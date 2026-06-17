@@ -15,11 +15,14 @@ declare_id!("8c7Boyk91MWkn5jabf5CnYD8DrG6p4hYm9eDdAAWXEKH");
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const BPS_DENOM: u64        = 10_000;
-const MAX_PROTOCOLS: usize  = 8;
-const COMPOUND_INTERVAL: i64 = 3_600;        // 1 hour
-const MAX_PERF_FEE_BPS: u64  = 1_000;        // 10%
-const MIN_FIRST_DEPOSIT: u64 = 1_000_000;    // $1 minimum first deposit (anti-donation-attack)
+const BPS_DENOM: u64          = 10_000;
+const MAX_PROTOCOLS: usize    = 8;
+const COMPOUND_INTERVAL: i64  = 3_600;        // 1 hour
+const MAX_PERF_FEE_BPS: u64   = 1_000;        // 10%
+const MIN_FIRST_DEPOSIT: u64  = 1_000_000;    // $1 minimum first deposit (anti-donation-attack)
+// Keeper must leave at least 10% of total deposits idle at all times.
+// Prevents keeper from deploying 100% of funds, which would block all withdrawals.
+const MIN_IDLE_BPS: u64       = 1_000;        // 10%
 
 // Token-gate tier thresholds (number of gate tokens required)
 const GOLD_THRESHOLD:   u64 = 1_000_000;     // 1M tokens  → unlimited deposits, 0% fee
@@ -157,6 +160,17 @@ pub mod yieldpilot {
             } else if tier == HolderTier::Bronze {
                 require!(pos_deposits.saturating_add(amount) <= BRONZE_CAP, VaultError::TierCapExceeded);
             }
+            // Snapshot tier for withdrawal fee calculation (anti-flash-loan)
+            let tier_u8: u8 = match tier {
+                HolderTier::Gold   => 0,
+                HolderTier::Silver => 1,
+                HolderTier::Bronze => 2,
+                HolderTier::None   => 3,
+            };
+            // Store the WORSE tier (higher number = worse) so borrowing tokens for one tx
+            // cannot retroactively improve the fee on an existing position.
+            let existing = ctx.accounts.user_position.tier_at_deposit;
+            ctx.accounts.user_position.tier_at_deposit = existing.max(tier_u8);
         }
 
         // TVL cap check
@@ -226,7 +240,7 @@ pub mod yieldpilot {
         Ok(())
     }
 
-    pub fn withdraw(ctx: Context<Withdraw>, shares: u64) -> Result<()> {
+    pub fn withdraw(ctx: Context<Withdraw>, shares: u64, min_amount_out: u64) -> Result<()> {
         // Note: withdrawal is allowed even when paused so users can always exit
         require!(shares > 0, VaultError::ZeroAmount);
 
@@ -247,6 +261,9 @@ pub mod yieldpilot {
             .and_then(|x| x.checked_div(v.total_shares as u128))
             .ok_or(VaultError::MathOverflow)? as u64;
         require!(amount_out > 0, VaultError::ZeroAmount);
+        // Slippage guard: caller specifies the minimum they will accept.
+        // Protects against vault balance dropping between simulation and execution.
+        require!(amount_out >= min_amount_out, VaultError::SlippageExceeded);
         // SECURITY: ensure vault has sufficient idle liquidity to cover this withdrawal.
         // Prevents a user from burning shares and receiving 0 tokens when funds are deployed.
         require!(vault_balance >= amount_out, VaultError::InsufficientIdle);
@@ -268,12 +285,17 @@ pub mod yieldpilot {
                 .as_ref()
                 .map(|a| a.amount)
                 .unwrap_or(0);
-            if gate_balance >= GOLD_THRESHOLD {
-                GOLD_FEE_BPS
-            } else if gate_balance >= SILVER_THRESHOLD {
-                SILVER_FEE_BPS
-            } else {
-                BRONZE_FEE_BPS
+            // Current tier based on live gate balance
+            let current_tier_u8: u8 = if gate_balance >= GOLD_THRESHOLD { 0 }
+                else if gate_balance >= SILVER_THRESHOLD { 1 }
+                else { 2 };
+            // Use WORSE of current tier and snapshotted tier at deposit.
+            // Prevents flash-borrowing gate tokens right before withdrawal to get a lower fee.
+            let effective_tier = current_tier_u8.max(pos.tier_at_deposit);
+            match effective_tier {
+                0 => GOLD_FEE_BPS,
+                1 => SILVER_FEE_BPS,
+                _ => BRONZE_FEE_BPS,
             }
         } else {
             v.perf_fee_bps // fallback to vault-level rate when gating is disabled
@@ -341,8 +363,11 @@ pub mod yieldpilot {
             amount_after_fee,
         )?;
 
-        // Update state
-        v.total_deposits = v.total_deposits.saturating_sub(amount_out);
+        // Update state.
+        // total_deposits tracks cost-basis (not vault balance), so subtract cost_basis not amount_out.
+        // amount_out >= cost_basis when there is profit; subtracting cost_basis avoids saturating
+        // to zero while other users still hold shares backed by real funds.
+        v.total_deposits = v.total_deposits.saturating_sub(cost_basis);
         v.total_shares   = v.total_shares.saturating_sub(shares);
         pos.shares           = pos.shares.saturating_sub(shares);
         pos.deposited_amount = pos.deposited_amount.saturating_sub(cost_basis);
@@ -455,7 +480,14 @@ pub mod yieldpilot {
         );
 
         let idle = v.total_deposits.saturating_sub(v.total_deployed());
-        require!(amount <= idle, VaultError::InsufficientIdle);
+        // Enforce minimum idle buffer: keeper cannot deploy funds if doing so would leave
+        // less than MIN_IDLE_BPS (10%) of total deposits idle. This guarantees users can
+        // always withdraw at least 10% of vault TVL without waiting for a recall.
+        let min_idle = v.total_deposits
+            .checked_mul(MIN_IDLE_BPS)
+            .and_then(|x| x.checked_div(BPS_DENOM))
+            .unwrap_or(0);
+        require!(idle.saturating_sub(amount) >= min_idle, VaultError::InsufficientIdle);
 
         let vault_key = v.key();
         let seeds: &[&[u8]] = &[b"vault", vault_key.as_ref(), &[v.authority_bump]];
@@ -686,10 +718,13 @@ pub struct UserPosition {
     pub deposited_amount: u64,
     pub last_deposit_ts:  i64,
     pub bump:             u8,
+    // Tier at time of most recent deposit. Fee is the HIGHER of current tier and snapshot tier,
+    // preventing a flash loan of gate tokens to temporarily gain a better fee rate at withdrawal.
+    pub tier_at_deposit:  u8, // 0=Gold, 1=Silver, 2=Bronze, 3=None/ungated
 }
 
 impl UserPosition {
-    pub const LEN: usize = 8 + 32 + 32 + 8 + 8 + 8 + 1 + 32;
+    pub const LEN: usize = 8 + 32 + 32 + 8 + 8 + 8 + 1 + 1 + 32; // +1 for tier_at_deposit
 }
 
 // ── Account contexts ──────────────────────────────────────────────────────────
@@ -1015,4 +1050,6 @@ pub enum VaultError {
     #[msg("Allocation must sum to exactly 10000 bps")]         AllocationNotFull,
     #[msg("No pending admin transfer")]                        NoPendingAdmin,
     #[msg("Not the pending admin")]                            NotPendingAdmin,
+    #[msg("Output below minimum — slippage exceeded")]         SlippageExceeded,
+    #[msg("Deploy would breach minimum idle buffer (10%)")]    IdleBufferBreach,
 }

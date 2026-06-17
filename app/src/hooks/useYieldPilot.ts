@@ -307,8 +307,19 @@ export function useYieldPilot(vaultAddresses: string[]) {
           ? await getAssociatedTokenAddress(gateMint, publicKey)
           : null;
 
+        // 1% slippage tolerance: user accepts up to 1% less than the simulated amount.
+        // The program enforces this on-chain so the tx fails rather than silently underpaying.
+        const vaultForWithdraw = await (program.account as any)["vault"].fetch(vaultPubkey);
+        const totalShares = (vaultForWithdraw.totalShares as anchor.BN).toNumber();
+        const vaultTokenAcct = await connection.getTokenAccountBalance(
+          new PublicKey((vaultForWithdraw.vaultTokenAccount as PublicKey).toBase58())
+        );
+        const vaultBal = vaultTokenAcct.value.uiAmount || 0;
+        const estimatedOut = totalShares > 0 ? (shares.toNumber() / totalShares) * vaultBal : 0;
+        const minAmountOut = new anchor.BN(Math.floor(estimatedOut * 0.99 * Math.pow(10, vaultTokenAcct.value.decimals)));
+
         return program.methods
-          .withdraw(shares)
+          .withdraw(shares, minAmountOut)
           .accounts({
             user: publicKey,
             vault: vaultPubkey,
