@@ -359,18 +359,20 @@ pub mod yieldpilot {
         Ok(())
     }
 
-    pub fn set_treasury(ctx: Context<AdminOnly>, treasury: Pubkey) -> Result<()> {
-        ctx.accounts.vault.treasury = treasury;
-        Ok(())
-    }
-
-    pub fn set_gate_mint(ctx: Context<AdminOnly>, gate_mint: Pubkey) -> Result<()> {
-        ctx.accounts.vault.gate_mint = gate_mint;
-        Ok(())
-    }
-
-    pub fn set_tvl_cap(ctx: Context<AdminOnly>, new_cap: u64) -> Result<()> {
-        ctx.accounts.vault.tvl_cap = new_cap;
+    // set_treasury, set_gate_mint, and set_tvl_cap are intentionally removed.
+    //
+    // treasury is fixed at vault initialization and cannot be redirected — this
+    // guarantees fee destinations cannot be switched to steal user funds.
+    //
+    // gate_mint is fixed at initialization — access rules cannot be changed to
+    // silently block all depositors after launch.
+    //
+    // tvl_cap can only increase, never decrease — admin cannot weaponize it to
+    // block deposits after users have committed funds.
+    pub fn raise_tvl_cap(ctx: Context<AdminOnly>, new_cap: u64) -> Result<()> {
+        let v = &mut ctx.accounts.vault;
+        require!(new_cap > v.tvl_cap, VaultError::TvlCapTooLow);
+        v.tvl_cap = new_cap;
         Ok(())
     }
 
@@ -393,17 +395,17 @@ pub mod yieldpilot {
         Ok(())
     }
 
+    // update_settings controls only operational behaviour — no financial parameters.
+    // perf_fee_bps is fixed at vault initialization and cannot be changed after launch.
+    // Users can verify the fee on-chain before depositing and trust it never changes.
     pub fn update_settings(
         ctx: Context<AdminOnly>,
         auto_compound: bool,
         auto_rebalance: bool,
-        perf_fee_bps: u64,
     ) -> Result<()> {
-        require!(perf_fee_bps <= MAX_PERF_FEE_BPS, VaultError::FeeTooHigh);
         let v = &mut ctx.accounts.vault;
         v.auto_compound  = auto_compound;
         v.auto_rebalance = auto_rebalance;
-        v.perf_fee_bps   = perf_fee_bps;
         Ok(())
     }
 
@@ -1003,7 +1005,7 @@ pub enum VaultError {
     #[msg("Invalid protocol index")]          InvalidProtocolIndex,
     #[msg("Insufficient idle balance")]       InsufficientIdle,
     #[msg("TVL cap exceeded")]                TvlCapExceeded,
-    #[msg("TVL cap must be >= $1")]           TvlCapTooLow,
+    #[msg("TVL cap must be >= $1 and can only increase")] TvlCapTooLow,
     #[msg("First deposit must be >= $1")]     FirstDepositTooSmall,
     #[msg("Must hold gate token to deposit")] NotTokenHolder,
     #[msg("Deposit exceeds your tier cap")]   TierCapExceeded,
