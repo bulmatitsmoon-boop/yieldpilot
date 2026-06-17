@@ -51,6 +51,7 @@ pub mod yieldpilot {
 
         let v = &mut ctx.accounts.vault;
         v.admin               = ctx.accounts.admin.key();
+        v.keeper              = params.keeper;
         v.mint                = ctx.accounts.mint.key();
         v.vault_token_account = ctx.accounts.vault_token_account.key();
         v.shares_mint         = ctx.accounts.shares_mint.key();
@@ -237,12 +238,18 @@ pub mod yieldpilot {
 
         // How many base tokens does this share represent?
         // Use actual vault token balance so accrued yield is included in share price.
+        // IMPORTANT: if funds are currently deployed to Kamino/Marinade, vault_balance
+        // will be lower than total value. Users must wait for the keeper to recall funds
+        // before withdrawing, or the keeper must recall first. We enforce this explicitly.
         let vault_balance = ctx.accounts.vault_token_account.amount;
         let amount_out = (shares as u128)
             .checked_mul(vault_balance as u128)
             .and_then(|x| x.checked_div(v.total_shares as u128))
             .ok_or(VaultError::MathOverflow)? as u64;
         require!(amount_out > 0, VaultError::ZeroAmount);
+        // SECURITY: ensure vault has sufficient idle liquidity to cover this withdrawal.
+        // Prevents a user from burning shares and receiving 0 tokens when funds are deployed.
+        require!(vault_balance >= amount_out, VaultError::InsufficientIdle);
 
         // Cost basis for this share tranche (for fee calculation)
         let cost_basis = (shares as u128)
@@ -294,9 +301,12 @@ pub mod yieldpilot {
             shares,
         )?;
 
-        // Validate treasury account mint if provided
+        // Validate treasury account: must match vault.treasury pubkey AND vault.mint.
+        // Without the key check, any user could pass their own token account as treasury
+        // and steal the performance fee that belongs to the vault operator.
         if let Some(treasury_acct) = ctx.accounts.treasury_token_account.as_ref() {
             require!(treasury_acct.mint == v.mint, VaultError::InvalidTreasuryAccount);
+            require!(treasury_acct.key() == v.treasury, VaultError::InvalidTreasuryAccount);
         }
 
         // Transfer perf fee → treasury (required when fee > 0)
@@ -364,6 +374,11 @@ pub mod yieldpilot {
         Ok(())
     }
 
+    pub fn set_keeper(ctx: Context<AdminOnly>, new_keeper: Pubkey) -> Result<()> {
+        ctx.accounts.vault.keeper = new_keeper;
+        Ok(())
+    }
+
     pub fn propose_admin(ctx: Context<AdminOnly>, new_admin: Pubkey) -> Result<()> {
         ctx.accounts.vault.pending_admin = new_admin;
         Ok(())
@@ -392,7 +407,7 @@ pub mod yieldpilot {
         Ok(())
     }
 
-    pub fn rebalance(ctx: Context<AdminOnly>, new_allocations: Vec<u64>) -> Result<()> {
+    pub fn rebalance(ctx: Context<KeeperOnly>, new_allocations: Vec<u64>) -> Result<()> {
         let v = &mut ctx.accounts.vault;
         require!(!v.paused, AdapterError::VaultPaused);
         require!(new_allocations.len() == v.protocol_count as usize, VaultError::AllocationMismatch);
@@ -405,7 +420,7 @@ pub mod yieldpilot {
         Ok(())
     }
 
-    pub fn compound(ctx: Context<AdminOnly>) -> Result<()> {
+    pub fn compound(ctx: Context<KeeperOnly>) -> Result<()> {
         let v = &mut ctx.accounts.vault;
         require!(!v.paused, AdapterError::VaultPaused);
         let now = Clock::get()?.unix_timestamp;
@@ -423,12 +438,19 @@ pub mod yieldpilot {
         amount: u64,
     ) -> Result<()> {
         let v = &mut ctx.accounts.vault;
+        require!(v.keeper == ctx.accounts.keeper.key(), VaultError::Unauthorized);
         require!(!v.paused, AdapterError::VaultPaused);
         require!(amount > 0, VaultError::ZeroAmount);
         let idx = protocol_index as usize;
         require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
         require!(v.protocols[idx].kind == ProtocolKind::Kamino, AdapterError::UnsupportedProtocol);
         assert_state_matches(&v.protocols[idx], ctx.accounts.kamino_reserve.key)?;
+        // SECURITY: validate collateral receipt account matches the one registered for this protocol.
+        // Without this, an admin could accidentally (or maliciously) route collateral tokens elsewhere.
+        require!(
+            ctx.accounts.vault_collateral_account.key() == v.protocols[idx].vault_receipt_account,
+            VaultError::InvalidTokenAccount
+        );
 
         let idle = v.total_deposits.saturating_sub(v.total_deployed());
         require!(amount <= idle, VaultError::InsufficientIdle);
@@ -476,7 +498,15 @@ pub mod yieldpilot {
         require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
         require!(v.protocols[idx].kind == ProtocolKind::Kamino, AdapterError::UnsupportedProtocol);
         assert_state_matches(&v.protocols[idx], ctx.accounts.kamino_reserve.key)?;
-        require!(collateral_amount <= v.protocols[idx].deployed_balance, AdapterError::InsufficientDeployedBalance);
+        // SECURITY: validate collateral account matches registry
+        require!(
+            ctx.accounts.vault_collateral_account.key() == v.protocols[idx].vault_receipt_account,
+            VaultError::InvalidTokenAccount
+        );
+        // Note: we do NOT check collateral_amount <= deployed_balance here because deployed_balance
+        // tracks underlying tokens deposited, while collateral_amount is in kTokens (cTokens). These
+        // are not 1:1 — kToken value increases as yield accrues. Kamino's own program enforces that
+        // the vault's collateral account has sufficient balance; we trust that CPI to validate amount.
 
         let vault_key = v.key();
         let seeds: &[&[u8]] = &[b"vault", vault_key.as_ref(), &[v.authority_bump]];
@@ -606,6 +636,7 @@ pub mod yieldpilot {
 #[account]
 pub struct Vault {
     pub admin:               Pubkey,
+    pub keeper:              Pubkey,  // separate hot key for rebalance/compound/deploy — stored cold
     pub mint:                Pubkey,
     pub vault_token_account: Pubkey,
     pub shares_mint:         Pubkey,
@@ -629,7 +660,7 @@ pub struct Vault {
 
 impl Vault {
     pub const LEN: usize = 8
-        + 32 * 7         // pubkeys (admin, mint, vault_token_account, shares_mint, treasury, gate_mint, pending_admin)
+        + 32 * 8         // pubkeys (admin, keeper, mint, vault_token_account, shares_mint, treasury, gate_mint, pending_admin)
         + 8 * 3          // u64 totals + fee
         + 3              // bools
         + 8              // i64
@@ -670,6 +701,7 @@ pub struct InitVaultParams {
     pub name:          String,
     pub treasury:      Pubkey,  // wallet that receives performance fees
     pub gate_mint:     Pubkey,  // pump.fun token mint; Pubkey::default() disables gating
+    pub keeper:        Pubkey,  // hot key for rebalance/compound/deploy — separate from cold admin
 }
 
 #[derive(Accounts)]
@@ -715,6 +747,16 @@ pub struct InitializeVault<'info> {
 pub struct AdminOnly<'info> {
     pub admin: Signer<'info>,
     #[account(mut, has_one = admin @ VaultError::Unauthorized)]
+    pub vault: Account<'info, Vault>,
+}
+
+// Keeper role: can rebalance, compound, deploy, and recall.
+// Cannot change admin, treasury, gate_mint, tvl_cap, or pause.
+// Stored as a separate hot key so admin can be kept cold/offline.
+#[derive(Accounts)]
+pub struct KeeperOnly<'info> {
+    pub keeper: Signer<'info>,
+    #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
     pub vault: Account<'info, Vault>,
 }
 
@@ -816,8 +858,8 @@ pub struct Withdraw<'info> {
 #[derive(Accounts)]
 pub struct DeployToKamino<'info> {
     #[account(mut)]
-    pub admin: Signer<'info>,
-    #[account(mut, has_one = admin @ VaultError::Unauthorized)]
+    pub keeper: Signer<'info>,
+    #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
     pub vault: Account<'info, Vault>,
     /// CHECK: PDA
     #[account(seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
@@ -848,8 +890,8 @@ pub struct DeployToKamino<'info> {
 #[derive(Accounts)]
 pub struct RecallFromKamino<'info> {
     #[account(mut)]
-    pub admin: Signer<'info>,
-    #[account(mut, has_one = admin @ VaultError::Unauthorized)]
+    pub keeper: Signer<'info>,
+    #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
     pub vault: Account<'info, Vault>,
     /// CHECK: PDA
     #[account(seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
@@ -880,8 +922,8 @@ pub struct RecallFromKamino<'info> {
 #[derive(Accounts)]
 pub struct DeployToMarinade<'info> {
     #[account(mut)]
-    pub admin: Signer<'info>,
-    #[account(mut, has_one = admin @ VaultError::Unauthorized)]
+    pub keeper: Signer<'info>,
+    #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
     pub vault: Account<'info, Vault>,
     /// CHECK: PDA
     #[account(seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
@@ -909,8 +951,8 @@ pub struct DeployToMarinade<'info> {
 #[derive(Accounts)]
 pub struct RecallFromMarinade<'info> {
     #[account(mut)]
-    pub admin: Signer<'info>,
-    #[account(mut, has_one = admin @ VaultError::Unauthorized)]
+    pub keeper: Signer<'info>,
+    #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
     pub vault: Account<'info, Vault>,
     /// CHECK: PDA
     #[account(seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]

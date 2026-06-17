@@ -19,6 +19,23 @@ export interface ProtocolApy {
 // slippage, which the rebalancer accounts for before routing out of them.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Hard cap: any fetched APY above this is treated as corrupt/spoofed data and falls back.
+// Legitimate Solana lending yields do not exceed 50% APY. This guards against DNS hijack
+// or CDN compromise feeding inflated numbers that trick the keeper into a bad rebalance.
+const MAX_SANE_APY_PERCENT = 50;
+
+function sanitizeApy(rawPercent: number, source: string): number {
+  if (!isFinite(rawPercent) || rawPercent < 0) {
+    logger.warn(`${source}: invalid APY ${rawPercent}, using 0`);
+    return 0;
+  }
+  if (rawPercent > MAX_SANE_APY_PERCENT) {
+    logger.warn(`${source}: APY ${rawPercent}% exceeds sanity cap ${MAX_SANE_APY_PERCENT}%, rejecting`);
+    return 0;
+  }
+  return rawPercent;
+}
+
 async function fetchKaminoApy(): Promise<ProtocolApy[]> {
   try {
     const { data } = await axios.get(
@@ -33,14 +50,14 @@ async function fetchKaminoApy(): Promise<ProtocolApy[]> {
       r.symbol === "USDC" || r.mintAddress === "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
     );
     if (usdcReserve) {
-      const apy = parseFloat(usdcReserve.supplyInterestAPY || usdcReserve.supplyApy || "0") * 100;
-      results.push({ protocolId: "kamino-usdc", name: "Kamino", asset: "USDC", apyBps: Math.round(apy * 100), apyPercent: apy, tvlUsd: parseFloat(usdcReserve.totalSupplyUsd || "0"), riskScore: 1, fetchedAt: new Date() });
+      const apy = sanitizeApy(parseFloat(usdcReserve.supplyInterestAPY || usdcReserve.supplyApy || "0") * 100, "kamino-usdc");
+      if (apy > 0) results.push({ protocolId: "kamino-usdc", name: "Kamino", asset: "USDC", apyBps: Math.round(apy * 100), apyPercent: apy, tvlUsd: parseFloat(usdcReserve.totalSupplyUsd || "0"), riskScore: 1, fetchedAt: new Date() });
     }
 
     const solReserve = allReserves.find((r: any) => r.symbol === "SOL");
     if (solReserve) {
-      const apy = parseFloat(solReserve.supplyInterestAPY || solReserve.supplyApy || "0") * 100;
-      results.push({ protocolId: "kamino-sol", name: "Kamino", asset: "SOL", apyBps: Math.round(apy * 100), apyPercent: apy, tvlUsd: parseFloat(solReserve.totalSupplyUsd || "0"), riskScore: 1, fetchedAt: new Date() });
+      const apy = sanitizeApy(parseFloat(solReserve.supplyInterestAPY || solReserve.supplyApy || "0") * 100, "kamino-sol");
+      if (apy > 0) results.push({ protocolId: "kamino-sol", name: "Kamino", asset: "SOL", apyBps: Math.round(apy * 100), apyPercent: apy, tvlUsd: parseFloat(solReserve.totalSupplyUsd || "0"), riskScore: 1, fetchedAt: new Date() });
     }
 
     logger.debug("Kamino APYs fetched", { count: results.length });
@@ -57,7 +74,8 @@ async function fetchMarinadeApy(): Promise<ProtocolApy[]> {
       `${process.env.MARINADE_API_URL || "https://api.marinade.finance"}/msol/apy/1d`,
       { timeout: 8000 }
     );
-    const apyPercent = parseFloat(data?.value || data?.apy || "0") * 100;
+    const apyPercent = sanitizeApy(parseFloat(data?.value || data?.apy || "0") * 100, "marinade-sol");
+    if (!apyPercent) return getFallbackApys(["marinade-sol"]);
     return [{ protocolId: "marinade-sol", name: "Marinade", asset: "SOL", apyBps: Math.round(apyPercent * 100), apyPercent, tvlUsd: data?.tvl_usd || 1_230_000_000, riskScore: 1, fetchedAt: new Date() }];
   } catch (err: any) {
     logger.warn("Failed to fetch Marinade APY", { error: err.message });
@@ -72,7 +90,7 @@ async function fetchJitoApy(): Promise<ProtocolApy[]> {
       "https://kobe.mainnet.jito.network/api/v1/stakes/apy",
       { timeout: 8000 }
     );
-    const apyPercent = parseFloat(data?.value || data?.apy || "0") * 100;
+    const apyPercent = sanitizeApy(parseFloat(data?.value || data?.apy || "0") * 100, "jito-sol");
     if (!apyPercent) return getFallbackApys(["jito-sol"]);
     return [{ protocolId: "jito-sol", name: "Jito", asset: "SOL", apyBps: Math.round(apyPercent * 100), apyPercent, tvlUsd: 2_100_000_000, riskScore: 1, fetchedAt: new Date() }];
   } catch (err: any) {
@@ -92,13 +110,13 @@ async function fetchMarginFiApy(): Promise<ProtocolApy[]> {
 
     const usdc = banks.find((b: any) => b.tokenSymbol === "USDC" || b.symbol === "USDC");
     if (usdc) {
-      const apy = parseFloat(usdc.depositRate || usdc.supplyApy || usdc.lendingRate || "0") * 100;
+      const apy = sanitizeApy(parseFloat(usdc.depositRate || usdc.supplyApy || usdc.lendingRate || "0") * 100, "marginfi-usdc");
       if (apy > 0) results.push({ protocolId: "marginfi-usdc", name: "MarginFi", asset: "USDC", apyBps: Math.round(apy * 100), apyPercent: apy, tvlUsd: parseFloat(usdc.totalDeposits || usdc.tvl || "0"), riskScore: 1, fetchedAt: new Date() });
     }
 
     const sol = banks.find((b: any) => b.tokenSymbol === "SOL" || b.symbol === "SOL");
     if (sol) {
-      const apy = parseFloat(sol.depositRate || sol.supplyApy || sol.lendingRate || "0") * 100;
+      const apy = sanitizeApy(parseFloat(sol.depositRate || sol.supplyApy || sol.lendingRate || "0") * 100, "marginfi-sol");
       if (apy > 0) results.push({ protocolId: "marginfi-sol", name: "MarginFi", asset: "SOL", apyBps: Math.round(apy * 100), apyPercent: apy, tvlUsd: parseFloat(sol.totalDeposits || sol.tvl || "0"), riskScore: 1, fetchedAt: new Date() });
     }
 

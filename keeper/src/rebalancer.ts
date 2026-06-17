@@ -42,9 +42,19 @@ export function computeRebalanceDecision(
   const protocols = vault.protocols.slice(0, vault.protocolCount);
   const currentAllocations = protocols.map(p => p.targetBps.toNumber());
 
-  // Match APYs to registered protocols by index position
-  const protocolApys = protocols.map((_, i) => apys[i]?.apyBps || 0);
-  const protocolIds  = protocols.map((_, i) => apys[i]?.protocolId || "");
+  // Match APYs to registered protocols by label (not by array index).
+  // Index-based matching is fragile: if APY fetcher order diverges from on-chain
+  // protocol registration order, funds get routed to the wrong protocol silently.
+  const apyByLabel = new Map<string, ProtocolApy>();
+  for (const apy of apys) {
+    apyByLabel.set(apy.protocolId, apy);
+  }
+
+  const protocolLabels = protocols.map(p =>
+    Buffer.from(p.label).toString("utf8").replace(/\0/g, "")
+  );
+  const protocolApys = protocolLabels.map(label => apyByLabel.get(label)?.apyBps || 0);
+  const protocolIds  = protocolLabels;
 
   const currentWeightedApy = computeWeightedApy(currentAllocations, protocolApys);
 

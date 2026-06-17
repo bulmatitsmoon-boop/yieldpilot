@@ -248,6 +248,14 @@ export function useYieldPilot(vaultAddresses: string[]) {
         const userTokenAccount = await getAssociatedTokenAddress(mintPubkey, publicKey);
         const userSharesAccount = await getAssociatedTokenAddress(sharesMint, publicKey);
 
+        // Resolve gate account for deposit: required when vault.gate_mint != SystemProgram
+        const gateMint = new PublicKey((vaultRaw.gateMint as PublicKey).toBase58());
+        const isGatingEnabled = gateMint.toBase58() !== PublicKey.default.toBase58() &&
+          gateMint.toBase58() !== SystemProgram.programId.toBase58();
+        const userGateAccount = isGatingEnabled
+          ? await getAssociatedTokenAddress(gateMint, publicKey)
+          : null;
+
         return program.methods
           .deposit(amount)
           .accounts({
@@ -259,7 +267,7 @@ export function useYieldPilot(vaultAddresses: string[]) {
             sharesMint,
             userPosition: positionPda,
             userSharesAccount,
-            userGateAccount: null as any,
+            userGateAccount: userGateAccount as any,
             tokenProgram: TOKEN_PROGRAM_ID,
             associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
             systemProgram: SystemProgram.programId,
