@@ -204,13 +204,16 @@ async function fetchOrcaApy(): Promise<ProtocolApy[]> {
 // Fallback APYs (used if API is down — based on recent historical averages)
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Raydium and Orca are intentionally excluded — LP positions carry impermanent
+// loss risk and are incompatible with principal-preserving yield vaults.
+// Marinade is included but the rebalancer accounts for its ~0.3% liquid unstake
+// exit cost before deciding to route out of it.
 const FALLBACK_APYS: Record<string, Omit<ProtocolApy, "fetchedAt">> = {
-  "kamino-usdc": { protocolId: "kamino-usdc", name: "Kamino", asset: "USDC", apyBps: 842, apyPercent: 8.42, tvlUsd: 412_000_000, riskScore: 1 },
-  "kamino-sol":  { protocolId: "kamino-sol",  name: "Kamino", asset: "SOL",  apyBps: 620, apyPercent: 6.20, tvlUsd: 280_000_000, riskScore: 1 },
-  "marinade-sol":     { protocolId: "marinade-sol",     name: "Marinade", asset: "SOL",      apyBps: 721, apyPercent: 7.21, tvlUsd: 1_230_000_000, riskScore: 1 },
-  "raydium-usdc-sol": { protocolId: "raydium-usdc-sol", name: "Raydium",  asset: "USDC-SOL", apyBps: 2470, apyPercent: 24.70, tvlUsd: 89_000_000, riskScore: 3 },
-  "drift-sol":        { protocolId: "drift-sol",        name: "Drift",    asset: "SOL",      apyBps: 588, apyPercent: 5.88, tvlUsd: 220_000_000, riskScore: 1 },
-  "orca-usdc-eth":    { protocolId: "orca-usdc-eth",    name: "Orca",     asset: "USDC-ETH", apyBps: 1830, apyPercent: 18.30, tvlUsd: 67_000_000, riskScore: 2 },
+  "kamino-usdc": { protocolId: "kamino-usdc", name: "Kamino",   asset: "USDC", apyBps: 842, apyPercent: 8.42, tvlUsd: 412_000_000, riskScore: 1 },
+  "kamino-sol":  { protocolId: "kamino-sol",  name: "Kamino",   asset: "SOL",  apyBps: 620, apyPercent: 6.20, tvlUsd: 280_000_000, riskScore: 1 },
+  "marinade-sol":{ protocolId: "marinade-sol",name: "Marinade", asset: "SOL",  apyBps: 721, apyPercent: 7.21, tvlUsd: 1_230_000_000, riskScore: 1 },
+  "drift-sol":   { protocolId: "drift-sol",   name: "Drift",    asset: "SOL",  apyBps: 588, apyPercent: 5.88, tvlUsd: 220_000_000, riskScore: 1 },
+  "solend-usdc": { protocolId: "solend-usdc", name: "Solend",   asset: "USDC", apyBps: 510, apyPercent: 5.10, tvlUsd: 95_000_000,  riskScore: 1 },
 };
 
 function getFallbackApys(ids: string[]): ProtocolApy[] {
@@ -224,12 +227,11 @@ function getFallbackApys(ids: string[]): ProtocolApy[] {
 export async function fetchAllApys(): Promise<ProtocolApy[]> {
   logger.info("Fetching APYs from all protocols...");
 
+  // Raydium and Orca excluded — LP impermanent loss risk
   const results = await Promise.allSettled([
     fetchKaminoApy(),
     fetchMarinadeApy(),
-    fetchRaydiumApy(),
     fetchDriftApy(),
-    fetchOrcaApy(),
   ]);
 
   const apys: ProtocolApy[] = results.flatMap(r =>
