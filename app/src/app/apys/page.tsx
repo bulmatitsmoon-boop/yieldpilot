@@ -32,7 +32,7 @@ function ILRiskModal({ onAccept, onDecline }: { onAccept: () => void; onDecline:
         style={{
           background: "var(--surface)", border: "1px solid var(--border)",
           borderRadius: 16, maxWidth: 520, width: "100%", padding: "36px 32px",
-          margin: "auto",
+          margin: "auto", maxHeight: "90vh", overflowY: "auto",
         }}
       >
         <div style={{
