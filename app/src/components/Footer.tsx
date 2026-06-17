@@ -35,7 +35,6 @@ export function Footer() {
             <div>
               <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 12 }}>Resources</div>
               {[
-                ["GitHub", "https://github.com/bulmatitsmoon-boop/yieldpilot"],
                 ["Whitepaper", "/whitepaper"],
                 ["Solana", "https://solana.com"],
               ].map(([label, href]) => (
@@ -54,7 +53,7 @@ export function Footer() {
         {/* Bottom bar */}
         <div style={{ borderTop: "1px solid var(--border)", paddingTop: 20, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
           <p style={{ color: "var(--text-dim)", fontSize: 12 }}>
-            © {new Date().getFullYear()} YieldPilot. Open source. Not financial advice.
+            © {new Date().getFullYear()} YieldPilot. Not financial advice.
           </p>
           <p style={{ color: "var(--text-dim)", fontSize: 12 }}>
             Currently on <span style={{ color: "var(--yellow)" }}>Devnet</span> — do not deposit real funds.

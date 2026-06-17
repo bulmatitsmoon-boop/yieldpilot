@@ -298,7 +298,7 @@ export default function Home() {
             ["What are the fees?", "Performance fees are tiered by $YPILOT held: Bronze (10k+) pays 6%, Silver (100k+) pays 3%, Gold (1M+) pays 0%. Fees apply on profits only, collected at withdrawal. Nothing on deposits or idle balances."],
             ["How does routing work?", "A keeper bot fetches live APY data every 15 minutes. When a better rate exists beyond a 0.5% threshold, it rebalances — 80% to the top protocol, 20% to the runner-up."],
             ["Can I withdraw anytime?", "Yes. Withdrawals are always available, even if the vault is paused for deposits. You receive your principal plus all earned yield, minus the tiered performance fee on profits (6% Bronze, 3% Silver, 0% Gold)."],
-            ["Has the code been audited?", "Not yet. The code is open source on GitHub. A third-party audit is planned before mainnet launch and raising the TVL cap."],
+            ["Has the code been audited?", "Not yet. A third-party audit is planned before mainnet launch. The on-chain program ID is publicly verifiable on Solscan at any time."],
           ].map(([q, a], i) => (
             <details key={i} style={{ borderTop: "1px solid var(--border)" }}>
               <summary style={{

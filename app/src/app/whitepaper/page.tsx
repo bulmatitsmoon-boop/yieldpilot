@@ -122,7 +122,7 @@ export default function Whitepaper() {
           ["set_gate_mint", "Update token-gate mint", "Admin"],
           ["set_treasury", "Update fee recipient wallet", "Admin"],
         ]} />
-        <P>Program ID (devnet): <span style={{ fontFamily: "var(--mono)", color: "var(--purple-light)", fontSize: 12 }}>8c7Boyk91MWkn5jabf5CnYD8DrG6p4hYm9eDdAAWXEKH</span>. Source code: <a href="https://github.com/bulmatitsmoon-boop/yieldpilot" target="_blank" rel="noopener noreferrer" style={{ color: "var(--purple-light)" }}>github.com/bulmatitsmoon-boop/yieldpilot</a>.</P>
+        <P>Program ID (devnet): <span style={{ fontFamily: "var(--mono)", color: "var(--purple-light)", fontSize: 12 }}>8c7Boyk91MWkn5jabf5CnYD8DrG6p4hYm9eDdAAWXEKH</span>. Verifiable on <a href="https://solscan.io/account/8c7Boyk91MWkn5jabf5CnYD8DrG6p4hYm9eDdAAWXEKH?cluster=devnet" target="_blank" rel="noopener noreferrer" style={{ color: "var(--purple-light)" }}>Solscan</a>.</P>
       </Section>
 
       <Section title="5. Fee Structure">
@@ -154,8 +154,8 @@ export default function Whitepaper() {
       <Section title="7. Security Model">
         <H3>Non-Custodial</H3>
         <P>YieldPilot never holds user funds directly. All assets are held in on-chain program-derived accounts (PDAs) controlled by the vault smart contract. No individual — including the YieldPilot team — can access or move user funds outside of the defined program instructions.</P>
-        <H3>Open Source</H3>
-        <P>All smart contract code is publicly available on GitHub. Anyone can read, verify, and audit the code at any time. Transparency is a core value of the protocol.</P>
+        <H3>Verifiable On-Chain</H3>
+        <P>The smart contract is deployed at a fixed program ID on Solana. Anyone can verify the vault state, fee parameters, and treasury address directly on-chain at any time — no need to trust our word. A full third-party code audit is planned before mainnet launch.</P>
         <H3>Emergency Pause</H3>
         <P>The vault admin can pause new deposits in the event of an emergency. Withdrawals remain available at all times — users can always retrieve their funds even when the vault is paused.</P>
         <H3>TVL Cap</H3>
