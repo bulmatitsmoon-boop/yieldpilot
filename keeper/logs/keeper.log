@@ -1,0 +1,172 @@
+2026-06-16 18:38:49 [[32minfo[39m] ⚡ YieldPilot Keeper starting up...
+2026-06-16 18:38:49 [[32minfo[39m] SolanaClient initialized
+{
+  "rpc": "http://127.0.0.1:8899",
+  "keeper": "8i7kydJHwi3Cdp46Xugyux2vWJmTScYDvnJrBiBihBnP",
+  "program": "8c7Boyk91MWkn5jabf5CnYD8DrG6p4hYm9eDdAAWXEKH"
+}
+2026-06-16 18:38:49 [[32minfo[39m] Keeper wallet: 8i7kydJHwi3Cdp46Xugyux2vWJmTScYDvnJrBiBihBnP (500000007.2136 SOL)
+2026-06-16 18:38:49 [[32minfo[39m] Scheduling cron jobs
+{
+  "apyCron": "*/15 * * * *",
+  "compoundCron": "0 * * * *"
+}
+2026-06-16 18:38:49 [[32minfo[39m] Running initial checks...
+2026-06-16 18:38:49 [[32minfo[39m] ── APY poll + rebalance check ──
+2026-06-16 18:38:49 [[32minfo[39m] Fetching APYs from all protocols...
+2026-06-16 18:38:50 [[33mwarn[39m] Failed to fetch Orca APY, using fallback
+{
+  "error": "Request failed with status code 404"
+}
+2026-06-16 18:38:50 [[33mwarn[39m] Failed to fetch Kamino APY, using fallback
+{
+  "error": "Request failed with status code 404"
+}
+2026-06-16 18:38:50 [[33mwarn[39m] Failed to fetch Drift APY, using fallback
+{
+  "error": "Request failed with status code 503"
+}
+2026-06-16 18:39:06 [[32minfo[39m] ⚡ YieldPilot Keeper starting up...
+2026-06-16 18:39:06 [[32minfo[39m] SolanaClient initialized
+{
+  "rpc": "http://127.0.0.1:8899",
+  "keeper": "8i7kydJHwi3Cdp46Xugyux2vWJmTScYDvnJrBiBihBnP",
+  "program": "8c7Boyk91MWkn5jabf5CnYD8DrG6p4hYm9eDdAAWXEKH"
+}
+2026-06-16 18:39:06 [[32minfo[39m] Keeper wallet: 8i7kydJHwi3Cdp46Xugyux2vWJmTScYDvnJrBiBihBnP (500000007.2136 SOL)
+2026-06-16 18:39:06 [[32minfo[39m] Scheduling cron jobs
+{
+  "apyCron": "*/15 * * * *",
+  "compoundCron": "0 * * * *"
+}
+2026-06-16 18:39:06 [[32minfo[39m] Running initial checks...
+2026-06-16 18:39:06 [[32minfo[39m] ── APY poll + rebalance check ──
+2026-06-16 18:39:06 [[32minfo[39m] Fetching APYs from all protocols...
+2026-06-16 18:39:06 [[33mwarn[39m] Failed to fetch Orca APY, using fallback
+{
+  "error": "Request failed with status code 404"
+}
+2026-06-16 18:39:06 [[33mwarn[39m] Failed to fetch Kamino APY, using fallback
+{
+  "error": "Request failed with status code 404"
+}
+2026-06-16 18:39:06 [[33mwarn[39m] Failed to fetch Drift APY, using fallback
+{
+  "error": "Request failed with status code 503"
+}
+2026-06-16 18:39:30 [[32minfo[39m] ⚡ YieldPilot Keeper starting up...
+2026-06-16 18:39:30 [[32minfo[39m] SolanaClient initialized
+{
+  "rpc": "http://127.0.0.1:8899",
+  "keeper": "8i7kydJHwi3Cdp46Xugyux2vWJmTScYDvnJrBiBihBnP",
+  "program": "8c7Boyk91MWkn5jabf5CnYD8DrG6p4hYm9eDdAAWXEKH"
+}
+2026-06-16 18:39:30 [[32minfo[39m] Keeper wallet: 8i7kydJHwi3Cdp46Xugyux2vWJmTScYDvnJrBiBihBnP (500000007.2136 SOL)
+2026-06-16 18:39:30 [[32minfo[39m] Scheduling cron jobs
+{
+  "apyCron": "*/15 * * * *",
+  "compoundCron": "0 * * * *"
+}
+2026-06-16 18:39:30 [[32minfo[39m] Running initial checks...
+2026-06-16 18:39:30 [[32minfo[39m] ── APY poll + rebalance check ──
+2026-06-16 18:39:30 [[32minfo[39m] Fetching APYs from all protocols...
+2026-06-16 18:39:30 [[33mwarn[39m] Failed to fetch Orca APY, using fallback
+{
+  "error": "Request failed with status code 404"
+}
+2026-06-16 18:39:31 [[33mwarn[39m] Failed to fetch Kamino APY, using fallback
+{
+  "error": "Request failed with status code 404"
+}
+2026-06-16 18:39:31 [[33mwarn[39m] Failed to fetch Drift APY, using fallback
+{
+  "error": "Request failed with status code 503"
+}
+2026-06-16 18:39:46 [[32minfo[39m] APY fetch complete
+{
+  "protocols": [
+    "Kamino(USDC): 8.42%",
+    "Kamino(SOL): 6.20%",
+    "Marinade(SOL): 12.69%",
+    "Raydium(USDC-SOL): 24.70%",
+    "Drift(SOL): 5.88%",
+    "Orca(USDC-ETH): 18.30%"
+  ]
+}
+2026-06-16 18:39:46 [[32minfo[39m] Checking vault: WHQzGV9o... (USDC Vault v1)
+2026-06-16 18:39:46 [[32minfo[39m]   Rebalance decision: Allocation drifted 500bps (threshold: 500bps)
+{
+  "current": [
+    6000,
+    4000
+  ],
+  "proposed": [
+    6500,
+    3500
+  ],
+  "apyImprovementBps": 11.099999999999909
+}
+2026-06-16 18:39:46 [[32minfo[39m]   Sending rebalance transaction...
+2026-06-16 18:39:46 [[32minfo[39m] rebalance(WHQzGV9o...) confirmed
+{
+  "signature": "21CPASFSditS8v3wH3bECv1gQN1z3nLccgE98TerMjCPG4majKL1yLECdNnwkgpkVyEGLaj4DfBkLaoX6fwEN6oP",
+  "attempt": 1
+}
+2026-06-16 18:39:46 [[32minfo[39m]   ✓ Rebalanced
+{
+  "signature": "21CPASFSditS8v3wH3bECv1gQN1z3nLccgE98TerMjCPG4majKL1yLECdNnwkgpkVyEGLaj4DfBkLaoX6fwEN6oP",
+  "newAllocations": [
+    6500,
+    3500
+  ]
+}
+2026-06-16 18:39:46 [[32minfo[39m] Checking vault: 2PnS5Mnw... (USDC Vault v1)
+2026-06-16 18:39:46 [[32minfo[39m]   Rebalance decision: Allocation drifted 500bps (threshold: 500bps)
+{
+  "current": [
+    6000,
+    4000
+  ],
+  "proposed": [
+    6500,
+    3500
+  ],
+  "apyImprovementBps": 11.099999999999909
+}
+2026-06-16 18:39:46 [[32minfo[39m]   Sending rebalance transaction...
+2026-06-16 18:39:47 [[32minfo[39m] rebalance(2PnS5Mnw...) confirmed
+{
+  "signature": "56EcWaFBC6F8NiqyBBXMd9isWCT8Xq6jFvzKeD5yqKsh8HE98fpTxX2t3p3c5wUbBVsKcBZSws6eRhNTFdQ4y6v9",
+  "attempt": 1
+}
+2026-06-16 18:39:47 [[32minfo[39m]   ✓ Rebalanced
+{
+  "signature": "56EcWaFBC6F8NiqyBBXMd9isWCT8Xq6jFvzKeD5yqKsh8HE98fpTxX2t3p3c5wUbBVsKcBZSws6eRhNTFdQ4y6v9",
+  "newAllocations": [
+    6500,
+    3500
+  ]
+}
+2026-06-16 18:39:47 [[32minfo[39m] ── Compound check ──
+2026-06-16 18:39:47 [[32minfo[39m] Vault WHQzGV9o...: Too early — 59min until compound interval
+2026-06-16 18:39:47 [[32minfo[39m] Vault 2PnS5Mnw...: Too early — 56min until compound interval
+2026-06-16 18:39:47 [[32minfo[39m] Health check
+{
+  "keeperBalance": "500000007.2136 SOL",
+  "uptime": "0min",
+  "stats": {
+    "apyPolls": 1,
+    "rebalances": 2,
+    "compounds": 0,
+    "errors": 0
+  },
+  "latestApys": [
+    "Kamino(USDC): 8.42%",
+    "Kamino(SOL): 6.20%",
+    "Marinade(SOL): 12.69%",
+    "Raydium(USDC-SOL): 24.70%",
+    "Drift(SOL): 5.88%",
+    "Orca(USDC-ETH): 18.30%"
+  ]
+}
+2026-06-16 18:39:47 [[32minfo[39m] ✓ Keeper running. Press Ctrl+C to stop.

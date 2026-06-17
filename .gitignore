@@ -1,0 +1,9 @@
+node_modules/
+target/
+.next/
+app/.next/
+app/node_modules/
+keeper/node_modules/
+.env
+.env.local
+app/.env*.local

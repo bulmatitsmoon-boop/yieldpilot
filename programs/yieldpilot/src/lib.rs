@@ -1,0 +1,929 @@
+use anchor_lang::prelude::*;
+use anchor_spl::{
+    associated_token::AssociatedToken,
+    token::{self, Mint, MintTo, Token, TokenAccount, Transfer, Burn},
+};
+
+pub mod adapters;
+use adapters::{
+    kamino::{KaminoDeposit, KaminoWithdraw, kamino_deposit, kamino_withdraw, KAMINO_LENDING_PROGRAM_ID},
+    marinade::{MarinadeDeposit, MarinadeUnstake, marinade_deposit, marinade_liquid_unstake},
+    {AdapterError, ProtocolAdapter, ProtocolKind, assert_state_matches},
+};
+
+declare_id!("8c7Boyk91MWkn5jabf5CnYD8DrG6p4hYm9eDdAAWXEKH");
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const BPS_DENOM: u64        = 10_000;
+const MAX_PROTOCOLS: usize  = 8;
+const COMPOUND_INTERVAL: i64 = 3_600;        // 1 hour
+const MAX_PERF_FEE_BPS: u64  = 1_000;        // 10%
+const MIN_FIRST_DEPOSIT: u64 = 1_000_000;    // $1 minimum first deposit (anti-donation-attack)
+
+// Token-gate tier thresholds (number of gate tokens required)
+const GOLD_THRESHOLD:   u64 = 1_000_000;     // 1M tokens  → unlimited deposits, 0% fee
+const SILVER_THRESHOLD: u64 =   100_000;     // 100k tokens → $10k cap, 3% fee
+const BRONZE_THRESHOLD: u64 =    10_000;     // 10k tokens  → $1k cap, 6% fee
+const SILVER_CAP:       u64 = 10_000_000_000; // $10k in base-6
+const BRONZE_CAP:       u64 =  1_000_000_000; // $1k in base-6
+
+// Tiered performance fees (in bps). Applied on profit at withdrawal.
+const GOLD_FEE_BPS:   u64 =   0; // 0%
+const SILVER_FEE_BPS: u64 = 300; // 3%
+const BRONZE_FEE_BPS: u64 = 600; // 6%
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq)]
+pub enum HolderTier { Gold, Silver, Bronze, None }
+
+// ── Program ───────────────────────────────────────────────────────────────────
+
+#[program]
+pub mod yieldpilot {
+    use super::*;
+
+    // ── Vault lifecycle ───────────────────────────────────────────────────────
+
+    pub fn initialize_vault(ctx: Context<InitializeVault>, params: InitVaultParams) -> Result<()> {
+        require!(params.perf_fee_bps <= MAX_PERF_FEE_BPS, VaultError::FeeTooHigh);
+        require!(params.name.len() <= 32, VaultError::NameTooLong);
+        require!(params.tvl_cap >= MIN_FIRST_DEPOSIT, VaultError::TvlCapTooLow);
+
+        let v = &mut ctx.accounts.vault;
+        v.admin               = ctx.accounts.admin.key();
+        v.mint                = ctx.accounts.mint.key();
+        v.vault_token_account = ctx.accounts.vault_token_account.key();
+        v.shares_mint         = ctx.accounts.shares_mint.key();
+        v.treasury  = params.treasury;
+        // Normalize: zero pubkey also means no gating
+        v.gate_mint = if params.gate_mint == Pubkey::default() {
+            anchor_lang::solana_program::system_program::ID
+        } else {
+            params.gate_mint
+        };
+        v.total_deposits      = 0;
+        v.total_shares        = 0;
+        v.perf_fee_bps        = params.perf_fee_bps;
+        v.auto_compound       = params.auto_compound;
+        v.auto_rebalance      = params.auto_rebalance;
+        v.last_compound_ts    = Clock::get()?.unix_timestamp;
+        v.name                = params.name;
+        v.bump                = ctx.bumps.vault;
+        v.authority_bump      = ctx.bumps.vault_authority;
+        v.protocol_count      = 0;
+        v.protocols           = [ProtocolAdapter::default(); MAX_PROTOCOLS];
+        v.paused              = false;
+        v.tvl_cap             = params.tvl_cap;
+
+        emit!(VaultInitialized { vault: v.key(), admin: v.admin, mint: v.mint });
+        Ok(())
+    }
+
+    pub fn register_protocol(
+        ctx: Context<AdminOnly>,
+        kind: u8,
+        external_state: Pubkey,
+        vault_receipt_account: Pubkey,
+        target_bps: u64,
+        label: String,
+    ) -> Result<()> {
+        let v = &mut ctx.accounts.vault;
+        require!(!v.paused, AdapterError::VaultPaused);
+        require!(v.protocol_count < MAX_PROTOCOLS as u8, VaultError::TooManyProtocols);
+        require!(label.len() <= 24, VaultError::NameTooLong);
+
+        let current_total: u64 = v.protocols[..v.protocol_count as usize]
+            .iter().map(|p| p.target_bps).sum();
+        require!(current_total + target_bps <= BPS_DENOM, VaultError::AllocationExceeded);
+
+        let kind = match kind {
+            0 => ProtocolKind::Kamino,
+            1 => ProtocolKind::Marinade,
+            _ => return err!(AdapterError::UnsupportedProtocol),
+        };
+
+        let mut label_bytes = [0u8; 24];
+        label_bytes[..label.len()].copy_from_slice(label.as_bytes());
+
+        let idx = v.protocol_count as usize;
+        v.protocols[idx] = ProtocolAdapter {
+            kind,
+            external_state,
+            vault_receipt_account,
+            deployed_balance: 0,
+            target_bps,
+            label: label_bytes,
+        };
+        v.protocol_count += 1;
+
+        emit!(ProtocolRegistered { vault: v.key(), external_state, target_bps });
+        Ok(())
+    }
+
+    // ── User instructions ─────────────────────────────────────────────────────
+
+    pub fn deposit(ctx: Context<Deposit>, amount: u64) -> Result<()> {
+        require!(!ctx.accounts.vault.paused, AdapterError::VaultPaused);
+        require!(amount > 0, VaultError::ZeroAmount);
+
+        let v = &mut ctx.accounts.vault;
+
+        // Token-gate: gate_mint == SystemProgram means no gating
+        if v.gate_mint != anchor_lang::solana_program::system_program::ID {
+            let gate_balance = ctx.accounts.user_gate_account
+                .as_ref()
+                .map(|a| a.amount)
+                .unwrap_or(0);
+            let tier = if gate_balance >= GOLD_THRESHOLD {
+                HolderTier::Gold
+            } else if gate_balance >= SILVER_THRESHOLD {
+                HolderTier::Silver
+            } else if gate_balance >= BRONZE_THRESHOLD {
+                HolderTier::Bronze
+            } else {
+                HolderTier::None
+            };
+            require!(tier != HolderTier::None, VaultError::NotTokenHolder);
+            let pos_deposits = ctx.accounts.user_position.deposited_amount;
+            if tier == HolderTier::Silver {
+                require!(pos_deposits.saturating_add(amount) <= SILVER_CAP, VaultError::TierCapExceeded);
+            } else if tier == HolderTier::Bronze {
+                require!(pos_deposits.saturating_add(amount) <= BRONZE_CAP, VaultError::TierCapExceeded);
+            }
+        }
+
+        // TVL cap check
+        require!(
+            v.total_deposits.saturating_add(amount) <= v.tvl_cap,
+            VaultError::TvlCapExceeded
+        );
+
+        // Anti-donation attack: first depositor must deposit at least MIN_FIRST_DEPOSIT
+        if v.total_shares == 0 {
+            require!(amount >= MIN_FIRST_DEPOSIT, VaultError::FirstDepositTooSmall);
+        }
+
+        // Share calculation
+        let shares_to_mint: u64 = if v.total_shares == 0 || v.total_deposits == 0 {
+            amount
+        } else {
+            (amount as u128)
+                .checked_mul(v.total_shares as u128)
+                .and_then(|x| x.checked_div(v.total_deposits as u128))
+                .ok_or(VaultError::MathOverflow)? as u64
+        };
+        require!(shares_to_mint > 0, VaultError::ZeroShares);
+
+        // Transfer tokens from user → vault
+        token::transfer(
+            CpiContext::new(ctx.accounts.token_program.to_account_info(), Transfer {
+                from:      ctx.accounts.user_token_account.to_account_info(),
+                to:        ctx.accounts.vault_token_account.to_account_info(),
+                authority: ctx.accounts.user.to_account_info(),
+            }),
+            amount,
+        )?;
+
+        // Mint shares to user
+        let vault_key = v.key();
+        let signer_seeds: &[&[u8]] = &[b"vault", vault_key.as_ref(), &[v.authority_bump]];
+        token::mint_to(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                MintTo {
+                    mint:      ctx.accounts.shares_mint.to_account_info(),
+                    to:        ctx.accounts.user_shares_account.to_account_info(),
+                    authority: ctx.accounts.vault_authority.to_account_info(),
+                },
+                &[signer_seeds],
+            ),
+            shares_to_mint,
+        )?;
+
+        // Update state
+        v.total_deposits = v.total_deposits.checked_add(amount).ok_or(VaultError::MathOverflow)?;
+        v.total_shares   = v.total_shares.checked_add(shares_to_mint).ok_or(VaultError::MathOverflow)?;
+
+        // Create/update position
+        let pos = &mut ctx.accounts.user_position;
+        if pos.owner == Pubkey::default() {
+            pos.owner = ctx.accounts.user.key();
+            pos.vault = v.key();
+            pos.bump  = ctx.bumps.user_position;
+        }
+        pos.shares           = pos.shares.checked_add(shares_to_mint).ok_or(VaultError::MathOverflow)?;
+        pos.deposited_amount = pos.deposited_amount.checked_add(amount).ok_or(VaultError::MathOverflow)?;
+        pos.last_deposit_ts  = Clock::get()?.unix_timestamp;
+
+        emit!(Deposited { vault: v.key(), user: ctx.accounts.user.key(), amount, shares_minted: shares_to_mint });
+        Ok(())
+    }
+
+    pub fn withdraw(ctx: Context<Withdraw>, shares: u64) -> Result<()> {
+        // Note: withdrawal is allowed even when paused so users can always exit
+        require!(shares > 0, VaultError::ZeroAmount);
+
+        let pos = &mut ctx.accounts.user_position;
+        require!(pos.shares >= shares, VaultError::InsufficientShares);
+
+        let v = &mut ctx.accounts.vault;
+        require!(v.total_shares > 0, VaultError::ZeroShares);
+
+        // How many base tokens does this share represent?
+        // Use actual vault token balance so accrued yield is included in share price.
+        let vault_balance = ctx.accounts.vault_token_account.amount;
+        let amount_out = (shares as u128)
+            .checked_mul(vault_balance as u128)
+            .and_then(|x| x.checked_div(v.total_shares as u128))
+            .ok_or(VaultError::MathOverflow)? as u64;
+        require!(amount_out > 0, VaultError::ZeroAmount);
+
+        // Cost basis for this share tranche (for fee calculation)
+        let cost_basis = (shares as u128)
+            .checked_mul(pos.deposited_amount as u128)
+            .and_then(|x| x.checked_div(pos.shares as u128))
+            .unwrap_or(0) as u64;
+
+        // Determine fee rate by tier (gate_mint == default means no gating → use vault default)
+        let fee_bps = if v.gate_mint != anchor_lang::solana_program::system_program::ID {
+            let gate_balance = ctx.accounts.user_gate_account
+                .as_ref()
+                .map(|a| a.amount)
+                .unwrap_or(0);
+            if gate_balance >= GOLD_THRESHOLD {
+                GOLD_FEE_BPS
+            } else if gate_balance >= SILVER_THRESHOLD {
+                SILVER_FEE_BPS
+            } else {
+                BRONZE_FEE_BPS
+            }
+        } else {
+            v.perf_fee_bps // fallback to vault-level rate when gating is disabled
+        };
+
+        // Performance fee: only on profit
+        let perf_fee = if amount_out > cost_basis {
+            let profit = amount_out - cost_basis;
+            profit.checked_mul(fee_bps)
+                .and_then(|x| x.checked_div(BPS_DENOM))
+                .unwrap_or(0)
+        } else { 0 };
+
+        let amount_after_fee = amount_out.saturating_sub(perf_fee);
+
+        // Burn shares
+        let vault_key = v.key();
+        let signer_seeds: &[&[u8]] = &[b"vault", vault_key.as_ref(), &[v.authority_bump]];
+        token::burn(
+            CpiContext::new(ctx.accounts.token_program.to_account_info(), Burn {
+                mint:      ctx.accounts.shares_mint.to_account_info(),
+                from:      ctx.accounts.user_shares_account.to_account_info(),
+                authority: ctx.accounts.user.to_account_info(),
+            }),
+            shares,
+        )?;
+
+        // Transfer perf fee → treasury (if any fee)
+        if perf_fee > 0 {
+            if let Some(treasury_account) = ctx.accounts.treasury_token_account.as_ref() {
+                token::transfer(
+                    CpiContext::new_with_signer(
+                        ctx.accounts.token_program.to_account_info(),
+                        Transfer {
+                            from:      ctx.accounts.vault_token_account.to_account_info(),
+                            to:        treasury_account.to_account_info(),
+                            authority: ctx.accounts.vault_authority.to_account_info(),
+                        },
+                        &[signer_seeds],
+                    ),
+                    perf_fee,
+                )?;
+            }
+        }
+
+        // Transfer tokens from vault → user (vault authority signs)
+        token::transfer(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from:      ctx.accounts.vault_token_account.to_account_info(),
+                    to:        ctx.accounts.user_token_account.to_account_info(),
+                    authority: ctx.accounts.vault_authority.to_account_info(),
+                },
+                &[signer_seeds],
+            ),
+            amount_after_fee,
+        )?;
+
+        // Update state
+        v.total_deposits = v.total_deposits.saturating_sub(amount_out);
+        v.total_shares   = v.total_shares.saturating_sub(shares);
+        pos.shares           = pos.shares.saturating_sub(shares);
+        pos.deposited_amount = pos.deposited_amount.saturating_sub(cost_basis);
+
+        emit!(Withdrawn { vault: v.key(), user: ctx.accounts.user.key(), shares_burned: shares, amount_out: amount_after_fee, perf_fee });
+        Ok(())
+    }
+
+    // ── Admin / keeper instructions ───────────────────────────────────────────
+
+    pub fn set_paused(ctx: Context<AdminOnly>, paused: bool) -> Result<()> {
+        ctx.accounts.vault.paused = paused;
+        emit!(PauseToggled { vault: ctx.accounts.vault.key(), paused });
+        Ok(())
+    }
+
+    pub fn set_treasury(ctx: Context<AdminOnly>, treasury: Pubkey) -> Result<()> {
+        ctx.accounts.vault.treasury = treasury;
+        Ok(())
+    }
+
+    pub fn set_gate_mint(ctx: Context<AdminOnly>, gate_mint: Pubkey) -> Result<()> {
+        ctx.accounts.vault.gate_mint = gate_mint;
+        Ok(())
+    }
+
+    pub fn set_tvl_cap(ctx: Context<AdminOnly>, new_cap: u64) -> Result<()> {
+        ctx.accounts.vault.tvl_cap = new_cap;
+        Ok(())
+    }
+
+    pub fn update_settings(
+        ctx: Context<AdminOnly>,
+        auto_compound: bool,
+        auto_rebalance: bool,
+        perf_fee_bps: u64,
+    ) -> Result<()> {
+        require!(perf_fee_bps <= MAX_PERF_FEE_BPS, VaultError::FeeTooHigh);
+        let v = &mut ctx.accounts.vault;
+        v.auto_compound  = auto_compound;
+        v.auto_rebalance = auto_rebalance;
+        v.perf_fee_bps   = perf_fee_bps;
+        Ok(())
+    }
+
+    pub fn rebalance(ctx: Context<AdminOnly>, new_allocations: Vec<u64>) -> Result<()> {
+        let v = &mut ctx.accounts.vault;
+        require!(!v.paused, AdapterError::VaultPaused);
+        require!(new_allocations.len() == v.protocol_count as usize, VaultError::AllocationMismatch);
+        let total: u64 = new_allocations.iter().sum();
+        require!(total <= BPS_DENOM, VaultError::AllocationExceeded);
+        for (i, &bps) in new_allocations.iter().enumerate() {
+            v.protocols[i].target_bps = bps;
+        }
+        emit!(Rebalanced { vault: v.key(), allocations: new_allocations, ts: Clock::get()?.unix_timestamp });
+        Ok(())
+    }
+
+    pub fn compound(ctx: Context<AdminOnly>) -> Result<()> {
+        let v = &mut ctx.accounts.vault;
+        require!(!v.paused, AdapterError::VaultPaused);
+        let now = Clock::get()?.unix_timestamp;
+        require!(now >= v.last_compound_ts + COMPOUND_INTERVAL, VaultError::CompoundTooEarly);
+        v.last_compound_ts = now;
+        emit!(Compounded { vault: v.key(), ts: now });
+        Ok(())
+    }
+
+    // ── Protocol deployment ───────────────────────────────────────────────────
+
+    pub fn deploy_to_kamino<'info>(
+        ctx: Context<'_, '_, '_, 'info, DeployToKamino<'info>>,
+        protocol_index: u8,
+        amount: u64,
+    ) -> Result<()> {
+        let v = &mut ctx.accounts.vault;
+        require!(!v.paused, AdapterError::VaultPaused);
+        require!(amount > 0, VaultError::ZeroAmount);
+        let idx = protocol_index as usize;
+        require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
+        require!(v.protocols[idx].kind == ProtocolKind::Kamino, AdapterError::UnsupportedProtocol);
+        assert_state_matches(&v.protocols[idx], ctx.accounts.kamino_reserve.key)?;
+
+        let idle = v.total_deposits.saturating_sub(v.total_deployed());
+        require!(amount <= idle, VaultError::InsufficientIdle);
+
+        let vault_key = v.key();
+        let seeds: &[&[u8]] = &[b"vault", vault_key.as_ref(), &[v.authority_bump]];
+
+        kamino_deposit(
+            CpiContext::new_with_signer(
+                ctx.accounts.kamino_program.to_account_info(),
+                KaminoDeposit {
+                    vault_authority:               ctx.accounts.vault_authority.to_account_info(),
+                    vault_token_account:           ctx.accounts.vault_token_account.clone(),
+                    vault_collateral_account:      ctx.accounts.vault_collateral_account.clone(),
+                    kamino_reserve:                ctx.accounts.kamino_reserve.to_account_info(),
+                    kamino_lending_market:         ctx.accounts.kamino_lending_market.to_account_info(),
+                    kamino_lending_market_authority: ctx.accounts.kamino_market_authority.to_account_info(),
+                    kamino_reserve_liquidity_supply: ctx.accounts.kamino_liquidity_supply.to_account_info(),
+                    kamino_collateral_mint:        ctx.accounts.kamino_collateral_mint.to_account_info(),
+                    kamino_collateral_supply:      ctx.accounts.kamino_collateral_supply.to_account_info(),
+                    token_program:                 ctx.accounts.token_program.clone(),
+                    kamino_program:                ctx.accounts.kamino_program.to_account_info(),
+                },
+                &[seeds],
+            ),
+            amount,
+            seeds,
+            ctx.remaining_accounts, // Pyth oracle accounts
+        )?;
+
+        v.protocols[idx].deployed_balance = v.protocols[idx].deployed_balance
+            .checked_add(amount).ok_or(VaultError::MathOverflow)?;
+
+        emit!(FundsDeployed { vault: v.key(), protocol_index, amount });
+        Ok(())
+    }
+
+    pub fn recall_from_kamino<'info>(
+        ctx: Context<'_, '_, '_, 'info, RecallFromKamino<'info>>,
+        protocol_index: u8,
+        collateral_amount: u64,
+    ) -> Result<()> {
+        let v = &mut ctx.accounts.vault;
+        let idx = protocol_index as usize;
+        require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
+        require!(v.protocols[idx].kind == ProtocolKind::Kamino, AdapterError::UnsupportedProtocol);
+        assert_state_matches(&v.protocols[idx], ctx.accounts.kamino_reserve.key)?;
+        require!(collateral_amount <= v.protocols[idx].deployed_balance, AdapterError::InsufficientDeployedBalance);
+
+        let vault_key = v.key();
+        let seeds: &[&[u8]] = &[b"vault", vault_key.as_ref(), &[v.authority_bump]];
+
+        kamino_withdraw(
+            CpiContext::new_with_signer(
+                ctx.accounts.kamino_program.to_account_info(),
+                KaminoWithdraw {
+                    vault_authority:               ctx.accounts.vault_authority.to_account_info(),
+                    vault_token_account:           ctx.accounts.vault_token_account.clone(),
+                    vault_collateral_account:      ctx.accounts.vault_collateral_account.clone(),
+                    kamino_reserve:                ctx.accounts.kamino_reserve.to_account_info(),
+                    kamino_lending_market:         ctx.accounts.kamino_lending_market.to_account_info(),
+                    kamino_lending_market_authority: ctx.accounts.kamino_market_authority.to_account_info(),
+                    kamino_reserve_liquidity_supply: ctx.accounts.kamino_liquidity_supply.to_account_info(),
+                    kamino_collateral_mint:        ctx.accounts.kamino_collateral_mint.to_account_info(),
+                    kamino_collateral_supply:      ctx.accounts.kamino_collateral_supply.to_account_info(),
+                    token_program:                 ctx.accounts.token_program.clone(),
+                    kamino_program:                ctx.accounts.kamino_program.to_account_info(),
+                },
+                &[seeds],
+            ),
+            collateral_amount,
+            seeds,
+            ctx.remaining_accounts,
+        )?;
+
+        v.protocols[idx].deployed_balance = v.protocols[idx].deployed_balance
+            .saturating_sub(collateral_amount);
+
+        emit!(FundsRecalled { vault: v.key(), protocol_index, collateral_amount });
+        Ok(())
+    }
+
+    pub fn deploy_to_marinade(
+        ctx: Context<DeployToMarinade>,
+        protocol_index: u8,
+        lamports: u64,
+    ) -> Result<()> {
+        let v = &mut ctx.accounts.vault;
+        require!(!v.paused, AdapterError::VaultPaused);
+        require!(lamports > 0, VaultError::ZeroAmount);
+        let idx = protocol_index as usize;
+        require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
+        require!(v.protocols[idx].kind == ProtocolKind::Marinade, AdapterError::UnsupportedProtocol);
+        assert_state_matches(&v.protocols[idx], ctx.accounts.marinade_state.key)?;
+
+        let vault_key = v.key();
+        let seeds: &[&[u8]] = &[b"vault", vault_key.as_ref(), &[v.authority_bump]];
+
+        marinade_deposit(
+            CpiContext::new_with_signer(
+                ctx.accounts.marinade_program.to_account_info(),
+                MarinadeDeposit {
+                    vault_authority:            ctx.accounts.vault_authority.to_account_info(),
+                    marinade_state:             ctx.accounts.marinade_state.to_account_info(),
+                    msol_mint:                  ctx.accounts.msol_mint.clone(),
+                    liq_pool_sol_leg:           ctx.accounts.liq_pool_sol_leg.to_account_info(),
+                    liq_pool_msol_leg:          ctx.accounts.liq_pool_msol_leg.clone(),
+                    liq_pool_msol_leg_authority:ctx.accounts.liq_pool_msol_leg_authority.to_account_info(),
+                    reserve_pda:                ctx.accounts.reserve_pda.to_account_info(),
+                    vault_msol_account:         ctx.accounts.vault_msol_account.clone(),
+                    msol_mint_authority:        ctx.accounts.msol_mint_authority.to_account_info(),
+                    system_program:             ctx.accounts.system_program.clone(),
+                    token_program:              ctx.accounts.token_program.clone(),
+                    marinade_program:           ctx.accounts.marinade_program.to_account_info(),
+                },
+                &[seeds],
+            ),
+            lamports,
+            seeds,
+        )?;
+
+        v.protocols[idx].deployed_balance = v.protocols[idx].deployed_balance
+            .checked_add(lamports).ok_or(VaultError::MathOverflow)?;
+
+        emit!(FundsDeployed { vault: v.key(), protocol_index, amount: lamports });
+        Ok(())
+    }
+
+    pub fn recall_from_marinade(
+        ctx: Context<RecallFromMarinade>,
+        protocol_index: u8,
+        msol_amount: u64,
+    ) -> Result<()> {
+        let v = &mut ctx.accounts.vault;
+        let idx = protocol_index as usize;
+        require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
+        require!(v.protocols[idx].kind == ProtocolKind::Marinade, AdapterError::UnsupportedProtocol);
+
+        let vault_key = v.key();
+        let seeds: &[&[u8]] = &[b"vault", vault_key.as_ref(), &[v.authority_bump]];
+
+        marinade_liquid_unstake(
+            CpiContext::new_with_signer(
+                ctx.accounts.marinade_program.to_account_info(),
+                MarinadeUnstake {
+                    vault_authority:        ctx.accounts.vault_authority.to_account_info(),
+                    marinade_state:         ctx.accounts.marinade_state.to_account_info(),
+                    msol_mint:              ctx.accounts.msol_mint.clone(),
+                    liq_pool_sol_leg:       ctx.accounts.liq_pool_sol_leg.to_account_info(),
+                    liq_pool_msol_leg:      ctx.accounts.liq_pool_msol_leg.clone(),
+                    treasury_msol_account:  ctx.accounts.treasury_msol_account.clone(),
+                    vault_msol_account:     ctx.accounts.vault_msol_account.clone(),
+                    transfer_sol_to:        ctx.accounts.vault_authority.to_account_info(),
+                    system_program:         ctx.accounts.system_program.clone(),
+                    token_program:          ctx.accounts.token_program.clone(),
+                    marinade_program:       ctx.accounts.marinade_program.to_account_info(),
+                },
+                &[seeds],
+            ),
+            msol_amount,
+            seeds,
+        )?;
+
+        v.protocols[idx].deployed_balance = v.protocols[idx].deployed_balance
+            .saturating_sub(msol_amount);
+
+        emit!(FundsRecalled { vault: v.key(), protocol_index, collateral_amount: msol_amount });
+        Ok(())
+    }
+}
+
+// ── Vault state ───────────────────────────────────────────────────────────────
+
+#[account]
+pub struct Vault {
+    pub admin:               Pubkey,
+    pub mint:                Pubkey,
+    pub vault_token_account: Pubkey,
+    pub shares_mint:         Pubkey,
+    pub treasury:            Pubkey,  // receives perf fees
+    pub gate_mint:           Pubkey,  // pump.fun token for access gating (Pubkey::default = no gate)
+    pub total_deposits:      u64,
+    pub total_shares:        u64,
+    pub perf_fee_bps:        u64,
+    pub auto_compound:       bool,
+    pub auto_rebalance:      bool,
+    pub paused:              bool,
+    pub last_compound_ts:    i64,
+    pub bump:                u8,
+    pub authority_bump:      u8,
+    pub protocol_count:      u8,
+    pub tvl_cap:             u64,
+    pub name:                String,
+    pub protocols:           [ProtocolAdapter; MAX_PROTOCOLS],
+}
+
+impl Vault {
+    pub const LEN: usize = 8
+        + 32 * 6         // pubkeys (admin, mint, vault_token_account, shares_mint, treasury, gate_mint)
+        + 8 * 3          // u64 totals + fee
+        + 3              // bools
+        + 8              // i64
+        + 3              // bumps + count
+        + 8              // tvl_cap
+        + 4 + 32         // name string
+        + MAX_PROTOCOLS * ProtocolAdapter::SIZE
+        + 128;           // padding
+
+    pub fn total_deployed(&self) -> u64 {
+        self.protocols[..self.protocol_count as usize]
+            .iter().map(|p| p.deployed_balance).sum()
+    }
+}
+
+#[account]
+pub struct UserPosition {
+    pub owner:            Pubkey,
+    pub vault:            Pubkey,
+    pub shares:           u64,
+    pub deposited_amount: u64,
+    pub last_deposit_ts:  i64,
+    pub bump:             u8,
+}
+
+impl UserPosition {
+    pub const LEN: usize = 8 + 32 + 32 + 8 + 8 + 8 + 1 + 32;
+}
+
+// ── Account contexts ──────────────────────────────────────────────────────────
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+pub struct InitVaultParams {
+    pub perf_fee_bps:  u64,
+    pub auto_compound: bool,
+    pub auto_rebalance:bool,
+    pub tvl_cap:       u64,
+    pub name:          String,
+    pub treasury:      Pubkey,  // wallet that receives performance fees
+    pub gate_mint:     Pubkey,  // pump.fun token mint; Pubkey::default() disables gating
+}
+
+#[derive(Accounts)]
+#[instruction(params: InitVaultParams)]
+pub struct InitializeVault<'info> {
+    #[account(mut)]
+    pub admin: Signer<'info>,
+
+    pub mint: Account<'info, Mint>,
+
+    #[account(
+        init, payer = admin, space = Vault::LEN,
+        seeds = [b"vault", mint.key().as_ref(), admin.key().as_ref()],
+        bump
+    )]
+    pub vault: Account<'info, Vault>,
+
+    /// CHECK: PDA, no data
+    #[account(seeds = [b"vault", vault.key().as_ref()], bump)]
+    pub vault_authority: UncheckedAccount<'info>,
+
+    #[account(
+        init, payer = admin,
+        associated_token::mint = mint,
+        associated_token::authority = vault_authority,
+    )]
+    pub vault_token_account: Account<'info, TokenAccount>,
+
+    #[account(
+        init, payer = admin,
+        mint::decimals = mint.decimals,
+        mint::authority = vault_authority,
+    )]
+    pub shares_mint: Account<'info, Mint>,
+
+    pub token_program:            Program<'info, Token>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program:           Program<'info, System>,
+    pub rent:                     Sysvar<'info, Rent>,
+}
+
+#[derive(Accounts)]
+pub struct AdminOnly<'info> {
+    pub admin: Signer<'info>,
+    #[account(mut, has_one = admin @ VaultError::Unauthorized)]
+    pub vault: Account<'info, Vault>,
+}
+
+#[derive(Accounts)]
+pub struct Deposit<'info> {
+    #[account(mut)]
+    pub user: Signer<'info>,
+
+    #[account(mut)]
+    pub vault: Box<Account<'info, Vault>>,
+
+    /// CHECK: PDA
+    #[account(seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
+    pub vault_authority: UncheckedAccount<'info>,
+
+    #[account(mut, constraint = vault_token_account.key() == vault.vault_token_account @ VaultError::InvalidTokenAccount)]
+    pub vault_token_account: Box<Account<'info, TokenAccount>>,
+
+    #[account(mut, constraint = user_token_account.owner == user.key() @ VaultError::Unauthorized,
+                   constraint = user_token_account.mint  == vault.mint  @ VaultError::InvalidTokenAccount)]
+    pub user_token_account: Box<Account<'info, TokenAccount>>,
+
+    #[account(mut, constraint = shares_mint.key() == vault.shares_mint @ VaultError::InvalidTokenAccount)]
+    pub shares_mint: Box<Account<'info, Mint>>,
+
+    #[account(
+        init_if_needed, payer = user, space = UserPosition::LEN,
+        seeds = [b"position", vault.key().as_ref(), user.key().as_ref()],
+        bump
+    )]
+    pub user_position: Box<Account<'info, UserPosition>>,
+
+    #[account(
+        init_if_needed, payer = user,
+        associated_token::mint = shares_mint,
+        associated_token::authority = user,
+    )]
+    pub user_shares_account: Box<Account<'info, TokenAccount>>,
+
+    /// Optional: user's gate token account. Required when vault.gate_mint != default.
+    pub user_gate_account: Option<Box<Account<'info, TokenAccount>>>,
+
+    pub token_program:            Program<'info, Token>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program:           Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct Withdraw<'info> {
+    #[account(mut)]
+    pub user: Signer<'info>,
+
+    #[account(mut)]
+    pub vault: Box<Account<'info, Vault>>,
+
+    /// CHECK: PDA
+    #[account(seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
+    pub vault_authority: UncheckedAccount<'info>,
+
+    #[account(mut, constraint = vault_token_account.key() == vault.vault_token_account @ VaultError::InvalidTokenAccount)]
+    pub vault_token_account: Box<Account<'info, TokenAccount>>,
+
+    #[account(mut, constraint = user_token_account.owner == user.key() @ VaultError::Unauthorized,
+                   constraint = user_token_account.mint  == vault.mint  @ VaultError::InvalidTokenAccount)]
+    pub user_token_account: Box<Account<'info, TokenAccount>>,
+
+    #[account(mut, constraint = shares_mint.key() == vault.shares_mint @ VaultError::InvalidTokenAccount)]
+    pub shares_mint: Box<Account<'info, Mint>>,
+
+    #[account(mut,
+        seeds = [b"position", vault.key().as_ref(), user.key().as_ref()],
+        bump  = user_position.bump,
+        constraint = user_position.owner == user.key() @ VaultError::Unauthorized,
+        constraint = user_position.vault == vault.key() @ VaultError::Unauthorized,
+    )]
+    pub user_position: Box<Account<'info, UserPosition>>,
+
+    #[account(mut, constraint = user_shares_account.owner == user.key() @ VaultError::Unauthorized,
+                   constraint = user_shares_account.mint  == vault.shares_mint @ VaultError::InvalidTokenAccount)]
+    pub user_shares_account: Box<Account<'info, TokenAccount>>,
+
+    /// Optional: treasury token account for perf fee routing.
+    #[account(mut)]
+    pub treasury_token_account: Option<Box<Account<'info, TokenAccount>>>,
+
+    /// Optional: user's gate token account. Used to determine fee tier at withdrawal.
+    pub user_gate_account: Option<Box<Account<'info, TokenAccount>>>,
+
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct DeployToKamino<'info> {
+    #[account(mut)]
+    pub admin: Signer<'info>,
+    #[account(mut, has_one = admin @ VaultError::Unauthorized)]
+    pub vault: Account<'info, Vault>,
+    /// CHECK: PDA
+    #[account(seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
+    pub vault_authority: UncheckedAccount<'info>,
+    #[account(mut, constraint = vault_token_account.key() == vault.vault_token_account)]
+    pub vault_token_account: Account<'info, TokenAccount>,
+    #[account(mut)]
+    pub vault_collateral_account: Account<'info, TokenAccount>,
+    /// CHECK: Kamino validates; owner constraint added
+    #[account(mut, owner = KAMINO_LENDING_PROGRAM_ID)]
+    pub kamino_reserve: UncheckedAccount<'info>,
+    /// CHECK: Kamino validates
+    pub kamino_lending_market: UncheckedAccount<'info>,
+    /// CHECK: Kamino validates
+    pub kamino_market_authority: UncheckedAccount<'info>,
+    /// CHECK: Kamino validates
+    #[account(mut)] pub kamino_liquidity_supply: UncheckedAccount<'info>,
+    /// CHECK: Kamino validates
+    #[account(mut)] pub kamino_collateral_mint: UncheckedAccount<'info>,
+    /// CHECK: Kamino validates
+    #[account(mut)] pub kamino_collateral_supply: UncheckedAccount<'info>,
+    pub token_program: Program<'info, Token>,
+    /// CHECK: address constraint
+    #[account(address = KAMINO_LENDING_PROGRAM_ID)]
+    pub kamino_program: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
+pub struct RecallFromKamino<'info> {
+    #[account(mut)]
+    pub admin: Signer<'info>,
+    #[account(mut, has_one = admin @ VaultError::Unauthorized)]
+    pub vault: Account<'info, Vault>,
+    /// CHECK: PDA
+    #[account(seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
+    pub vault_authority: UncheckedAccount<'info>,
+    #[account(mut, constraint = vault_token_account.key() == vault.vault_token_account)]
+    pub vault_token_account: Account<'info, TokenAccount>,
+    #[account(mut)]
+    pub vault_collateral_account: Account<'info, TokenAccount>,
+    /// CHECK: owner constraint
+    #[account(mut, owner = KAMINO_LENDING_PROGRAM_ID)]
+    pub kamino_reserve: UncheckedAccount<'info>,
+    /// CHECK: Kamino validates
+    pub kamino_lending_market: UncheckedAccount<'info>,
+    /// CHECK: Kamino validates
+    pub kamino_market_authority: UncheckedAccount<'info>,
+    /// CHECK: Kamino validates
+    #[account(mut)] pub kamino_liquidity_supply: UncheckedAccount<'info>,
+    /// CHECK: Kamino validates
+    #[account(mut)] pub kamino_collateral_mint: UncheckedAccount<'info>,
+    /// CHECK: Kamino validates
+    #[account(mut)] pub kamino_collateral_supply: UncheckedAccount<'info>,
+    pub token_program: Program<'info, Token>,
+    /// CHECK: address constraint
+    #[account(address = KAMINO_LENDING_PROGRAM_ID)]
+    pub kamino_program: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
+pub struct DeployToMarinade<'info> {
+    #[account(mut)]
+    pub admin: Signer<'info>,
+    #[account(mut, has_one = admin @ VaultError::Unauthorized)]
+    pub vault: Account<'info, Vault>,
+    /// CHECK: PDA
+    #[account(seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
+    pub vault_authority: UncheckedAccount<'info>,
+    /// CHECK: Marinade validates
+    #[account(mut)] pub marinade_state: UncheckedAccount<'info>,
+    #[account(mut)] pub msol_mint: Account<'info, Mint>,
+    /// CHECK: Marinade validates
+    #[account(mut)] pub liq_pool_sol_leg: UncheckedAccount<'info>,
+    #[account(mut)] pub liq_pool_msol_leg: Account<'info, TokenAccount>,
+    /// CHECK: Marinade validates
+    pub liq_pool_msol_leg_authority: UncheckedAccount<'info>,
+    /// CHECK: Marinade validates
+    #[account(mut)] pub reserve_pda: UncheckedAccount<'info>,
+    #[account(mut)] pub vault_msol_account: Account<'info, TokenAccount>,
+    /// CHECK: Marinade validates
+    pub msol_mint_authority: UncheckedAccount<'info>,
+    pub system_program: Program<'info, System>,
+    pub token_program:  Program<'info, Token>,
+    /// CHECK: address constraint
+    #[account(address = adapters::marinade::MARINADE_MAINNET_PROGRAM)]
+    pub marinade_program: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
+pub struct RecallFromMarinade<'info> {
+    #[account(mut)]
+    pub admin: Signer<'info>,
+    #[account(mut, has_one = admin @ VaultError::Unauthorized)]
+    pub vault: Account<'info, Vault>,
+    /// CHECK: PDA
+    #[account(seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
+    pub vault_authority: UncheckedAccount<'info>,
+    /// CHECK: Marinade validates
+    #[account(mut)] pub marinade_state: UncheckedAccount<'info>,
+    #[account(mut)] pub msol_mint: Account<'info, Mint>,
+    /// CHECK: Marinade validates
+    #[account(mut)] pub liq_pool_sol_leg: UncheckedAccount<'info>,
+    #[account(mut)] pub liq_pool_msol_leg: Account<'info, TokenAccount>,
+    #[account(mut)] pub treasury_msol_account: Account<'info, TokenAccount>,
+    #[account(mut)] pub vault_msol_account: Account<'info, TokenAccount>,
+    pub system_program: Program<'info, System>,
+    pub token_program:  Program<'info, Token>,
+    /// CHECK: address constraint
+    #[account(address = adapters::marinade::MARINADE_MAINNET_PROGRAM)]
+    pub marinade_program: UncheckedAccount<'info>,
+}
+
+// ── Events ────────────────────────────────────────────────────────────────────
+
+#[event] pub struct VaultInitialized  { pub vault: Pubkey, pub admin: Pubkey, pub mint: Pubkey }
+#[event] pub struct ProtocolRegistered{ pub vault: Pubkey, pub external_state: Pubkey, pub target_bps: u64 }
+#[event] pub struct Deposited         { pub vault: Pubkey, pub user: Pubkey, pub amount: u64, pub shares_minted: u64 }
+#[event] pub struct Withdrawn         { pub vault: Pubkey, pub user: Pubkey, pub shares_burned: u64, pub amount_out: u64, pub perf_fee: u64 }
+#[event] pub struct Rebalanced        { pub vault: Pubkey, pub allocations: Vec<u64>, pub ts: i64 }
+#[event] pub struct Compounded        { pub vault: Pubkey, pub ts: i64 }
+#[event] pub struct FundsDeployed     { pub vault: Pubkey, pub protocol_index: u8, pub amount: u64 }
+#[event] pub struct FundsRecalled     { pub vault: Pubkey, pub protocol_index: u8, pub collateral_amount: u64 }
+#[event] pub struct PauseToggled      { pub vault: Pubkey, pub paused: bool }
+
+// ── Errors ────────────────────────────────────────────────────────────────────
+
+#[error_code]
+pub enum VaultError {
+    #[msg("Unauthorized")]                    Unauthorized,
+    #[msg("Fee exceeds 10% maximum")]         FeeTooHigh,
+    #[msg("Name too long (max 32 chars)")]    NameTooLong,
+    #[msg("Allocation exceeds 100%")]         AllocationExceeded,
+    #[msg("Allocation count mismatch")]       AllocationMismatch,
+    #[msg("Too many protocols (max 8)")]      TooManyProtocols,
+    #[msg("Amount must be > 0")]              ZeroAmount,
+    #[msg("Zero shares calculated")]          ZeroShares,
+    #[msg("Insufficient shares")]             InsufficientShares,
+    #[msg("Math overflow")]                   MathOverflow,
+    #[msg("Invalid token account")]           InvalidTokenAccount,
+    #[msg("Compound interval not reached")]   CompoundTooEarly,
+    #[msg("Invalid protocol index")]          InvalidProtocolIndex,
+    #[msg("Insufficient idle balance")]       InsufficientIdle,
+    #[msg("TVL cap exceeded")]                TvlCapExceeded,
+    #[msg("TVL cap must be >= $1")]           TvlCapTooLow,
+    #[msg("First deposit must be >= $1")]     FirstDepositTooSmall,
+    #[msg("Must hold gate token to deposit")] NotTokenHolder,
+    #[msg("Deposit exceeds your tier cap")]   TierCapExceeded,
+}
