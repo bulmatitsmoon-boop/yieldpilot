@@ -61,6 +61,7 @@ pub mod yieldpilot {
         } else {
             params.gate_mint
         };
+        v.pending_admin       = Pubkey::default();
         v.total_deposits      = 0;
         v.total_shares        = 0;
         v.perf_fee_bps        = params.perf_fee_bps;
@@ -130,6 +131,11 @@ pub mod yieldpilot {
 
         // Token-gate: gate_mint == SystemProgram means no gating
         if v.gate_mint != anchor_lang::solana_program::system_program::ID {
+            // Validate gate account belongs to user and uses the correct mint
+            if let Some(gate_acct) = ctx.accounts.user_gate_account.as_ref() {
+                require!(gate_acct.mint == v.gate_mint, VaultError::InvalidGateAccount);
+                require!(gate_acct.owner == ctx.accounts.user.key(), VaultError::InvalidGateAccount);
+            }
             let gate_balance = ctx.accounts.user_gate_account
                 .as_ref()
                 .map(|a| a.amount)
@@ -246,6 +252,11 @@ pub mod yieldpilot {
 
         // Determine fee rate by tier (gate_mint == default means no gating → use vault default)
         let fee_bps = if v.gate_mint != anchor_lang::solana_program::system_program::ID {
+            // Validate gate account mint and owner before trusting balance
+            if let Some(gate_acct) = ctx.accounts.user_gate_account.as_ref() {
+                require!(gate_acct.mint == v.gate_mint, VaultError::InvalidGateAccount);
+                require!(gate_acct.owner == ctx.accounts.user.key(), VaultError::InvalidGateAccount);
+            }
             let gate_balance = ctx.accounts.user_gate_account
                 .as_ref()
                 .map(|a| a.amount)
@@ -283,22 +294,27 @@ pub mod yieldpilot {
             shares,
         )?;
 
-        // Transfer perf fee → treasury (if any fee)
+        // Validate treasury account mint if provided
+        if let Some(treasury_acct) = ctx.accounts.treasury_token_account.as_ref() {
+            require!(treasury_acct.mint == v.mint, VaultError::InvalidTreasuryAccount);
+        }
+
+        // Transfer perf fee → treasury (required when fee > 0)
         if perf_fee > 0 {
-            if let Some(treasury_account) = ctx.accounts.treasury_token_account.as_ref() {
-                token::transfer(
-                    CpiContext::new_with_signer(
-                        ctx.accounts.token_program.to_account_info(),
-                        Transfer {
-                            from:      ctx.accounts.vault_token_account.to_account_info(),
-                            to:        treasury_account.to_account_info(),
-                            authority: ctx.accounts.vault_authority.to_account_info(),
-                        },
-                        &[signer_seeds],
-                    ),
-                    perf_fee,
-                )?;
-            }
+            let treasury_account = ctx.accounts.treasury_token_account.as_ref()
+                .ok_or(VaultError::TreasuryRequired)?;
+            token::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.token_program.to_account_info(),
+                    Transfer {
+                        from:      ctx.accounts.vault_token_account.to_account_info(),
+                        to:        treasury_account.to_account_info(),
+                        authority: ctx.accounts.vault_authority.to_account_info(),
+                    },
+                    &[signer_seeds],
+                ),
+                perf_fee,
+            )?;
         }
 
         // Transfer tokens from vault → user (vault authority signs)
@@ -348,6 +364,20 @@ pub mod yieldpilot {
         Ok(())
     }
 
+    pub fn propose_admin(ctx: Context<AdminOnly>, new_admin: Pubkey) -> Result<()> {
+        ctx.accounts.vault.pending_admin = new_admin;
+        Ok(())
+    }
+
+    pub fn accept_admin(ctx: Context<AcceptAdmin>) -> Result<()> {
+        let v = &mut ctx.accounts.vault;
+        require!(v.pending_admin != Pubkey::default(), VaultError::NoPendingAdmin);
+        require!(v.pending_admin == ctx.accounts.new_admin.key(), VaultError::NotPendingAdmin);
+        v.admin = ctx.accounts.new_admin.key();
+        v.pending_admin = Pubkey::default();
+        Ok(())
+    }
+
     pub fn update_settings(
         ctx: Context<AdminOnly>,
         auto_compound: bool,
@@ -367,7 +397,7 @@ pub mod yieldpilot {
         require!(!v.paused, AdapterError::VaultPaused);
         require!(new_allocations.len() == v.protocol_count as usize, VaultError::AllocationMismatch);
         let total: u64 = new_allocations.iter().sum();
-        require!(total <= BPS_DENOM, VaultError::AllocationExceeded);
+        require!(total == BPS_DENOM, VaultError::AllocationNotFull);
         for (i, &bps) in new_allocations.iter().enumerate() {
             v.protocols[i].target_bps = bps;
         }
@@ -536,6 +566,7 @@ pub mod yieldpilot {
         let idx = protocol_index as usize;
         require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
         require!(v.protocols[idx].kind == ProtocolKind::Marinade, AdapterError::UnsupportedProtocol);
+        assert_state_matches(&v.protocols[idx], ctx.accounts.marinade_state.key)?;
 
         let vault_key = v.key();
         let seeds: &[&[u8]] = &[b"vault", vault_key.as_ref(), &[v.authority_bump]];
@@ -580,6 +611,7 @@ pub struct Vault {
     pub shares_mint:         Pubkey,
     pub treasury:            Pubkey,  // receives perf fees
     pub gate_mint:           Pubkey,  // pump.fun token for access gating (Pubkey::default = no gate)
+    pub pending_admin:       Pubkey,  // two-step admin transfer; Pubkey::default = no pending transfer
     pub total_deposits:      u64,
     pub total_shares:        u64,
     pub perf_fee_bps:        u64,
@@ -597,7 +629,7 @@ pub struct Vault {
 
 impl Vault {
     pub const LEN: usize = 8
-        + 32 * 6         // pubkeys (admin, mint, vault_token_account, shares_mint, treasury, gate_mint)
+        + 32 * 7         // pubkeys (admin, mint, vault_token_account, shares_mint, treasury, gate_mint, pending_admin)
         + 8 * 3          // u64 totals + fee
         + 3              // bools
         + 8              // i64
@@ -683,6 +715,13 @@ pub struct InitializeVault<'info> {
 pub struct AdminOnly<'info> {
     pub admin: Signer<'info>,
     #[account(mut, has_one = admin @ VaultError::Unauthorized)]
+    pub vault: Account<'info, Vault>,
+}
+
+#[derive(Accounts)]
+pub struct AcceptAdmin<'info> {
+    pub new_admin: Signer<'info>,
+    #[account(mut, constraint = vault.pending_admin == new_admin.key() @ VaultError::NotPendingAdmin)]
     pub vault: Account<'info, Vault>,
 }
 
@@ -926,4 +965,10 @@ pub enum VaultError {
     #[msg("First deposit must be >= $1")]     FirstDepositTooSmall,
     #[msg("Must hold gate token to deposit")] NotTokenHolder,
     #[msg("Deposit exceeds your tier cap")]   TierCapExceeded,
+    #[msg("Gate account mint does not match vault gate mint")] InvalidGateAccount,
+    #[msg("Treasury account mint does not match vault mint")]  InvalidTreasuryAccount,
+    #[msg("Treasury account required when fee is non-zero")]   TreasuryRequired,
+    #[msg("Allocation must sum to exactly 10000 bps")]         AllocationNotFull,
+    #[msg("No pending admin transfer")]                        NoPendingAdmin,
+    #[msg("Not the pending admin")]                            NotPendingAdmin,
 }
