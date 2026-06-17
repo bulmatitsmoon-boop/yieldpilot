@@ -18,15 +18,23 @@ function fmtTvl(usd: number) {
 
 function ILRiskModal({ onAccept, onDecline }: { onAccept: () => void; onDecline: () => void }) {
   return (
-    <div style={{
-      position: "fixed", inset: 0, zIndex: 1000,
-      background: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)",
-      display: "flex", alignItems: "center", justifyContent: "center", padding: 24,
-    }}>
-      <div style={{
-        background: "var(--surface)", border: "1px solid var(--border)",
-        borderRadius: 16, maxWidth: 520, width: "100%", padding: "36px 32px",
-      }}>
+    <div
+      onClick={onDecline}
+      style={{
+        position: "fixed", inset: 0, zIndex: 1000,
+        background: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)",
+        display: "flex", alignItems: "flex-start", justifyContent: "center",
+        padding: "40px 24px", overflowY: "auto",
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: "var(--surface)", border: "1px solid var(--border)",
+          borderRadius: 16, maxWidth: 520, width: "100%", padding: "36px 32px",
+          margin: "auto",
+        }}
+      >
         <div style={{
           display: "inline-flex", alignItems: "center", gap: 8,
           background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.25)",
