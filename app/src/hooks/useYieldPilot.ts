@@ -12,7 +12,12 @@ import {
   getAssociatedTokenAddress,
   TOKEN_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
+  NATIVE_MINT,
+  createAssociatedTokenAccountInstruction,
+  createSyncNativeInstruction,
+  createCloseAccountInstruction,
 } from "@solana/spl-token";
+import { Transaction, SystemProgram as SP } from "@solana/web3.js";
 import IDL from "@/idl/yieldpilot.json";
 
 const PROGRAM_ID = new PublicKey(
@@ -256,6 +261,20 @@ export function useYieldPilot(vaultAddresses: string[]) {
           ? await getAssociatedTokenAddress(gateMint, publicKey)
           : null;
 
+        const isSOL = mintPubkey.toBase58() === NATIVE_MINT.toBase58();
+        const preIxs: anchor.web3.TransactionInstruction[] = [];
+        const postIxs: anchor.web3.TransactionInstruction[] = [];
+
+        if (isSOL) {
+          const ataInfo = await connection.getAccountInfo(userTokenAccount);
+          if (!ataInfo) {
+            preIxs.push(createAssociatedTokenAccountInstruction(publicKey, userTokenAccount, publicKey, NATIVE_MINT));
+          }
+          preIxs.push(SP.transfer({ fromPubkey: publicKey, toPubkey: userTokenAccount, lamports: BigInt(amount.toString()) }));
+          preIxs.push(createSyncNativeInstruction(userTokenAccount));
+          postIxs.push(createCloseAccountInstruction(userTokenAccount, publicKey, publicKey));
+        }
+
         return program.methods
           .deposit(amount)
           .accounts({
@@ -272,6 +291,8 @@ export function useYieldPilot(vaultAddresses: string[]) {
             associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
             systemProgram: SystemProgram.programId,
           })
+          .preInstructions(preIxs)
+          .postInstructions(postIxs)
           .rpc();
       });
     },
