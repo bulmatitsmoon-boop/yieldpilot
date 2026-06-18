@@ -29,8 +29,15 @@ export default function Dashboard() {
   const { apys, loading: apyLoading } = useApys();
 
   // ── Derived stats ─────────────────────────────────────────────────────────
-  const totalDeposited = positions.reduce((s, p) => s + p.currentValue / 1e6, 0);
-  const totalEarned    = positions.reduce((s, p) => s + p.earnedValue / 1e6, 0);
+  const mintDecimals = (mint: string) => mint === "So11111111111111111111111111111111111111112" ? 1e9 : 1e6;
+  const totalDeposited = positions.reduce((s, p) => {
+    const vault = vaults.find(v => v.address === p.vault);
+    return s + p.currentValue / mintDecimals(vault?.mint || "");
+  }, 0);
+  const totalEarned = positions.reduce((s, p) => {
+    const vault = vaults.find(v => v.address === p.vault);
+    return s + p.earnedValue / mintDecimals(vault?.mint || "");
+  }, 0);
   const avgApy = apys.length ? apys.reduce((s, a) => s + a.apyPercent, 0) / apys.length : 0;
   const bestApy = apys.length ? Math.max(...apys.map((a) => a.apyPercent)) : 0;
   const bestProtocol = apys.find((a) => a.apyPercent === bestApy);
@@ -151,15 +158,15 @@ export default function Dashboard() {
                     <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: 600 }}>{vault?.name || "Vault"}</div>
                       <div style={{ color: "var(--text-muted)", fontSize: 12 }}>
-                        {fmt(pos.depositedAmount / 1e6)} deposited · {fmtAddr(pos.vault)}
+                        {fmt(pos.depositedAmount / mintDecimals(vaults.find(v => v.address === pos.vault)?.mint || ""), 4)} deposited · {fmtAddr(pos.vault)}
                       </div>
                     </div>
                     <div style={{ textAlign: "right" }}>
                       <div style={{ color: "var(--green)", fontWeight: 700, fontFamily: "var(--mono)" }}>
-                        +${fmt(pos.earnedValue / 1e6, 4)} earned
+                        +{fmt(pos.earnedValue / mintDecimals(vaults.find(v => v.address === pos.vault)?.mint || ""), 4)} earned
                       </div>
                       <div style={{ color: "var(--text-muted)", fontSize: 12 }}>
-                        ${fmt(pos.currentValue / 1e6)} current value
+                        {fmt(pos.currentValue / mintDecimals(vaults.find(v => v.address === pos.vault)?.mint || ""), 4)} current value
                       </div>
                     </div>
                   </div>
