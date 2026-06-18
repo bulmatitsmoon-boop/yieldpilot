@@ -325,11 +325,18 @@ export function useYieldPilot(vaultAddresses: string[]) {
           ? await getAssociatedTokenAddress(gateMint, publicKey)
           : null;
 
-        // Create user token account if it doesn't exist so the program can send tokens back
+        const isSOL = mintPubkey.toBase58() === NATIVE_MINT.toBase58();
         const preIxs: anchor.web3.TransactionInstruction[] = [];
+        const postIxs: anchor.web3.TransactionInstruction[] = [];
+
+        // Ensure the user token account exists before the program tries to send tokens into it
         const ataInfo = await connection.getAccountInfo(userTokenAccount);
         if (!ataInfo) {
           preIxs.push(createAssociatedTokenAccountInstruction(publicKey, userTokenAccount, publicKey, mintPubkey));
+        }
+        // For SOL: after the program sends wSOL back, close the wSOL account → native SOL
+        if (isSOL) {
+          postIxs.push(createCloseAccountInstruction(userTokenAccount, publicKey, publicKey));
         }
 
         const totalShares = (vaultRaw.totalShares as anchor.BN).toNumber();
@@ -354,6 +361,7 @@ export function useYieldPilot(vaultAddresses: string[]) {
             tokenProgram: TOKEN_PROGRAM_ID,
           })
           .preInstructions(preIxs)
+          .postInstructions(postIxs)
           .rpc();
       });
     },
