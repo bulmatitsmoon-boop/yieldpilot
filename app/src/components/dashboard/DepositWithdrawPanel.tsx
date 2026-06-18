@@ -25,9 +25,10 @@ interface Props {
   onDeposit: (vaultAddress: string, mint: string, amount: anchor.BN) => Promise<any>;
   onWithdraw: (vaultAddress: string, mint: string, shares: anchor.BN) => Promise<any>;
   userShares: number;
+  userCurrentValue?: number;
 }
 
-export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userShares }: Props) {
+export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userShares, userCurrentValue }: Props) {
   const { publicKey } = useWallet();
   const { connection } = useConnection();
   const [tab, setTab] = useState<"deposit" | "withdraw">("deposit");
@@ -40,9 +41,11 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
   const isNativeSOL = vault.mint === WSOL_MINT;
   const bestApy = apys.sort((a, b) => b.apyBps - a.apyBps)[0];
 
+  // Estimated token amount the user would get back if they withdraw everything
+  const estimatedAll = userCurrentValue ? userCurrentValue / (isNativeSOL ? 1e9 : 1e6) : null;
+
   useEffect(() => { fetchBalance(); }, [publicKey, vault.mint]);
 
-  // Fetch user wallet balance when they interact
   const fetchBalance = async () => {
     if (!publicKey) return;
     try {
@@ -60,18 +63,27 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
     }
   };
 
-  const handleAction = async () => {
+  const handleDeposit = async () => {
     if (!amount || busy) return;
     setBusy(true);
     try {
       const raw = new anchor.BN(Math.floor(parseFloat(amount) * 10 ** decimals));
-      if (tab === "deposit") {
-        await onDeposit(vault.address, vault.mint, raw);
-      } else {
-        // For withdraw, treat input as share amount (simplified; in prod show $ value)
-        const sharesToBurn = new anchor.BN(Math.floor(parseFloat(amount) * 10 ** decimals));
-        await onWithdraw(vault.address, vault.mint, sharesToBurn);
-      }
+      await onDeposit(vault.address, vault.mint, raw);
+      setAmount("");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleWithdraw = async (allShares?: boolean) => {
+    if (busy) return;
+    if (!allShares && !amount) return;
+    setBusy(true);
+    try {
+      const shares = allShares
+        ? new anchor.BN(userShares)
+        : new anchor.BN(Math.floor(parseFloat(amount) * 10 ** decimals));
+      await onWithdraw(vault.address, vault.mint, shares);
       setAmount("");
     } finally {
       setBusy(false);
@@ -102,7 +114,7 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
           <label style={{ color: "var(--text-muted)", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em" }}>
             {tab === "deposit" ? "Amount to deposit" : "Amount to withdraw"}
           </label>
-          {walletBalance !== null && (
+          {walletBalance !== null && tab === "deposit" && (
             <span style={{ color: "var(--text-muted)", fontSize: 12 }}>
               Balance: {walletBalance.toFixed(decimals === 9 ? 5 : 2)} {asset}
             </span>
@@ -145,34 +157,56 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
         </div>
       )}
 
-      {/* Withdraw info */}
+      {/* Withdraw info + Withdraw All */}
       {tab === "withdraw" && userShares > 0 && (
         <div style={{ background: "var(--bg)", borderRadius: 8, padding: "12px 14px", marginBottom: 20, fontSize: 13 }}>
+          {estimatedAll !== null && (
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+              <span style={{ color: "var(--text-muted)" }}>Available to withdraw</span>
+              <span style={{ fontFamily: "var(--mono)", fontWeight: 600 }}>
+                ~{estimatedAll.toFixed(decimals === 9 ? 5 : 2)} {asset}
+              </span>
+            </div>
+          )}
           <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <span style={{ color: "var(--text-muted)" }}>Your shares</span>
-            <span style={{ fontFamily: "var(--mono)" }}>{fmt(userShares / 1e6)}</span>
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
             <span style={{ color: "var(--text-muted)" }}>Perf fee (on profit)</span>
             <span>{(vault.perfFeeBps / 100).toFixed(1)}%</span>
           </div>
+          <button
+            onClick={() => handleWithdraw(true)}
+            disabled={busy}
+            style={{
+              marginTop: 12, width: "100%", padding: "9px 0",
+              background: "transparent", border: "1px solid var(--border)",
+              borderRadius: 8, color: "var(--text)", fontWeight: 600, fontSize: 13,
+              cursor: busy ? "not-allowed" : "pointer", fontFamily: "Inter, sans-serif",
+              opacity: busy ? 0.5 : 1,
+            }}
+          >
+            {busy ? "Processing..." : `Withdraw All${estimatedAll !== null ? ` (~${estimatedAll.toFixed(decimals === 9 ? 5 : 2)} ${asset})` : ""}`}
+          </button>
         </div>
       )}
 
-      <Button
-        fullWidth
-        size="lg"
-        onClick={handleAction}
-        disabled={!publicKey || !amount || parseFloat(amount) <= 0 || busy}
-      >
-        {!publicKey
-          ? "Connect wallet first"
-          : busy
-          ? "Processing..."
-          : tab === "deposit"
-          ? `Deposit ${amount || "0"} ${asset}`
-          : `Withdraw ${amount || "0"} ${asset}`}
-      </Button>
+      {tab === "deposit" ? (
+        <Button
+          fullWidth
+          size="lg"
+          onClick={handleDeposit}
+          disabled={!publicKey || !amount || parseFloat(amount) <= 0 || busy}
+        >
+          {!publicKey ? "Connect wallet first" : busy ? "Processing..." : `Deposit ${amount || "0"} ${asset}`}
+        </Button>
+      ) : (
+        <Button
+          fullWidth
+          size="lg"
+          onClick={() => handleWithdraw(false)}
+          disabled={!publicKey || !amount || parseFloat(amount) <= 0 || busy}
+        >
+          {!publicKey ? "Connect wallet first" : busy ? "Processing..." : `Withdraw ${amount || "0"} ${asset}`}
+        </Button>
+      )}
 
       {!publicKey && (
         <p style={{ color: "var(--text-muted)", fontSize: 12, textAlign: "center", marginTop: 10 }}>

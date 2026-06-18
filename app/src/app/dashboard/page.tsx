@@ -255,6 +255,7 @@ export default function Dashboard() {
               onDeposit={deposit}
               onWithdraw={withdraw}
               userShares={primaryPosition?.shares || 0}
+              userCurrentValue={primaryPosition?.currentValue}
             />
           ) : (
             <div style={{ color: "var(--text-muted)", padding: 20 }}>
