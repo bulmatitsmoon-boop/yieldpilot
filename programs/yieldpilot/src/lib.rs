@@ -754,7 +754,7 @@ pub struct InitializeVault<'info> {
         seeds = [b"vault", mint.key().as_ref(), admin.key().as_ref()],
         bump
     )]
-    pub vault: Account<'info, Vault>,
+    pub vault: Box<Account<'info, Vault>>,
 
     /// CHECK: PDA, no data
     #[account(seeds = [b"vault", vault.key().as_ref()], bump)]

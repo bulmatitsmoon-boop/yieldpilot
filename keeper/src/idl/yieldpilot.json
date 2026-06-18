@@ -7,6 +7,30 @@
   },
   "instructions": [
     {
+      "name": "accept_admin",
+      "discriminator": [
+        112,
+        42,
+        45,
+        90,
+        116,
+        181,
+        13,
+        170
+      ],
+      "accounts": [
+        {
+          "name": "new_admin",
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "compound",
       "discriminator": [
         165,
@@ -20,11 +44,8 @@
       ],
       "accounts": [
         {
-          "name": "admin",
-          "signer": true,
-          "relations": [
-            "vault"
-          ]
+          "name": "keeper",
+          "signer": true
         },
         {
           "name": "vault",
@@ -47,12 +68,9 @@
       ],
       "accounts": [
         {
-          "name": "admin",
+          "name": "keeper",
           "writable": true,
-          "signer": true,
-          "relations": [
-            "vault"
-          ]
+          "signer": true
         },
         {
           "name": "vault",
@@ -143,12 +161,9 @@
       ],
       "accounts": [
         {
-          "name": "admin",
+          "name": "keeper",
           "writable": true,
-          "signer": true,
-          "relations": [
-            "vault"
-          ]
+          "signer": true
         },
         {
           "name": "vault",
@@ -622,6 +637,70 @@
       ]
     },
     {
+      "name": "propose_admin",
+      "discriminator": [
+        121,
+        214,
+        199,
+        212,
+        87,
+        39,
+        117,
+        234
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "vault"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "new_admin",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "raise_tvl_cap",
+      "discriminator": [
+        189,
+        18,
+        217,
+        77,
+        58,
+        73,
+        228,
+        195
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "vault"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "new_cap",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "rebalance",
       "discriminator": [
         108,
@@ -635,11 +714,8 @@
       ],
       "accounts": [
         {
-          "name": "admin",
-          "signer": true,
-          "relations": [
-            "vault"
-          ]
+          "name": "keeper",
+          "signer": true
         },
         {
           "name": "vault",
@@ -669,12 +745,9 @@
       ],
       "accounts": [
         {
-          "name": "admin",
+          "name": "keeper",
           "writable": true,
-          "signer": true,
-          "relations": [
-            "vault"
-          ]
+          "signer": true
         },
         {
           "name": "vault",
@@ -765,12 +838,9 @@
       ],
       "accounts": [
         {
-          "name": "admin",
+          "name": "keeper",
           "writable": true,
-          "signer": true,
-          "relations": [
-            "vault"
-          ]
+          "signer": true
         },
         {
           "name": "vault",
@@ -894,16 +964,16 @@
       ]
     },
     {
-      "name": "set_gate_mint",
+      "name": "set_keeper",
       "discriminator": [
-        127,
-        39,
-        248,
-        229,
-        20,
-        204,
-        166,
-        10
+        102,
+        94,
+        23,
+        78,
+        157,
+        222,
+        243,
+        214
       ],
       "accounts": [
         {
@@ -920,7 +990,7 @@
       ],
       "args": [
         {
-          "name": "gate_mint",
+          "name": "new_keeper",
           "type": "pubkey"
         }
       ]
@@ -958,70 +1028,6 @@
       ]
     },
     {
-      "name": "set_treasury",
-      "discriminator": [
-        57,
-        97,
-        196,
-        95,
-        195,
-        206,
-        106,
-        136
-      ],
-      "accounts": [
-        {
-          "name": "admin",
-          "signer": true,
-          "relations": [
-            "vault"
-          ]
-        },
-        {
-          "name": "vault",
-          "writable": true
-        }
-      ],
-      "args": [
-        {
-          "name": "treasury",
-          "type": "pubkey"
-        }
-      ]
-    },
-    {
-      "name": "set_tvl_cap",
-      "discriminator": [
-        251,
-        62,
-        244,
-        225,
-        95,
-        215,
-        48,
-        0
-      ],
-      "accounts": [
-        {
-          "name": "admin",
-          "signer": true,
-          "relations": [
-            "vault"
-          ]
-        },
-        {
-          "name": "vault",
-          "writable": true
-        }
-      ],
-      "args": [
-        {
-          "name": "new_cap",
-          "type": "u64"
-        }
-      ]
-    },
-    {
       "name": "update_settings",
       "discriminator": [
         81,
@@ -1054,10 +1060,6 @@
         {
           "name": "auto_rebalance",
           "type": "bool"
-        },
-        {
-          "name": "perf_fee_bps",
-          "type": "u64"
         }
       ]
     },
@@ -1158,6 +1160,13 @@
           "optional": true
         },
         {
+          "name": "user_gate_account",
+          "docs": [
+            "Optional: user's gate token account. Used to determine fee tier at withdrawal."
+          ],
+          "optional": true
+        },
+        {
           "name": "token_program",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         }
@@ -1165,6 +1174,10 @@
       "args": [
         {
           "name": "shares",
+          "type": "u64"
+        },
+        {
+          "name": "min_amount_out",
           "type": "u64"
         }
       ]
@@ -1437,6 +1450,10 @@
           {
             "name": "gate_mint",
             "type": "pubkey"
+          },
+          {
+            "name": "keeper",
+            "type": "pubkey"
           }
         ]
       }
@@ -1603,6 +1620,10 @@
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "tier_at_deposit",
+            "type": "u8"
           }
         ]
       }
@@ -1614,6 +1635,10 @@
         "fields": [
           {
             "name": "admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "keeper",
             "type": "pubkey"
           },
           {
@@ -1634,6 +1659,10 @@
           },
           {
             "name": "gate_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "pending_admin",
             "type": "pubkey"
           },
           {

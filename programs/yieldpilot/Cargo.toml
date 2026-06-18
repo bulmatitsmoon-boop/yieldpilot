@@ -18,9 +18,6 @@ default = []
 [dependencies]
 anchor-lang  = { version = "=0.31.0", features = ["init-if-needed"] }
 anchor-spl   = { version = "=0.31.0", features = ["token", "associated_token"] }
-# Pin to pre-edition2024 / Rust-1.79-compatible versions
-blake3       = "=1.5.4"
-cpufeatures  = "=0.2.11"
 hashbrown    = "=0.14.5"
 indexmap     = "=2.3.0"
 zeroize      = "=1.7.0"
