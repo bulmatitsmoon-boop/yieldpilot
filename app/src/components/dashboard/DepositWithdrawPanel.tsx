@@ -104,7 +104,7 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
           </label>
           {walletBalance !== null && (
             <span style={{ color: "var(--text-muted)", fontSize: 12 }}>
-              Balance: {fmt(walletBalance)} {asset}
+              Balance: {walletBalance.toFixed(decimals === 9 ? 5 : 2)} {asset}
             </span>
           )}
         </div>
