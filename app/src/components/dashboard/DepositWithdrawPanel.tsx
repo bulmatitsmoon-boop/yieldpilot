@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useWallet, useConnection } from "@solana/wallet-adapter-react";
 import * as anchor from "@coral-xyz/anchor";
 import { getAssociatedTokenAddress } from "@solana/spl-token";
@@ -10,6 +10,14 @@ import type { ProtocolApy } from "@/hooks/useApys";
 const DECIMALS: Record<string, number> = {
   USDC: 6, USDT: 6, SOL: 9, ETH: 8,
 };
+
+const WSOL_MINT = "So11111111111111111111111111111111111111112";
+
+function mintToSymbol(mint: string): string {
+  if (mint === WSOL_MINT) return "SOL";
+  if (mint === "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU") return "USDC";
+  return mint.slice(0, 4);
+}
 
 interface Props {
   vault: VaultInfo;
@@ -27,20 +35,26 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
   const [busy, setBusy] = useState(false);
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
 
-  const asset = vault.mint.slice(0, 4); // rough guess; in prod map mint→symbol
+  const asset = mintToSymbol(vault.mint);
   const decimals = DECIMALS[asset] || 6;
+  const isNativeSOL = vault.mint === WSOL_MINT;
   const bestApy = apys.sort((a, b) => b.apyBps - a.apyBps)[0];
+
+  useEffect(() => { fetchBalance(); }, [publicKey, vault.mint]);
 
   // Fetch user wallet balance when they interact
   const fetchBalance = async () => {
     if (!publicKey) return;
     try {
-      const ata = await getAssociatedTokenAddress(
-        new (await import("@solana/web3.js")).PublicKey(vault.mint),
-        publicKey
-      );
-      const info = await connection.getTokenAccountBalance(ata);
-      setWalletBalance(info.value.uiAmount || 0);
+      if (isNativeSOL) {
+        const lamports = await connection.getBalance(publicKey);
+        setWalletBalance(lamports / 1e9);
+      } else {
+        const { PublicKey } = await import("@solana/web3.js");
+        const ata = await getAssociatedTokenAddress(new PublicKey(vault.mint), publicKey);
+        const info = await connection.getTokenAccountBalance(ata);
+        setWalletBalance(info.value.uiAmount || 0);
+      }
     } catch {
       setWalletBalance(0);
     }
