@@ -81,6 +81,7 @@ export function useYieldPilot(vaultAddresses: string[]) {
   const [txStatus, setTxStatus] = useState<TxStatus>("idle");
   const [txError, setTxError] = useState<string | null>(null);
   const [lastTxSig, setLastTxSig] = useState<string | null>(null);
+  const [txHistory, setTxHistory] = useState<{ sig: string; type: string; ts: number }[]>([]);
 
   // Build Anchor program (read-only, no wallet needed for fetching)
   const getProgram = useCallback(() => {
@@ -214,11 +215,8 @@ export function useYieldPilot(vaultAddresses: string[]) {
         const sig = await fn();
         setLastTxSig(sig);
         setTxStatus("success");
-        // Refresh state after tx confirms
-        setTimeout(() => {
-          fetchVaults();
-          fetchPositions();
-        }, 2000);
+        setTxHistory(h => [{ sig, type: "transaction", ts: Date.now() }, ...h].slice(0, 20));
+        setTimeout(() => { fetchVaults(); fetchPositions(); }, 2000);
         setTimeout(() => setTxStatus("idle"), 5000);
         return sig;
       } catch (err: any) {
@@ -367,6 +365,7 @@ export function useYieldPilot(vaultAddresses: string[]) {
     txStatus,
     txError,
     lastTxSig,
+    txHistory,
     deposit,
     withdraw,
     refresh: () => { fetchVaults(); fetchPositions(); },

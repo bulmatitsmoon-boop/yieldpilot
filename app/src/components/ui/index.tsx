@@ -116,23 +116,40 @@ export function Button({
 export function TxBanner({ status, error, sig }: { status: string; error: string | null; sig: string | null }) {
   if (status === "idle") return null;
 
-  const configs: Record<string, { bg: string; border: string; icon: string; msg: string }> = {
-    signing:    { bg: "#0c1a2e", border: "#1e40af", icon: "⏳", msg: "Waiting for wallet signature..." },
-    confirming: { bg: "#0c1a2e", border: "#1e40af", icon: "🔄", msg: "Confirming on-chain..." },
-    success:    { bg: "#052e16", border: "#166534", icon: "✓", msg: "Transaction confirmed!" },
-    error:      { bg: "#450a0a", border: "#7f1d1d", icon: "✕", msg: error || "Transaction failed" },
+  const configs: Record<string, { bg: string; border: string; color: string; icon: string; msg: string }> = {
+    signing:    { bg: "#0c1a2e", border: "#1e40af", color: "#93c5fd", icon: "⏳", msg: "Waiting for wallet signature..." },
+    confirming: { bg: "#0c1a2e", border: "#1e40af", color: "#93c5fd", icon: "🔄", msg: "Confirming on-chain..." },
+    success:    { bg: "#052e16", border: "#166534", color: "#86efac", icon: "✓", msg: "Transaction confirmed!" },
+    error:      { bg: "#450a0a", border: "#7f1d1d", color: "#fca5a5", icon: "✕", msg: error || "Transaction failed" },
   };
   const c = configs[status];
   if (!c) return null;
 
   return (
-    <div style={{ background: c.bg, border: `1px solid ${c.border}`, borderRadius: 10, padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 16 }}>
-      <span style={{ fontSize: 13 }}>{c.icon} {c.msg}</span>
+    <div style={{
+      position: "fixed", bottom: 24, right: 24, zIndex: 1000,
+      background: c.bg, border: `1px solid ${c.border}`,
+      borderRadius: 12, padding: "16px 20px",
+      display: "flex", flexDirection: "column", gap: 8,
+      minWidth: 300, maxWidth: 420,
+      boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+      animation: "slideIn 0.2s ease",
+    }}>
+      <style>{`@keyframes slideIn { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }`}</style>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span style={{ fontSize: 16 }}>{c.icon}</span>
+        <span style={{ color: c.color, fontWeight: 600, fontSize: 14 }}>{c.msg}</span>
+      </div>
       {sig && status === "success" && (
-        <a href={`https://solscan.io/tx/${sig}?cluster=devnet`} target="_blank" rel="noopener noreferrer"
-          style={{ color: "var(--purple-light)", fontSize: 12, textDecoration: "none" }}>
-          View on Solscan ↗
-        </a>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <div style={{ color: "var(--text-muted)", fontSize: 11, fontFamily: "var(--mono)", wordBreak: "break-all" }}>
+            {sig.slice(0, 20)}...{sig.slice(-8)}
+          </div>
+          <a href={`https://solscan.io/tx/${sig}?cluster=devnet`} target="_blank" rel="noopener noreferrer"
+            style={{ color: "var(--purple-light)", fontSize: 12, textDecoration: "none", fontWeight: 600 }}>
+            View on Solscan ↗
+          </a>
+        </div>
       )}
     </div>
   );
