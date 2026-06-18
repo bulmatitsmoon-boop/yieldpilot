@@ -24,7 +24,7 @@ export default function Dashboard() {
   const { setVisible } = useWalletModal();
   const [activeTab, setActiveTab] = useState<Tab>("overview");
 
-  const { vaults, positions, loading, txStatus, txError, lastTxSig, deposit, withdraw, refresh } =
+  const { vaults, positions, loading, txStatus, txError, lastTxSig, txHistory, deposit, withdraw, refresh } =
     useYieldPilot(VAULT_ADDRESSES);
   const { apys, loading: apyLoading } = useApys();
 
@@ -190,6 +190,33 @@ export default function Dashboard() {
               })
             )}
           </Card>
+
+          {/* Transaction history */}
+          {txHistory.length > 0 && (
+            <Card>
+              <CardHeader title="Transaction History" />
+              {txHistory.map((tx, i) => (
+                <div key={i} style={{ padding: "12px 20px", borderTop: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--text-muted)" }}>
+                      {tx.sig.slice(0, 16)}...{tx.sig.slice(-8)}
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 2 }}>
+                      {new Date(tx.ts).toLocaleTimeString()}
+                    </div>
+                  </div>
+                  <a
+                    href={`https://solscan.io/tx/${tx.sig}?cluster=devnet`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ color: "var(--purple-light)", fontSize: 12, textDecoration: "none", fontWeight: 600 }}
+                  >
+                    Solscan ↗
+                  </a>
+                </div>
+              ))}
+            </Card>
+          )}
 
           {/* Protocol snapshot */}
           <ProtocolTable apys={apys} loading={apyLoading} />
