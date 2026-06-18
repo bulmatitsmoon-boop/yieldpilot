@@ -272,7 +272,7 @@ export default function Dashboard() {
                   ["1. Deposit", "You deposit tokens into the vault. You receive shares representing your ownership."],
                   ["2. Auto-optimize", "The keeper bot moves funds to highest-yield protocols every 15 minutes."],
                   ["3. Auto-compound", "Rewards are harvested and reinvested every hour, growing your position."],
-                  ["4. Withdraw anytime", "Burn your shares to receive your tokens plus earned yield, minus a small performance fee."],
+                  ["4. Withdraw anytime", "Withdraw your tokens plus any earned yield at any time, minus a small performance fee."],
                 ].map(([title, desc]) => (
                   <div key={title}>
                     <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>{title}</div>
