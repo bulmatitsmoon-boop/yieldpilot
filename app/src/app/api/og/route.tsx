@@ -36,10 +36,14 @@ export async function GET() {
         <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 32 }}>
           <div style={{
             width: 64, height: 64, borderRadius: 16,
-            background: "linear-gradient(135deg, #7c3aed, #06b6d4)",
+            background: "#7c3aed",
             display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 36,
-          }}>⚡</div>
+          }}>
+            <svg width="32" height="32" viewBox="0 0 14 14" fill="none">
+              <path d="M7 1L12 4V10L7 13L2 10V4L7 1Z" stroke="#fff" strokeWidth="1.5" strokeLinejoin="round"/>
+              <circle cx="7" cy="7" r="2" fill="#fff"/>
+            </svg>
+          </div>
           <span style={{ fontSize: 52, fontWeight: 900, color: "#e2e8f0", letterSpacing: "-2px" }}>
             YieldPilot
           </span>
@@ -79,7 +83,7 @@ export async function GET() {
           color: "#374151", fontSize: 18, letterSpacing: "0.5px",
           display: "flex",
         }}>
-          yieldpilotapp.netlify.app
+          yieldpilot-chi.vercel.app
         </div>
       </div>
     ),
