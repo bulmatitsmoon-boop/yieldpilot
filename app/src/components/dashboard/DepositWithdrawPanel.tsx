@@ -100,7 +100,7 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
       <div style={{ marginBottom: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
           <label style={{ color: "var(--text-muted)", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-            {tab === "deposit" ? "Amount to deposit" : "Shares to burn"}
+            {tab === "deposit" ? "Amount to deposit" : "Amount to withdraw"}
           </label>
           {walletBalance !== null && (
             <span style={{ color: "var(--text-muted)", fontSize: 12 }}>
@@ -171,7 +171,7 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
           ? "Processing..."
           : tab === "deposit"
           ? `Deposit ${amount || "0"} ${asset}`
-          : `Withdraw ${amount || "0"} shares`}
+          : `Withdraw ${amount || "0"} ${asset}`}
       </Button>
 
       {!publicKey && (
