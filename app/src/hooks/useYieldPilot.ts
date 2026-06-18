@@ -16,7 +16,7 @@ import {
 import IDL from "@/idl/yieldpilot.json";
 
 const PROGRAM_ID = new PublicKey(
-  process.env.NEXT_PUBLIC_PROGRAM_ID || "YPiLt1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ12"
+  process.env.NEXT_PUBLIC_PROGRAM_ID || "8c7Boyk91MWkn5jabf5CnYD8DrG6p4hYm9eDdAAWXEKH"
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
