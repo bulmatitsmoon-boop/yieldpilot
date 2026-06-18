@@ -26,12 +26,13 @@ interface Props {
   onWithdraw: (vaultAddress: string, mint: string, shares: anchor.BN) => Promise<any>;
   userShares: number;
   userCurrentValue?: number;
+  mode: "deposit" | "withdraw";
 }
 
-export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userShares, userCurrentValue }: Props) {
+export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userShares, userCurrentValue, mode }: Props) {
   const { publicKey } = useWallet();
   const { connection } = useConnection();
-  const [tab, setTab] = useState<"deposit" | "withdraw">("deposit");
+  const tab = mode;
   const [amount, setAmount] = useState("");
   const [busy, setBusy] = useState(false);
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
@@ -90,23 +91,9 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
     }
   };
 
-  const tabStyle = (t: string): React.CSSProperties => ({
-    flex: 1, padding: "9px 0", border: "none", cursor: "pointer",
-    background: tab === t ? "var(--surface-2)" : "transparent",
-    color: tab === t ? "var(--text)" : "var(--text-muted)",
-    fontWeight: 600, fontSize: 13, borderRadius: 6, fontFamily: "Inter, sans-serif",
-    transition: "all 0.15s",
-  });
-
   return (
     <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 24, maxWidth: 400 }}>
       <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 20 }}>{vault.name}</div>
-
-      {/* Tab switcher */}
-      <div style={{ display: "flex", background: "var(--bg)", padding: 3, borderRadius: 8, marginBottom: 20, gap: 3 }}>
-        <button onClick={() => setTab("deposit")} style={tabStyle("deposit")}>Deposit</button>
-        <button onClick={() => setTab("withdraw")} style={tabStyle("withdraw")}>Withdraw</button>
-      </div>
 
       {/* Amount input */}
       <div style={{ marginBottom: 16 }}>

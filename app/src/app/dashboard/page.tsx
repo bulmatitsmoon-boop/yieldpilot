@@ -17,7 +17,7 @@ const VAULT_ADDRESSES = (process.env.NEXT_PUBLIC_VAULT_ADDRESSES || "")
   .map((s) => s.trim())
   .filter(Boolean);
 
-type Tab = "overview" | "protocols" | "deposit";
+type Tab = "overview" | "protocols" | "deposit" | "withdraw";
 
 export default function Dashboard() {
   const { publicKey, connected } = useWallet();
@@ -143,7 +143,7 @@ export default function Dashboard() {
 
       {/* Tabs */}
       <div style={{ display: "flex", gap: 4, marginBottom: 20, background: "var(--surface)", padding: 4, borderRadius: 10, border: "1px solid var(--border)", width: "fit-content" }}>
-        {(["overview", "protocols", "deposit"] as Tab[]).map((t) => (
+        {(["overview", "protocols", "deposit", "withdraw"] as Tab[]).map((t) => (
           <button key={t} onClick={() => setActiveTab(t)} style={tabStyle(t)}>
             {t.charAt(0).toUpperCase() + t.slice(1)}
           </button>
@@ -228,48 +228,27 @@ export default function Dashboard() {
         <ProtocolTable apys={apys} loading={apyLoading} />
       )}
 
-      {/* ── Deposit/Withdraw ─────────────────────────────────────────────── */}
+      {/* ── Deposit ──────────────────────────────────────────────────────── */}
       {activeTab === "deposit" && (
         <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
           <div style={{ width: "100%", display: "flex", gap: 8, marginBottom: 4 }}>
             {vaults.map((v, i) => (
-              <button
-                key={v.address}
-                onClick={() => setSelectedVaultIdx(i)}
-                style={{
-                  padding: "8px 20px", borderRadius: 8, border: "1px solid var(--border)",
-                  cursor: "pointer", fontWeight: 600, fontSize: 13, fontFamily: "Inter, sans-serif",
-                  background: selectedVaultIdx === i ? "var(--purple)" : "var(--surface)",
-                  color: selectedVaultIdx === i ? "#fff" : "var(--text-muted)",
-                  transition: "all 0.15s",
-                }}
-              >
+              <button key={v.address} onClick={() => setSelectedVaultIdx(i)} style={{ padding: "8px 20px", borderRadius: 8, border: "1px solid var(--border)", cursor: "pointer", fontWeight: 600, fontSize: 13, fontFamily: "Inter, sans-serif", background: selectedVaultIdx === i ? "var(--purple)" : "var(--surface)", color: selectedVaultIdx === i ? "#fff" : "var(--text-muted)", transition: "all 0.15s" }}>
                 {v.name}
               </button>
             ))}
           </div>
           {primaryVault ? (
-            <DepositWithdrawPanel
-              vault={primaryVault}
-              apys={apys}
-              onDeposit={deposit}
-              onWithdraw={withdraw}
-              userShares={primaryPosition?.shares || 0}
-              userCurrentValue={primaryPosition?.currentValue}
-            />
+            <DepositWithdrawPanel vault={primaryVault} apys={apys} onDeposit={deposit} onWithdraw={withdraw} userShares={primaryPosition?.shares || 0} userCurrentValue={primaryPosition?.currentValue} mode="deposit" />
           ) : (
-            <div style={{ color: "var(--text-muted)", padding: 20 }}>
-              {loading ? "Loading vault..." : "No vault configured. Set NEXT_PUBLIC_VAULT_ADDRESSES in .env.local"}
-            </div>
+            <div style={{ color: "var(--text-muted)", padding: 20 }}>{loading ? "Loading vault..." : "No vault configured."}</div>
           )}
-
-          {/* Info panel */}
           <div style={{ flex: 1, minWidth: 260 }}>
             <Card>
               <CardHeader title="How it works" />
               <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 16 }}>
                 {[
-                  ["1. Deposit", "You deposit tokens into the vault. You receive shares representing your ownership."],
+                  ["1. Deposit", "You deposit tokens into the vault."],
                   ["2. Auto-optimize", "The keeper bot moves funds to highest-yield protocols every 15 minutes."],
                   ["3. Auto-compound", "Rewards are harvested and reinvested every hour, growing your position."],
                   ["4. Withdraw anytime", "Withdraw your tokens plus any earned yield at any time, minus a small performance fee."],
@@ -282,6 +261,24 @@ export default function Dashboard() {
               </div>
             </Card>
           </div>
+        </div>
+      )}
+
+      {/* ── Withdraw ─────────────────────────────────────────────────────── */}
+      {activeTab === "withdraw" && (
+        <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
+          <div style={{ width: "100%", display: "flex", gap: 8, marginBottom: 4 }}>
+            {vaults.map((v, i) => (
+              <button key={v.address} onClick={() => setSelectedVaultIdx(i)} style={{ padding: "8px 20px", borderRadius: 8, border: "1px solid var(--border)", cursor: "pointer", fontWeight: 600, fontSize: 13, fontFamily: "Inter, sans-serif", background: selectedVaultIdx === i ? "var(--purple)" : "var(--surface)", color: selectedVaultIdx === i ? "#fff" : "var(--text-muted)", transition: "all 0.15s" }}>
+                {v.name}
+              </button>
+            ))}
+          </div>
+          {primaryVault ? (
+            <DepositWithdrawPanel vault={primaryVault} apys={apys} onDeposit={deposit} onWithdraw={withdraw} userShares={primaryPosition?.shares || 0} userCurrentValue={primaryPosition?.currentValue} mode="withdraw" />
+          ) : (
+            <div style={{ color: "var(--text-muted)", padding: 20 }}>{loading ? "Loading vault..." : "No vault configured."}</div>
+          )}
         </div>
       )}
     </div>
