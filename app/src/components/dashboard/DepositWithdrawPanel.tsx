@@ -158,32 +158,32 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
       )}
 
       {/* Withdraw info + Withdraw All */}
-      {tab === "withdraw" && userShares > 0 && (
+      {tab === "withdraw" && (
         <div style={{ background: "var(--bg)", borderRadius: 8, padding: "12px 14px", marginBottom: 20, fontSize: 13 }}>
-          {estimatedAll !== null && (
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-              <span style={{ color: "var(--text-muted)" }}>Available to withdraw</span>
-              <span style={{ fontFamily: "var(--mono)", fontWeight: 600 }}>
-                ~{estimatedAll.toFixed(decimals === 9 ? 5 : 2)} {asset}
-              </span>
-            </div>
-          )}
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+            <span style={{ color: "var(--text-muted)" }}>Available to withdraw</span>
+            <span style={{ fontFamily: "var(--mono)", fontWeight: 600 }}>
+              {estimatedAll !== null ? `~${estimatedAll.toFixed(decimals === 9 ? 5 : 2)} ${asset}` : "—"}
+            </span>
+          </div>
           <div style={{ display: "flex", justifyContent: "space-between" }}>
             <span style={{ color: "var(--text-muted)" }}>Perf fee (on profit)</span>
             <span>{(vault.perfFeeBps / 100).toFixed(1)}%</span>
           </div>
           <button
             onClick={() => handleWithdraw(true)}
-            disabled={busy}
+            disabled={busy || userShares === 0}
             style={{
               marginTop: 12, width: "100%", padding: "9px 0",
               background: "transparent", border: "1px solid var(--border)",
-              borderRadius: 8, color: "var(--text)", fontWeight: 600, fontSize: 13,
-              cursor: busy ? "not-allowed" : "pointer", fontFamily: "Inter, sans-serif",
-              opacity: busy ? 0.5 : 1,
+              borderRadius: 8, color: userShares === 0 ? "var(--text-muted)" : "var(--text)",
+              fontWeight: 600, fontSize: 13,
+              cursor: (busy || userShares === 0) ? "not-allowed" : "pointer",
+              fontFamily: "Inter, sans-serif",
+              opacity: (busy || userShares === 0) ? 0.5 : 1,
             }}
           >
-            {busy ? "Processing..." : `Withdraw All${estimatedAll !== null ? ` (~${estimatedAll.toFixed(decimals === 9 ? 5 : 2)} ${asset})` : ""}`}
+            {busy ? "Processing..." : estimatedAll !== null ? `Withdraw All (~${estimatedAll.toFixed(decimals === 9 ? 5 : 2)} ${asset})` : "Withdraw All"}
           </button>
         </div>
       )}
