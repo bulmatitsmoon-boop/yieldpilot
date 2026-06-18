@@ -29,15 +29,31 @@ export default function Dashboard() {
   const { apys, loading: apyLoading } = useApys();
 
   // ── Derived stats ─────────────────────────────────────────────────────────
-  const mintDecimals = (mint: string) => mint === "So11111111111111111111111111111111111111112" ? 1e9 : 1e6;
-  const totalDeposited = positions.reduce((s, p) => {
+  const WSOL = "So11111111111111111111111111111111111111112";
+  const mintDecimals = (mint: string) => mint === WSOL ? 1e9 : 1e6;
+  const mintSymbol = (mint: string) => mint === WSOL ? "SOL" : "USDC";
+
+  // Group deposits by token so we can show "0.1 SOL" and "50 USDC" separately
+  const depositsByToken = positions.reduce((acc, p) => {
     const vault = vaults.find(v => v.address === p.vault);
-    return s + p.currentValue / mintDecimals(vault?.mint || "");
-  }, 0);
-  const totalEarned = positions.reduce((s, p) => {
+    const sym = mintSymbol(vault?.mint || "");
+    const dec = mintDecimals(vault?.mint || "");
+    acc[sym] = (acc[sym] || 0) + p.currentValue / dec;
+    return acc;
+  }, {} as Record<string, number>);
+
+  const earnedByToken = positions.reduce((acc, p) => {
     const vault = vaults.find(v => v.address === p.vault);
-    return s + p.earnedValue / mintDecimals(vault?.mint || "");
-  }, 0);
+    const sym = mintSymbol(vault?.mint || "");
+    const dec = mintDecimals(vault?.mint || "");
+    acc[sym] = (acc[sym] || 0) + p.earnedValue / dec;
+    return acc;
+  }, {} as Record<string, number>);
+
+  const fmtTokens = (byToken: Record<string, number>) =>
+    Object.keys(byToken).length === 0
+      ? "—"
+      : Object.entries(byToken).map(([sym, amt]) => `${fmt(amt, 4)} ${sym}`).join(" · ");
   const avgApy = apys.length ? apys.reduce((s, a) => s + a.apyPercent, 0) / apys.length : 0;
   const bestApy = apys.length ? Math.max(...apys.map((a) => a.apyPercent)) : 0;
   const bestProtocol = apys.find((a) => a.apyPercent === bestApy);
@@ -93,8 +109,8 @@ export default function Dashboard() {
 
       {/* Stats row */}
       <div style={{ display: "flex", gap: 12, marginBottom: 24, flexWrap: "wrap" }}>
-        <StatCard label="Your Deposits" value={`$${fmt(totalDeposited)}`} sub={positions.length ? `${positions.length} active position${positions.length > 1 ? "s" : ""}` : "No positions yet"} />
-        <StatCard label="Total Earned" value={`$${fmt(totalEarned)}`} sub="all time" accent="var(--green)" />
+        <StatCard label="Your Deposits" value={fmtTokens(depositsByToken)} sub={positions.length ? `${positions.length} active position${positions.length > 1 ? "s" : ""}` : "No positions yet"} />
+        <StatCard label="Total Earned" value={fmtTokens(earnedByToken)} sub="all time" accent="var(--green)" />
         <StatCard label="Avg Protocol APY" value={`${fmt(avgApy)}%`} sub="across protocols" accent="var(--purple-light)" />
         <StatCard label="Best Available" value={`${fmt(bestApy)}%`} sub={bestProtocol ? `${bestProtocol.name} · ${bestProtocol.asset}` : ""} accent="var(--yellow)" />
       </div>
