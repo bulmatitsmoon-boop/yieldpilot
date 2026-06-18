@@ -33,8 +33,9 @@ export default function Dashboard() {
   const bestApy = apys.length ? Math.max(...apys.map((a) => a.apyPercent)) : 0;
   const bestProtocol = apys.find((a) => a.apyPercent === bestApy);
 
-  const primaryVault = vaults[0];
-  const primaryPosition = positions[0];
+  const [selectedVaultIdx, setSelectedVaultIdx] = useState(0);
+  const primaryVault = vaults[selectedVaultIdx] ?? vaults[0];
+  const primaryPosition = positions[selectedVaultIdx] ?? positions[0];
 
   // ── Tabs ──────────────────────────────────────────────────────────────────
   const tabStyle = (t: Tab): React.CSSProperties => ({
@@ -178,6 +179,23 @@ export default function Dashboard() {
       {/* ── Deposit/Withdraw ─────────────────────────────────────────────── */}
       {activeTab === "deposit" && (
         <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
+          <div style={{ width: "100%", display: "flex", gap: 8, marginBottom: 4 }}>
+            {vaults.map((v, i) => (
+              <button
+                key={v.address}
+                onClick={() => setSelectedVaultIdx(i)}
+                style={{
+                  padding: "8px 20px", borderRadius: 8, border: "1px solid var(--border)",
+                  cursor: "pointer", fontWeight: 600, fontSize: 13, fontFamily: "Inter, sans-serif",
+                  background: selectedVaultIdx === i ? "var(--purple)" : "var(--surface)",
+                  color: selectedVaultIdx === i ? "#fff" : "var(--text-muted)",
+                  transition: "all 0.15s",
+                }}
+              >
+                {v.name}
+              </button>
+            ))}
+          </div>
           {primaryVault ? (
             <DepositWithdrawPanel
               vault={primaryVault}
