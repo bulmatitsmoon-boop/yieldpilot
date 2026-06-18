@@ -319,20 +319,21 @@ export function useYieldPilot(vaultAddresses: string[]) {
         const userTokenAccount = await getAssociatedTokenAddress(mintPubkey, publicKey);
         const userSharesAccount = await getAssociatedTokenAddress(sharesMint, publicKey);
 
-        const vaultRawForWithdraw = await (program.account as any)["vault"].fetch(vaultPubkey);
-        const gateMint = new PublicKey((vaultRawForWithdraw.gateMint as PublicKey).toBase58());
+        const gateMint = new PublicKey((vaultRaw.gateMint as PublicKey).toBase58());
         const isGatingEnabled = gateMint.toBase58() !== PublicKey.default.toBase58();
         const userGateAccount = isGatingEnabled
           ? await getAssociatedTokenAddress(gateMint, publicKey)
           : null;
 
-        // 1% slippage tolerance: user accepts up to 1% less than the simulated amount.
-        // The program enforces this on-chain so the tx fails rather than silently underpaying.
-        const vaultForWithdraw = await (program.account as any)["vault"].fetch(vaultPubkey);
-        const totalShares = (vaultForWithdraw.totalShares as anchor.BN).toNumber();
-        const vaultTokenAcct = await connection.getTokenAccountBalance(
-          new PublicKey((vaultForWithdraw.vaultTokenAccount as PublicKey).toBase58())
-        );
+        // Create user token account if it doesn't exist so the program can send tokens back
+        const preIxs: anchor.web3.TransactionInstruction[] = [];
+        const ataInfo = await connection.getAccountInfo(userTokenAccount);
+        if (!ataInfo) {
+          preIxs.push(createAssociatedTokenAccountInstruction(publicKey, userTokenAccount, publicKey, mintPubkey));
+        }
+
+        const totalShares = (vaultRaw.totalShares as anchor.BN).toNumber();
+        const vaultTokenAcct = await connection.getTokenAccountBalance(vaultTokenAccount);
         const vaultBal = vaultTokenAcct.value.uiAmount || 0;
         const estimatedOut = totalShares > 0 ? (shares.toNumber() / totalShares) * vaultBal : 0;
         const minAmountOut = new anchor.BN(Math.floor(estimatedOut * 0.99 * Math.pow(10, vaultTokenAcct.value.decimals)));
@@ -352,6 +353,7 @@ export function useYieldPilot(vaultAddresses: string[]) {
             userGateAccount: userGateAccount as any,
             tokenProgram: TOKEN_PROGRAM_ID,
           })
+          .preInstructions(preIxs)
           .rpc();
       });
     },
