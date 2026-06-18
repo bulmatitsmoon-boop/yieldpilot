@@ -14,7 +14,12 @@ export function Footer() {
           {/* Brand */}
           <div style={{ maxWidth: 260 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-              <div style={{ width: 28, height: 28, borderRadius: 7, background: "linear-gradient(135deg, #7c3aed, #06b6d4)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>⚡</div>
+              <div style={{ width: 28, height: 28, borderRadius: 7, background: "var(--purple)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                    <path d="M7 1L12 4V10L7 13L2 10V4L7 1Z" stroke="#fff" strokeWidth="1.5" strokeLinejoin="round"/>
+                    <circle cx="7" cy="7" r="2" fill="#fff"/>
+                  </svg>
+                </div>
               <span style={{ fontWeight: 800, fontSize: 15 }}>YieldPilot</span>
             </div>
             <p style={{ color: "var(--text-muted)", fontSize: 13, lineHeight: 1.6 }}>
