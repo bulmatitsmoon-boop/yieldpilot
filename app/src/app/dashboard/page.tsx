@@ -1,7 +1,5 @@
 "use client";
 
-export const dynamic = "force-dynamic";
-
 import { useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
@@ -17,50 +15,33 @@ const VAULT_ADDRESSES = (process.env.NEXT_PUBLIC_VAULT_ADDRESSES || "")
   .map((s) => s.trim())
   .filter(Boolean);
 
-type Tab = "overview" | "protocols" | "deposit" | "withdraw";
+type Tab = "overview" | "protocols" | "deposit";
 
 export default function Dashboard() {
   const { publicKey, connected } = useWallet();
   const { setVisible } = useWalletModal();
   const [activeTab, setActiveTab] = useState<Tab>("overview");
 
-  const { vaults, positions, loading, txStatus, txError, lastTxSig, txHistory, deposit, withdraw, refresh } =
+  const { vaults, positions, loading, txStatus, txError, lastTxSig, deposit, withdraw, refresh } =
     useYieldPilot(VAULT_ADDRESSES);
   const { apys, loading: apyLoading } = useApys();
 
   // ── Derived stats ─────────────────────────────────────────────────────────
-  const WSOL = "So11111111111111111111111111111111111111112";
-  const mintDecimals = (mint: string) => mint === WSOL ? 1e9 : 1e6;
-  const mintSymbol = (mint: string) => mint === WSOL ? "SOL" : "USDC";
-
-  // Group deposits by token so we can show "0.1 SOL" and "50 USDC" separately
-  const depositsByToken = positions.reduce((acc, p) => {
-    const vault = vaults.find(v => v.address === p.vault);
-    const sym = mintSymbol(vault?.mint || "");
-    const dec = mintDecimals(vault?.mint || "");
-    acc[sym] = (acc[sym] || 0) + p.currentValue / dec;
-    return acc;
-  }, {} as Record<string, number>);
-
-  const earnedByToken = positions.reduce((acc, p) => {
-    const vault = vaults.find(v => v.address === p.vault);
-    const sym = mintSymbol(vault?.mint || "");
-    const dec = mintDecimals(vault?.mint || "");
-    acc[sym] = (acc[sym] || 0) + p.earnedValue / dec;
-    return acc;
-  }, {} as Record<string, number>);
-
-  const fmtTokens = (byToken: Record<string, number>) =>
-    Object.keys(byToken).length === 0
-      ? "—"
-      : Object.entries(byToken).map(([sym, amt]) => `${fmt(amt, 4)} ${sym}`).join(" · ");
+  const totalDeposited = positions.reduce((s, p) => s + p.currentValue / 1e6, 0);
+  const totalEarned    = positions.reduce((s, p) => s + p.earnedValue / 1e6, 0);
   const avgApy = apys.length ? apys.reduce((s, a) => s + a.apyPercent, 0) / apys.length : 0;
   const bestApy = apys.length ? Math.max(...apys.map((a) => a.apyPercent)) : 0;
   const bestProtocol = apys.find((a) => a.apyPercent === bestApy);
 
-  const [selectedVaultIdx, setSelectedVaultIdx] = useState(0);
-  const primaryVault = vaults[selectedVaultIdx] ?? vaults[0];
-  const primaryPosition = positions[selectedVaultIdx] ?? positions[0];
+  const primaryVault = vaults[0];
+  const primaryPosition = positions[0];
+
+  // ── Global vault stats ────────────────────────────────────────────────────
+  const totalTvl = vaults.reduce((s, v) => s + v.totalDeposits, 0);
+  const totalTvlUsd = totalTvl / 1e6; // USDC vault is 6 decimals; approximate for display
+  const lastCompound = primaryVault ? new Date(primaryVault.lastCompoundTs * 1000) : null;
+  const minutesSinceCompound = lastCompound ? Math.floor((Date.now() - lastCompound.getTime()) / 60000) : null;
+  const currentAllocation = primaryVault?.protocols.filter(p => p.targetBps > 0) || [];
 
   // ── Tabs ──────────────────────────────────────────────────────────────────
   const tabStyle = (t: Tab): React.CSSProperties => ({
@@ -73,34 +54,85 @@ export default function Dashboard() {
   // ── Landing (not connected) ───────────────────────────────────────────────
   if (!connected) {
     return (
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "80vh", gap: 20, padding: 24, textAlign: "center" }}>
-        <div style={{ width: 64, height: 64, borderRadius: 16, background: "var(--purple)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <svg width="32" height="32" viewBox="0 0 14 14" fill="none">
-            <path d="M7 1L12 4V10L7 13L2 10V4L7 1Z" stroke="#fff" strokeWidth="1.5" strokeLinejoin="round"/>
-            <circle cx="7" cy="7" r="2" fill="#fff"/>
-          </svg>
+      <div style={{ maxWidth: 760, margin: "0 auto", padding: "60px 16px 80px", display: "flex", flexDirection: "column", alignItems: "center", gap: 0, textAlign: "center" }}>
+
+        {/* Hero */}
+        <div style={{ marginBottom: 48 }}>
+          <div style={{ width: 56, height: 56, borderRadius: 14, background: "linear-gradient(135deg, #7c3aed, #06b6d4)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}>
+            <svg width="28" height="28" viewBox="0 0 14 14" fill="none"><path d="M7 1L12 4V10L7 13L2 10V4L7 1Z" stroke="#fff" strokeWidth="1.5" strokeLinejoin="round"/><circle cx="7" cy="7" r="2" fill="#fff"/></svg>
+          </div>
+          <h1 style={{ fontSize: 36, fontWeight: 900, letterSpacing: "-0.03em", lineHeight: 1.1, marginBottom: 16 }}>
+            Earn the best yield<br />on Solana, automatically.
+          </h1>
+          <p style={{ color: "var(--text-muted)", fontSize: 16, maxWidth: 420, margin: "0 auto 28px", lineHeight: 1.6 }}>
+            YieldPilot routes your USDC and SOL across top Solana protocols — rebalancing every 15 minutes to maximize your APY.
+          </p>
+          <button
+            onClick={() => setVisible(true)}
+            style={{
+              background: "linear-gradient(135deg, #7c3aed, #06b6d4)",
+              color: "#fff", border: "none", padding: "14px 36px", borderRadius: 12,
+              fontWeight: 700, fontSize: 16, cursor: "pointer", fontFamily: "Inter, sans-serif",
+            }}
+          >
+            Connect Wallet to Start
+          </button>
+          <p style={{ color: "var(--text-dim)", fontSize: 12, marginTop: 10 }}>Works with Phantom & Solflare</p>
         </div>
-        <h1 style={{ fontSize: 32, fontWeight: 800, letterSpacing: "-0.03em", lineHeight: 1.1 }}>
-          Earn the best yield<br />on Solana, automatically.
-        </h1>
-        <p style={{ color: "var(--text-muted)", fontSize: 16, maxWidth: 420 }}>
-          YieldPilot moves your tokens across Kamino, Marinade, Raydium, and more —
-          chasing the highest APY without you lifting a finger.
-        </p>
-        <button
-          onClick={() => setVisible(true)}
-          style={{
-            marginTop: 8, background: "linear-gradient(135deg, #7c3aed, #06b6d4)",
-            color: "#fff", border: "none", padding: "14px 36px", borderRadius: 12,
-            fontWeight: 700, fontSize: 16, cursor: "pointer", fontFamily: "Inter, sans-serif",
-          }}
-        >
-          Connect Wallet to Start
-        </button>
-        <p style={{ color: "var(--text-dim)", fontSize: 12 }}>Works with Phantom & Solflare</p>
+
+        {/* Live vault stats */}
+        <div style={{ width: "100%", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, padding: "24px 28px", marginBottom: 32 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 20 }}>Live Vault Stats</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 24 }}>
+            <div style={{ textAlign: "left" }}>
+              <div style={{ fontSize: 22, fontWeight: 800, fontFamily: "var(--mono)", color: "var(--text)" }}>
+                ${totalTvlUsd > 0 ? totalTvlUsd.toLocaleString("en-US", { maximumFractionDigits: 0 }) : "—"}
+              </div>
+              <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 4 }}>Total Value Locked</div>
+            </div>
+            <div style={{ textAlign: "left" }}>
+              <div style={{ fontSize: 22, fontWeight: 800, fontFamily: "var(--mono)", color: "var(--green)" }}>
+                {bestApy > 0 ? `${bestApy.toFixed(2)}%` : "—"}
+              </div>
+              <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 4 }}>
+                Best APY {bestProtocol ? `· ${bestProtocol.name}` : ""}
+              </div>
+            </div>
+            <div style={{ textAlign: "left" }}>
+              <div style={{ fontSize: 22, fontWeight: 800, fontFamily: "var(--mono)", color: "var(--purple-light)" }}>
+                {minutesSinceCompound !== null ? `${minutesSinceCompound}m ago` : "—"}
+              </div>
+              <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 4 }}>Last Compounded</div>
+            </div>
+            <div style={{ textAlign: "left" }}>
+              <div style={{ fontSize: 22, fontWeight: 800, fontFamily: "var(--mono)", color: "var(--yellow)" }}>
+                15 min
+              </div>
+              <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 4 }}>Rebalance Interval</div>
+            </div>
+          </div>
+
+          {/* Current allocation breakdown */}
+          {currentAllocation.length > 0 && (
+            <div style={{ marginTop: 24, paddingTop: 20, borderTop: "1px solid var(--border)" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 14 }}>Current Allocation</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {currentAllocation.map((p, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{ fontSize: 13, color: "var(--text-muted)", minWidth: 120, textAlign: "left" }}>{p.name}</div>
+                    <div style={{ flex: 1, height: 6, background: "var(--bg)", borderRadius: 99, overflow: "hidden" }}>
+                      <div style={{ width: `${p.targetBps / 100}%`, height: "100%", background: i === 0 ? "var(--purple)" : "var(--purple-light)", borderRadius: 99 }} />
+                    </div>
+                    <div style={{ fontSize: 13, fontWeight: 700, fontFamily: "var(--mono)", color: "var(--text)", minWidth: 40, textAlign: "right" }}>{(p.targetBps / 100).toFixed(0)}%</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Protocol preview */}
-        <div style={{ marginTop: 32, width: "100%", maxWidth: 640 }}>
+        <div style={{ width: "100%" }}>
           <ProtocolTable apys={apys} loading={apyLoading} />
         </div>
       </div>
@@ -114,8 +146,8 @@ export default function Dashboard() {
 
       {/* Stats row */}
       <div style={{ display: "flex", gap: 12, marginBottom: 24, flexWrap: "wrap" }}>
-        <StatCard label="Your Deposits" value={fmtTokens(depositsByToken)} sub={positions.length ? `${positions.length} active position${positions.length > 1 ? "s" : ""}` : "No positions yet"} />
-        <StatCard label="Total Earned" value={fmtTokens(earnedByToken)} sub="all time" accent="var(--green)" />
+        <StatCard label="Your Deposits" value={`$${fmt(totalDeposited)}`} sub={positions.length ? `${positions.length} active position${positions.length > 1 ? "s" : ""}` : "No positions yet"} />
+        <StatCard label="Total Earned" value={`$${fmt(totalEarned)}`} sub="all time" accent="var(--green)" />
         <StatCard label="Avg Protocol APY" value={`${fmt(avgApy)}%`} sub="across protocols" accent="var(--purple-light)" />
         <StatCard label="Best Available" value={`${fmt(bestApy)}%`} sub={bestProtocol ? `${bestProtocol.name} · ${bestProtocol.asset}` : ""} accent="var(--yellow)" />
       </div>
@@ -148,7 +180,7 @@ export default function Dashboard() {
 
       {/* Tabs */}
       <div style={{ display: "flex", gap: 4, marginBottom: 20, background: "var(--surface)", padding: 4, borderRadius: 10, border: "1px solid var(--border)", width: "fit-content" }}>
-        {(["overview", "protocols", "deposit", "withdraw"] as Tab[]).map((t) => (
+        {(["overview", "protocols", "deposit"] as Tab[]).map((t) => (
           <button key={t} onClick={() => setActiveTab(t)} style={tabStyle(t)}>
             {t.charAt(0).toUpperCase() + t.slice(1)}
           </button>
@@ -158,6 +190,54 @@ export default function Dashboard() {
       {/* ── Overview ─────────────────────────────────────────────────────── */}
       {activeTab === "overview" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+
+          {/* Live vault stats */}
+          <Card>
+            <CardHeader title="Live Vault Stats" />
+            <div style={{ padding: "16px 20px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 20, marginBottom: currentAllocation.length > 0 ? 20 : 0 }}>
+                <div>
+                  <div style={{ fontSize: 20, fontWeight: 800, fontFamily: "var(--mono)" }}>
+                    ${totalTvlUsd > 0 ? totalTvlUsd.toLocaleString("en-US", { maximumFractionDigits: 0 }) : "—"}
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 3 }}>Total Value Locked</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 20, fontWeight: 800, fontFamily: "var(--mono)", color: "var(--green)" }}>
+                    {bestApy > 0 ? `${bestApy.toFixed(2)}%` : "—"}
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 3 }}>Best APY {bestProtocol ? `· ${bestProtocol.name}` : ""}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 20, fontWeight: 800, fontFamily: "var(--mono)", color: "var(--purple-light)" }}>
+                    {minutesSinceCompound !== null ? `${minutesSinceCompound}m ago` : "—"}
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 3 }}>Last Compounded</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 20, fontWeight: 800, fontFamily: "var(--mono)", color: "var(--yellow)" }}>15 min</div>
+                  <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 3 }}>Rebalance Interval</div>
+                </div>
+              </div>
+              {currentAllocation.length > 0 && (
+                <div style={{ paddingTop: 16, borderTop: "1px solid var(--border)" }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 12 }}>Current Allocation</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    {currentAllocation.map((p, i) => (
+                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                        <div style={{ fontSize: 13, color: "var(--text-muted)", minWidth: 120 }}>{p.name}</div>
+                        <div style={{ flex: 1, height: 6, background: "var(--bg)", borderRadius: 99, overflow: "hidden" }}>
+                          <div style={{ width: `${p.targetBps / 100}%`, height: "100%", background: i === 0 ? "var(--purple)" : "var(--purple-light)", borderRadius: 99 }} />
+                        </div>
+                        <div style={{ fontSize: 13, fontWeight: 700, fontFamily: "var(--mono)", minWidth: 40, textAlign: "right" }}>{(p.targetBps / 100).toFixed(0)}%</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </Card>
+
           {/* Positions */}
           <Card>
             <CardHeader title="Your Positions" />
@@ -179,15 +259,15 @@ export default function Dashboard() {
                     <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: 600 }}>{vault?.name || "Vault"}</div>
                       <div style={{ color: "var(--text-muted)", fontSize: 12 }}>
-                        {fmt(pos.depositedAmount / mintDecimals(vaults.find(v => v.address === pos.vault)?.mint || ""), 4)} deposited · {fmtAddr(pos.vault)}
+                        {fmt(pos.depositedAmount / 1e6)} deposited · {fmtAddr(pos.vault)}
                       </div>
                     </div>
                     <div style={{ textAlign: "right" }}>
                       <div style={{ color: "var(--green)", fontWeight: 700, fontFamily: "var(--mono)" }}>
-                        +{fmt(pos.earnedValue / mintDecimals(vaults.find(v => v.address === pos.vault)?.mint || ""), 4)} earned
+                        +${fmt(pos.earnedValue / 1e6, 4)} earned
                       </div>
                       <div style={{ color: "var(--text-muted)", fontSize: 12 }}>
-                        {fmt(pos.currentValue / mintDecimals(vaults.find(v => v.address === pos.vault)?.mint || ""), 4)} current value
+                        ${fmt(pos.currentValue / 1e6)} current value
                       </div>
                     </div>
                   </div>
@@ -195,33 +275,6 @@ export default function Dashboard() {
               })
             )}
           </Card>
-
-          {/* Transaction history */}
-          {txHistory.length > 0 && (
-            <Card>
-              <CardHeader title="Transaction History" />
-              {txHistory.map((tx, i) => (
-                <div key={i} style={{ padding: "12px 20px", borderTop: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div>
-                    <div style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--text-muted)" }}>
-                      {tx.sig.slice(0, 16)}...{tx.sig.slice(-8)}
-                    </div>
-                    <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 2 }}>
-                      {new Date(tx.ts).toLocaleTimeString()}
-                    </div>
-                  </div>
-                  <a
-                    href={`https://solscan.io/tx/${tx.sig}?cluster=devnet`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ color: "var(--purple-light)", fontSize: 12, textDecoration: "none", fontWeight: 600 }}
-                  >
-                    Solscan ↗
-                  </a>
-                </div>
-              ))}
-            </Card>
-          )}
 
           {/* Protocol snapshot */}
           <ProtocolTable apys={apys} loading={apyLoading} />
@@ -233,30 +286,33 @@ export default function Dashboard() {
         <ProtocolTable apys={apys} loading={apyLoading} />
       )}
 
-      {/* ── Deposit ──────────────────────────────────────────────────────── */}
+      {/* ── Deposit/Withdraw ─────────────────────────────────────────────── */}
       {activeTab === "deposit" && (
         <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
-          <div style={{ width: "100%", display: "flex", gap: 8, marginBottom: 4 }}>
-            {vaults.map((v, i) => (
-              <button key={v.address} onClick={() => setSelectedVaultIdx(i)} style={{ padding: "8px 20px", borderRadius: 8, border: "1px solid var(--border)", cursor: "pointer", fontWeight: 600, fontSize: 13, fontFamily: "Inter, sans-serif", background: selectedVaultIdx === i ? "var(--purple)" : "var(--surface)", color: selectedVaultIdx === i ? "#fff" : "var(--text-muted)", transition: "all 0.15s" }}>
-                {v.name}
-              </button>
-            ))}
-          </div>
           {primaryVault ? (
-            <DepositWithdrawPanel vault={primaryVault} apys={apys} onDeposit={deposit} onWithdraw={withdraw} userShares={primaryPosition?.shares || 0} userCurrentValue={primaryPosition?.currentValue} mode="deposit" />
+            <DepositWithdrawPanel
+              vault={primaryVault}
+              apys={apys}
+              onDeposit={deposit}
+              onWithdraw={withdraw}
+              userShares={primaryPosition?.shares || 0}
+            />
           ) : (
-            <div style={{ color: "var(--text-muted)", padding: 20 }}>{loading ? "Loading vault..." : "No vault configured."}</div>
+            <div style={{ color: "var(--text-muted)", padding: 20 }}>
+              {loading ? "Loading vault..." : "No vault configured. Set NEXT_PUBLIC_VAULT_ADDRESSES in .env.local"}
+            </div>
           )}
+
+          {/* Info panel */}
           <div style={{ flex: 1, minWidth: 260 }}>
             <Card>
               <CardHeader title="How it works" />
               <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 16 }}>
                 {[
-                  ["1. Deposit", "You deposit tokens into the vault."],
+                  ["1. Deposit", "You deposit tokens into the vault. You receive shares representing your ownership."],
                   ["2. Auto-optimize", "The keeper bot moves funds to highest-yield protocols every 15 minutes."],
                   ["3. Auto-compound", "Rewards are harvested and reinvested every hour, growing your position."],
-                  ["4. Withdraw anytime", "Withdraw your tokens plus any earned yield at any time, minus a small performance fee."],
+                  ["4. Withdraw anytime", "Burn your shares to receive your tokens plus earned yield, minus a small performance fee."],
                 ].map(([title, desc]) => (
                   <div key={title}>
                     <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>{title}</div>
@@ -266,24 +322,6 @@ export default function Dashboard() {
               </div>
             </Card>
           </div>
-        </div>
-      )}
-
-      {/* ── Withdraw ─────────────────────────────────────────────────────── */}
-      {activeTab === "withdraw" && (
-        <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
-          <div style={{ width: "100%", display: "flex", gap: 8, marginBottom: 4 }}>
-            {vaults.map((v, i) => (
-              <button key={v.address} onClick={() => setSelectedVaultIdx(i)} style={{ padding: "8px 20px", borderRadius: 8, border: "1px solid var(--border)", cursor: "pointer", fontWeight: 600, fontSize: 13, fontFamily: "Inter, sans-serif", background: selectedVaultIdx === i ? "var(--purple)" : "var(--surface)", color: selectedVaultIdx === i ? "#fff" : "var(--text-muted)", transition: "all 0.15s" }}>
-                {v.name}
-              </button>
-            ))}
-          </div>
-          {primaryVault ? (
-            <DepositWithdrawPanel vault={primaryVault} apys={apys} onDeposit={deposit} onWithdraw={withdraw} userShares={primaryPosition?.shares || 0} userCurrentValue={primaryPosition?.currentValue} mode="withdraw" />
-          ) : (
-            <div style={{ color: "var(--text-muted)", padding: 20 }}>{loading ? "Loading vault..." : "No vault configured."}</div>
-          )}
         </div>
       )}
     </div>
