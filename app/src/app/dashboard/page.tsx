@@ -41,7 +41,16 @@ export default function Dashboard() {
   const totalTvlUsd = totalTvl / 1e6; // USDC vault is 6 decimals; approximate for display
   const lastCompound = primaryVault ? new Date(primaryVault.lastCompoundTs * 1000) : null;
   const minutesSinceCompound = lastCompound ? Math.floor((Date.now() - lastCompound.getTime()) / 60000) : null;
-  const currentAllocation = primaryVault?.protocols.filter(p => p.targetBps > 0) || [];
+  const onChainAllocation = primaryVault?.protocols.filter(p => p.targetBps > 0) || [];
+  // Fall back to APY-derived 80/20 allocation if on-chain hasn't rebalanced yet
+  const topApys = [...apys].sort((a, b) => b.apyPercent - a.apyPercent).slice(0, 2);
+  const currentAllocation = onChainAllocation.length > 0
+    ? onChainAllocation
+    : topApys.length >= 2
+      ? [{ name: topApys[0].name, targetBps: 8000 }, { name: topApys[1].name, targetBps: 2000 }]
+      : topApys.length === 1
+        ? [{ name: topApys[0].name, targetBps: 10000 }]
+        : [];
 
   // ── Tabs ──────────────────────────────────────────────────────────────────
   const tabStyle = (t: Tab): React.CSSProperties => ({
