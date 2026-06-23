@@ -16,7 +16,7 @@ export const metadata: Metadata = {
     type: "website",
     images: [
       {
-        url: "https://yieldpilot-chi.vercel.app/api/og",
+        url: "https://yieldpilot-chi.vercel.app/api/og?v=2",
         width: 1200,
         height: 630,
         alt: "YieldPilot — Solana Yield Optimizer",
@@ -27,7 +27,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "YieldPilot — Earn the best yield on Solana, automatically",
     description: "Deposit once. YieldPilot routes your funds to the highest-yielding protocol every 15 minutes.",
-    images: ["https://yieldpilot-chi.vercel.app/api/og"],
+    images: ["https://yieldpilot-chi.vercel.app/api/og?v=2"],
   },
 };
 
