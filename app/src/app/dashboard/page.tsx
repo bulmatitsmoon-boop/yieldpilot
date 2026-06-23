@@ -74,7 +74,12 @@ export default function Dashboard() {
   if (!connected) {
     return (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "80vh", gap: 20, padding: 24, textAlign: "center" }}>
-        <div style={{ fontSize: 52 }}>⚡</div>
+        <div style={{ width: 64, height: 64, borderRadius: 16, background: "var(--purple)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <svg width="32" height="32" viewBox="0 0 14 14" fill="none">
+            <path d="M7 1L12 4V10L7 13L2 10V4L7 1Z" stroke="#fff" strokeWidth="1.5" strokeLinejoin="round"/>
+            <circle cx="7" cy="7" r="2" fill="#fff"/>
+          </svg>
+        </div>
         <h1 style={{ fontSize: 32, fontWeight: 800, letterSpacing: "-0.03em", lineHeight: 1.1 }}>
           Earn the best yield<br />on Solana, automatically.
         </h1>
