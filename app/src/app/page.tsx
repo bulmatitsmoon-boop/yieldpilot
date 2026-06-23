@@ -197,7 +197,7 @@ export default function Home() {
 
         <div style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
           <div style={{
-            display: "grid", gridTemplateColumns: "1fr 180px 160px 110px",
+            display: "grid", gridTemplateColumns: "1fr 1fr 1fr 100px",
             padding: "10px 24px", background: "var(--surface-2)",
             fontSize: 11, fontWeight: 700, color: "var(--text-dim)",
             textTransform: "uppercase", letterSpacing: "0.06em",
@@ -208,23 +208,23 @@ export default function Home() {
             <span>Perf. fee</span>
           </div>
           {[
-            { tier: "Gold",   req: "1,000,000+", cap: "Unlimited",  fee: "0%", muted: false },
-            { tier: "Silver", req: "100,000+",   cap: "$10,000",    fee: "3%", muted: false },
-            { tier: "Bronze", req: "10,000+",    cap: "$1,000",     fee: "6%", muted: false },
-            { tier: "None",   req: "< 10,000",   cap: "No access",  fee: "—",  muted: true  },
-          ].map(({ tier, req, cap, fee, muted }) => (
+            { tier: "Gold",   color: "#F59E0B", req: "1,000,000+", cap: "Unlimited",  fee: "0%", muted: false },
+            { tier: "Silver", color: "#94A3B8", req: "100,000+",   cap: "$10,000",    fee: "3%", muted: false },
+            { tier: "Bronze", color: "#CD7F32", req: "10,000+",    cap: "$1,000",     fee: "6%", muted: false },
+            { tier: "None",   color: "#6B7280", req: "< 10,000",   cap: "No access",  fee: "—",  muted: true  },
+          ].map(({ tier, color, req, cap, fee, muted }) => (
             <div key={tier} style={{
-              display: "grid", gridTemplateColumns: "1fr 180px 160px 110px",
-              padding: "16px 24px", borderTop: "1px solid var(--border)",
+              display: "grid", gridTemplateColumns: "1fr 1fr 1fr 100px",
+              padding: "18px 24px", borderTop: "1px solid var(--border)",
               alignItems: "center", background: "var(--surface)",
               opacity: muted ? 0.45 : 1,
             }}>
-              <span style={{ fontWeight: 700, fontSize: 14 }}>{tier}</span>
-              <span style={{ fontFamily: "var(--mono)", fontSize: 13, color: "var(--text-muted)" }}>{req}</span>
-              <span style={{ fontSize: 13, color: cap === "Unlimited" ? "var(--green)" : cap === "No access" ? "var(--text-dim)" : "var(--text)" }}>
+              <span style={{ fontWeight: 700, fontSize: 14, color }}>{tier}</span>
+              <span style={{ fontFamily: "var(--mono)", fontSize: 13, color: "var(--text-muted)", paddingLeft: 8 }}>{req}</span>
+              <span style={{ fontSize: 13, color: cap === "Unlimited" ? "var(--green)" : cap === "No access" ? "var(--text-dim)" : "var(--text)", paddingLeft: 8 }}>
                 {cap}
               </span>
-              <span style={{ fontFamily: "var(--mono)", fontSize: 13, color: "var(--text-muted)" }}>{fee}</span>
+              <span style={{ fontFamily: "var(--mono)", fontSize: 13, color: "var(--text-muted)", paddingLeft: 8 }}>{fee}</span>
             </div>
           ))}
         </div>
