@@ -121,6 +121,7 @@ export default function Whitepaper() {
           ["set_tvl_cap", "Update maximum vault TVL", "Admin"],
           ["set_gate_mint", "Update token-gate mint", "Admin"],
           ["set_treasury", "Update fee recipient wallet", "Admin"],
+          ["set_keeper", "Update keeper wallet address", "Admin"],
         ]} />
         <P>Program ID (devnet): <span style={{ fontFamily: "var(--mono)", color: "var(--purple-light)", fontSize: 12 }}>8c7Boyk91MWkn5jabf5CnYD8DrG6p4hYm9eDdAAWXEKH</span>. Verifiable on <a href="https://solscan.io/account/8c7Boyk91MWkn5jabf5CnYD8DrG6p4hYm9eDdAAWXEKH?cluster=devnet" target="_blank" rel="noopener noreferrer" style={{ color: "var(--purple-light)" }}>Solscan</a>.</P>
       </Section>
@@ -155,26 +156,29 @@ export default function Whitepaper() {
         <H3>Non-Custodial</H3>
         <P>YieldPilot never holds user funds directly. All assets are held in on-chain program-derived accounts (PDAs) controlled by the vault smart contract. No individual — including the YieldPilot team — can access or move user funds outside of the defined program instructions.</P>
         <H3>Verifiable On-Chain</H3>
-        <P>The smart contract is deployed at a fixed program ID on Solana. Anyone can verify the vault state, fee parameters, and treasury address directly on-chain at any time — no need to trust our word. A full third-party code audit is planned before mainnet launch.</P>
+        <P>The smart contract is deployed at a fixed program ID on Solana. Anyone can verify the vault state, fee parameters, and treasury address directly on-chain at any time — no need to trust our word.</P>
         <H3>Emergency Pause</H3>
         <P>The vault admin can pause new deposits in the event of an emergency. Withdrawals remain available at all times — users can always retrieve their funds even when the vault is paused.</P>
         <H3>TVL Cap</H3>
         <P>A configurable TVL cap limits total deposits during the early phase, reducing exposure while the protocol matures.</P>
+        <H3>Separated Admin &amp; Keeper Wallets</H3>
+        <P>The admin wallet (which controls vault configuration) and the keeper wallet (which executes rebalances) are separate keypairs with separate on-chain authorities. Compromising the keeper grants no ability to change fees, pause the vault, or access funds.</P>
         <H3>Audit Status</H3>
-        <P>The code has not yet been formally audited by a third party. A professional audit is planned prior to raising the TVL cap significantly. Until then, deposit only what you are comfortable risking.</P>
+        <P>The code has not yet been formally audited by a third party. A professional audit is planned as the protocol scales. The TVL cap will be raised incrementally as the protocol matures. Until then, deposit only what you are comfortable risking.</P>
       </Section>
 
       <Section title="8. Roadmap">
         <Table rows={[
           ["Phase", "Milestone", "Status"],
           ["Phase 1", "Smart contract development & testing (14/14 tests passing)", "Complete"],
-          ["Phase 1", "Keeper bot — auto-routing & compounding", "Complete"],
-          ["Phase 1", "Frontend at yieldpilotapp.netlify.app", "Complete"],
-          ["Phase 1", "Devnet deployment & vault initialization", "In progress"],
+          ["Phase 1", "Keeper bot — live APY routing & auto-compound", "Complete"],
+          ["Phase 1", "Frontend at yieldpilot-chi.vercel.app", "Complete"],
+          ["Phase 1", "Devnet deployment & vault initialization", "Complete"],
+          ["Phase 1", "Admin / keeper wallet separation", "Complete"],
           ["Phase 1", "Mainnet launch with $YPILOT token gating", "Pending funding"],
           ["Phase 2", "Third-party smart contract audit", "Planned"],
-          ["Phase 2", "Additional protocols — Orca, Raydium, Jito", "Planned"],
-          ["Phase 2", "Discounted fees for Gold tier holders", "Planned"],
+          ["Phase 2", "Additional protocols — Jito, BlazeStake, Solend", "Planned"],
+          ["Phase 2", "Referral system — earn a share of referred yield fees", "Planned"],
           ["Phase 3", "Cross-chain deposits via Wormhole", "Research"],
           ["Phase 3", "Auto-bridge to highest cross-chain yield", "Research"],
         ]} />
@@ -182,7 +186,7 @@ export default function Whitepaper() {
 
       <Section title="9. Disclaimer">
         <P>This document is for informational purposes only and does not constitute financial advice or a solicitation to buy or sell any asset. DeFi protocols carry significant risks including smart contract vulnerabilities, protocol failures, and potential loss of funds. Never deposit more than you can afford to lose.</P>
-        <P>YieldPilot is currently deployed on Solana devnet. Devnet tokens have no monetary value. Do not send real funds to devnet addresses.</P>
+        <P>YieldPilot is currently deployed on Solana devnet for testing. Mainnet launch is pending. Do not send real funds to devnet addresses.</P>
       </Section>
 
       <div style={{ borderTop: "1px solid var(--border)", paddingTop: 24, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
