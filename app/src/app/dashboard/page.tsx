@@ -305,6 +305,7 @@ export default function Dashboard() {
               onDeposit={deposit}
               onWithdraw={withdraw}
               userShares={primaryPosition?.shares || 0}
+              mode="deposit"
             />
           ) : (
             <div style={{ color: "var(--text-muted)", padding: 20 }}>
