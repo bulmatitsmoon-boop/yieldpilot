@@ -41,6 +41,7 @@ export function Footer() {
               <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 12 }}>Resources</div>
               {[
                 ["Whitepaper", "/whitepaper"],
+                ["X / Twitter", "https://x.com/YieldPilotSOL"],
                 ["Solana", "https://solana.com"],
               ].map(([label, href]) => (
                 <div key={href} style={{ marginBottom: 8 }}>
