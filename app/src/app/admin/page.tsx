@@ -17,7 +17,7 @@ const PROGRAM_ID = new PublicKey(
 );
 const VAULT_ADDRESSES = (process.env.NEXT_PUBLIC_VAULT_ADDRESSES || "")
   .split(",").map(s => s.trim()).filter(Boolean);
-const ADMIN_WALLET = process.env.NEXT_PUBLIC_ADMIN_WALLET || "";
+const ADMIN_WALLET = process.env.NEXT_PUBLIC_ADMIN_WALLET || "8i7kydJHwi3Cdp46Xugyux2vWJmTScYDvnJrBiBihBnP";
 
 type TxStatus = "idle" | "signing" | "confirming" | "success" | "error";
 
@@ -38,7 +38,7 @@ export default function AdminPage() {
   const [newTvlCap, setNewTvlCap] = useState("");
   const [rebalanceAllocs, setRebalanceAllocs] = useState("8000,2000");
 
-  const isAdmin = publicKey?.toBase58() === ADMIN_WALLET || !ADMIN_WALLET;
+  const isAdmin = connected && publicKey?.toBase58() === ADMIN_WALLET;
 
   const getProgram = () => {
     const wallet = {
