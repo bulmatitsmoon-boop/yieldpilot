@@ -22,7 +22,7 @@ export default function Dashboard() {
   const { setVisible } = useWalletModal();
   const [activeTab, setActiveTab] = useState<Tab>("overview");
 
-  const { vaults, positions, loading, txStatus, txError, lastTxSig, deposit, withdraw, refresh } =
+  const { vaults, positions, loading, txStatus, txError, vaultError, lastTxSig, deposit, withdraw, refresh } =
     useYieldPilot(VAULT_ADDRESSES);
   const { apys, loading: apyLoading } = useApys();
 
@@ -309,7 +309,7 @@ export default function Dashboard() {
             />
           ) : (
             <div style={{ color: "var(--text-muted)", padding: 20 }}>
-              {loading ? "Loading vault..." : "No vault configured. Set NEXT_PUBLIC_VAULT_ADDRESSES in .env.local"}
+              {loading ? "Loading vault..." : vaultError ?  : "No vault configured. Set NEXT_PUBLIC_VAULT_ADDRESSES in .env.local"}
             </div>
           )}
 
