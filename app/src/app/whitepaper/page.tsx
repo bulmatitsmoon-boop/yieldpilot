@@ -137,7 +137,7 @@ export default function Whitepaper() {
           ["Withdrawal fee", "None", "—"],
           ["Management fee", "None", "—"],
         ]} />
-        <P>Example: You hold Silver tier and deposit $1,000 USDC. After 6 months your position grows to $1,080. Your $80 profit incurs a 3% fee ($2.40). You receive $1,077.60. Gold tier holders pay no fee at all. No fee is ever charged on principal.</P>
+        <P>Example: You hold Silver tier and deposit $1,000 USDC. After 6 months at 24.70% APY your position grows to $1,123.50. Your $123.50 profit incurs a 6% fee ($7.41). You receive $1,116.09. Gold tier holders pay no fee at all. No fee is ever charged on principal.</P>
       </Section>
 
       <Section title="6. Token-Gated Access Tiers">
