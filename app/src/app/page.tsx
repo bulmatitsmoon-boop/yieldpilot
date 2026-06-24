@@ -21,7 +21,7 @@ export default function Home() {
         <div style={{ display: "inline-flex", alignItems: "center", gap: 8, marginBottom: 28 }}>
           <div style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--green)" }} />
           <span style={{ fontSize: 12, color: "var(--text-muted)", letterSpacing: "0.04em" }}>
-            Live on Solana devnet
+            Live on Solana mainnet
           </span>
         </div>
 
@@ -251,7 +251,7 @@ export default function Home() {
             {
               label: "Program",
               id: process.env.NEXT_PUBLIC_PROGRAM_ID || "8c7Boyk91MWkn5jabf5CnYD8DrG6p4hYm9eDdAAWXEKH",
-              network: "devnet",
+              network: "mainnet-beta",
             },
           ].map(({ label, id, network }) => (
             <div key={label} style={{
