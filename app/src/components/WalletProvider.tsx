@@ -12,7 +12,7 @@ import { clusterApiUrl } from "@solana/web3.js";
 
 import "@solana/wallet-adapter-react-ui/styles.css";
 
-const NETWORK = (process.env.NEXT_PUBLIC_SOLANA_NETWORK as any) || "devnet";
+const NETWORK = (process.env.NEXT_PUBLIC_SOLANA_NETWORK as any) || "mainnet-beta";
 const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || clusterApiUrl(NETWORK);
 
 // Wallet adapter FC types lag behind @types/react@18 — cast to any
