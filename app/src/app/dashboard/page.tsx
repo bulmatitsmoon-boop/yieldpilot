@@ -309,7 +309,7 @@ export default function Dashboard() {
             />
           ) : (
             <div style={{ color: "var(--text-muted)", padding: 20 }}>
-              {loading ? "Loading vault..." : vaultError ?  : "No vault configured. Set NEXT_PUBLIC_VAULT_ADDRESSES in .env.local"}
+              {loading ? "Loading vault..." : "No vault configured. Set NEXT_PUBLIC_VAULT_ADDRESSES in .env.local"}
             </div>
           )}
 
