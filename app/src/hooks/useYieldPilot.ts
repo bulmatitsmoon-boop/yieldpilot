@@ -81,6 +81,7 @@ export function useYieldPilot(vaultAddresses: string[]) {
   const [txStatus, setTxStatus] = useState<TxStatus>("idle");
   const [txError, setTxError] = useState<string | null>(null);
   const [lastTxSig, setLastTxSig] = useState<string | null>(null);
+  const [vaultError, setVaultError] = useState<string | null>(null);
   const [txHistory, setTxHistory] = useState<{ sig: string; type: string; ts: number }[]>([]);
 
   // Build Anchor program (read-only, no wallet needed for fetching)
@@ -136,8 +137,9 @@ export function useYieldPilot(vaultAddresses: string[]) {
           .filter((r): r is PromiseFulfilledResult<VaultInfo> => r.status === "fulfilled")
           .map((r) => r.value)
       );
-    } catch (err) {
+    } catch (err: any) {
       console.error("fetchVaults error", err);
+      setVaultError(err?.message || String(err));
     } finally {
       setLoading(false);
     }
@@ -374,6 +376,7 @@ export function useYieldPilot(vaultAddresses: string[]) {
     loading,
     txStatus,
     txError,
+    vaultError,
     lastTxSig,
     txHistory,
     deposit,
