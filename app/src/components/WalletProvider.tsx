@@ -13,7 +13,7 @@ import { clusterApiUrl } from "@solana/web3.js";
 import "@solana/wallet-adapter-react-ui/styles.css";
 
 const NETWORK = (process.env.NEXT_PUBLIC_SOLANA_NETWORK as any) || "mainnet-beta";
-const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || "/api/rpc";
+const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || "https://yieldpilot-chi.vercel.app/api/rpc";
 
 // Wallet adapter FC types lag behind @types/react@18 — cast to any
 const Conn = ConnectionProvider as any;
