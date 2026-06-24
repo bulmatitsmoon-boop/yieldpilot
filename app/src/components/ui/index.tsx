@@ -145,7 +145,7 @@ export function TxBanner({ status, error, sig }: { status: string; error: string
           <div style={{ color: "var(--text-muted)", fontSize: 11, fontFamily: "var(--mono)", wordBreak: "break-all" }}>
             {sig.slice(0, 20)}...{sig.slice(-8)}
           </div>
-          <a href={`https://solscan.io/tx/${sig}?cluster=devnet`} target="_blank" rel="noopener noreferrer"
+          <a href={`https://solscan.io/tx/${sig}?`} target="_blank" rel="noopener noreferrer"
             style={{ color: "var(--purple-light)", fontSize: 12, textDecoration: "none", fontWeight: 600 }}>
             View on Solscan ↗
           </a>

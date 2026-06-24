@@ -123,7 +123,7 @@ export default function Whitepaper() {
           ["set_treasury", "Update fee recipient wallet", "Admin"],
           ["set_keeper", "Update keeper wallet address", "Admin"],
         ]} />
-        <P>Program ID (devnet): <span style={{ fontFamily: "var(--mono)", color: "var(--purple-light)", fontSize: 12 }}>8c7Boyk91MWkn5jabf5CnYD8DrG6p4hYm9eDdAAWXEKH</span>. Verifiable on <a href="https://solscan.io/account/8c7Boyk91MWkn5jabf5CnYD8DrG6p4hYm9eDdAAWXEKH?cluster=devnet" target="_blank" rel="noopener noreferrer" style={{ color: "var(--purple-light)" }}>Solscan</a>.</P>
+        <P>Program ID (mainnet): <span style={{ fontFamily: "var(--mono)", color: "var(--purple-light)", fontSize: 12 }}>8c7Boyk91MWkn5jabf5CnYD8DrG6p4hYm9eDdAAWXEKH</span>. Verifiable on <a href="https://solscan.io/account/8c7Boyk91MWkn5jabf5CnYD8DrG6p4hYm9eDdAAWXEKH" target="_blank" rel="noopener noreferrer" style={{ color: "var(--purple-light)" }}>Solscan</a>.</P>
       </Section>
 
       <Section title="5. Fee Structure">
@@ -186,7 +186,7 @@ export default function Whitepaper() {
 
       <Section title="9. Disclaimer">
         <P>This document is for informational purposes only and does not constitute financial advice or a solicitation to buy or sell any asset. DeFi protocols carry significant risks including smart contract vulnerabilities, protocol failures, and potential loss of funds. Never deposit more than you can afford to lose.</P>
-        <P>YieldPilot is currently deployed on Solana devnet for testing. Mainnet launch is pending. Do not send real funds to devnet addresses.</P>
+        <P>YieldPilot is deployed on Solana mainnet. Always verify transaction details before signing.</P>
       </Section>
 
       <div style={{ borderTop: "1px solid var(--border)", paddingTop: 24, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
