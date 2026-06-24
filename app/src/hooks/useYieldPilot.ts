@@ -293,7 +293,7 @@ export function useYieldPilot(vaultAddresses: string[]) {
           })
           .preInstructions(preIxs)
           .postInstructions(postIxs)
-          .rpc();
+          .rpc({ skipPreflight: true });
       });
     },
     [publicKey, getProgram, wrapTx]
@@ -364,7 +364,7 @@ export function useYieldPilot(vaultAddresses: string[]) {
           })
           .preInstructions(preIxs)
           .postInstructions(postIxs)
-          .rpc();
+          .rpc({ skipPreflight: true });
       });
     },
     [publicKey, getProgram, wrapTx]
