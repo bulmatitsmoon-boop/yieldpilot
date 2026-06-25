@@ -11,7 +11,7 @@ pub mod main_group {
 
     // USDC bank in main group
     // TODO: verify — fetch via `getProgramAccounts(MARGINFI_PROGRAM, { filters: [{ memcmp: { offset: 8+32, bytes: USDC_MINT } }] })`
-    pub const USDC_BANK: Pubkey = pubkey!("2s37akK2eyBbp8DZgCm7RtsaEz8eJP3Nxd4urLHnd9RQ");
+    pub const USDC_BANK: Pubkey = pubkey!("2s37akK2eyBbp8DZgCm7RtsaEz8eJP3Nxd4urLHQv7yB");
 
     // SOL bank in main group
     // TODO: verify at mainnet launch
