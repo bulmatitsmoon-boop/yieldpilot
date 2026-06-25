@@ -48,7 +48,9 @@ const MARINADE_TREASURY_MSOL = new PublicKey("B1aLzaNMeFVAyQ6f3XbbUyKcH2YPHu2fqi
 // BlazeStake mainnet constants (SPL Stake Pool)
 // ─────────────────────────────────────────────────────────────────────────────
 const SPL_STAKE_POOL_PROGRAM = new PublicKey("SPoo1Ku8WFXoNDMHPsrGSTx1iKKoGJ8GHC4NKVFJN3F");
-const BLAZE_POOL = new PublicKey("stk9ApQL9uNEt6Bta4iqQGqBnWmFMBGMxcVSoVYYFqu"); // TODO: verify against bSOL mint authority 6WecYymEARvjG5ZyqkrVQ6YkhPfujNzWpSPwNKXHCbV2
+// WARNING: bSOL mint authority (6WecYymE) != SPL withdraw authority (63s2Tss) for this pool.
+// Pool migrated from old address; direct SPL CPI may need to route through Sanctum router.
+const BLAZE_POOL = new PublicKey("stk9ApL5HeVAwPLr3TLhDXdZS8ptVu7zp6ov8HFDuMi"); // pool state confirmed on-chain (pool_mint = bSOL)
 const BSOL_MINT = new PublicKey("bSo13r4TkiE4KumL71LsHTPpL2euBYLFx6h9HP3piy1");
 
 // ─────────────────────────────────────────────────────────────────────────────

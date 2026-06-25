@@ -13,7 +13,7 @@ pub const SPL_STAKE_POOL_PROGRAM: Pubkey = pubkey!("SPoo1Ku8WFXoNDMHPsrGSTx1iKKo
 pub mod blaze {
     use anchor_lang::prelude::{pubkey, Pubkey};
     pub const PROGRAM:          Pubkey = pubkey!("SPoo1Ku8WFXoNDMHPsrGSTx1iKKoGJ8GHC4NKVFJN3F");
-    pub const POOL:             Pubkey = pubkey!("stk9ApQL9uNEt6Bta4iqQGqBnWmFMBGMxcVSoVYYFqu"); // TODO: verify against bSOL mint authority
+    pub const POOL:             Pubkey = pubkey!("stk9ApL5HeVAwPLr3TLhDXdZS8ptVu7zp6ov8HFDuMi"); // WARNING: bSOL mint auth (6WecYymE) != SPL withdraw auth (63s2Tss) — pool migrated, direct CPI may need Sanctum router
     pub const BSOL_MINT:        Pubkey = pubkey!("bSo13r4TkiE4KumL71LsHTPpL2euBYLFx6h9HP3piy1");
 }
 
