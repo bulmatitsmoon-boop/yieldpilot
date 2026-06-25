@@ -8,6 +8,9 @@ pub mod adapters;
 use adapters::{
     kamino::{KaminoDeposit, KaminoWithdraw, kamino_deposit, kamino_withdraw, KAMINO_LENDING_PROGRAM_ID},
     marinade::{MarinadeDeposit, MarinadeUnstake, marinade_deposit, marinade_liquid_unstake},
+    spl_stake_pool::{SplStakePoolDeposit, SplStakePoolWithdraw, spl_stake_pool_deposit, spl_stake_pool_withdraw},
+    solend::{SolendDeposit, SolendWithdraw, solend_deposit, solend_withdraw},
+    marginfi::{MarginFiDeposit, MarginFiWithdraw, marginfi_deposit, marginfi_withdraw},
     {AdapterError, ProtocolAdapter, ProtocolKind, assert_state_matches},
 };
 
@@ -301,8 +304,13 @@ pub mod yieldpilot {
             v.perf_fee_bps // fallback to vault-level rate when gating is disabled
         };
 
-        // Performance fee: only on profit
-        let perf_fee = if amount_out > cost_basis {
+        // Whitelist check: waive fee entirely for whitelisted wallets
+        let is_whitelisted = ctx.accounts.whitelist_entry.is_some();
+
+        // Performance fee: only on profit, and only for non-whitelisted users
+        let perf_fee = if is_whitelisted {
+            0
+        } else if amount_out > cost_basis {
             let profit = amount_out - cost_basis;
             profit.checked_mul(fee_bps)
                 .and_then(|x| x.checked_div(BPS_DENOM))
@@ -411,6 +419,15 @@ pub mod yieldpilot {
         Ok(())
     }
 
+    pub fn add_to_whitelist(ctx: Context<AddToWhitelist>, _wallet: Pubkey) -> Result<()> {
+        ctx.accounts.whitelist_entry.bump = ctx.bumps.whitelist_entry;
+        Ok(())
+    }
+
+    pub fn remove_from_whitelist(_ctx: Context<RemoveFromWhitelist>, _wallet: Pubkey) -> Result<()> {
+        Ok(())
+    }
+
     pub fn accept_admin(ctx: Context<AcceptAdmin>) -> Result<()> {
         let v = &mut ctx.accounts.vault;
         require!(v.pending_admin != Pubkey::default(), VaultError::NoPendingAdmin);
@@ -496,17 +513,19 @@ pub mod yieldpilot {
             CpiContext::new_with_signer(
                 ctx.accounts.kamino_program.to_account_info(),
                 KaminoDeposit {
-                    vault_authority:               ctx.accounts.vault_authority.to_account_info(),
-                    vault_token_account:           ctx.accounts.vault_token_account.clone(),
-                    vault_collateral_account:      ctx.accounts.vault_collateral_account.clone(),
-                    kamino_reserve:                ctx.accounts.kamino_reserve.to_account_info(),
-                    kamino_lending_market:         ctx.accounts.kamino_lending_market.to_account_info(),
+                    vault_authority:                ctx.accounts.vault_authority.to_account_info(),
+                    kamino_reserve:                 ctx.accounts.kamino_reserve.to_account_info(),
+                    kamino_lending_market:          ctx.accounts.kamino_lending_market.to_account_info(),
                     kamino_lending_market_authority: ctx.accounts.kamino_market_authority.to_account_info(),
+                    reserve_liquidity_mint:         ctx.accounts.kamino_liquidity_mint.to_account_info(),
                     kamino_reserve_liquidity_supply: ctx.accounts.kamino_liquidity_supply.to_account_info(),
-                    kamino_collateral_mint:        ctx.accounts.kamino_collateral_mint.to_account_info(),
-                    kamino_collateral_supply:      ctx.accounts.kamino_collateral_supply.to_account_info(),
-                    token_program:                 ctx.accounts.token_program.clone(),
-                    kamino_program:                ctx.accounts.kamino_program.to_account_info(),
+                    kamino_collateral_mint:         ctx.accounts.kamino_collateral_mint.to_account_info(),
+                    vault_token_account:            ctx.accounts.vault_token_account.clone(),
+                    vault_collateral_account:       ctx.accounts.vault_collateral_account.clone(),
+                    collateral_token_program:       ctx.accounts.token_program.to_account_info(),
+                    liquidity_token_program:        ctx.accounts.token_program.clone(),
+                    instruction_sysvar:             ctx.accounts.instruction_sysvar.to_account_info(),
+                    kamino_program:                 ctx.accounts.kamino_program.to_account_info(),
                 },
                 &[seeds],
             ),
@@ -549,17 +568,19 @@ pub mod yieldpilot {
             CpiContext::new_with_signer(
                 ctx.accounts.kamino_program.to_account_info(),
                 KaminoWithdraw {
-                    vault_authority:               ctx.accounts.vault_authority.to_account_info(),
-                    vault_token_account:           ctx.accounts.vault_token_account.clone(),
-                    vault_collateral_account:      ctx.accounts.vault_collateral_account.clone(),
-                    kamino_reserve:                ctx.accounts.kamino_reserve.to_account_info(),
-                    kamino_lending_market:         ctx.accounts.kamino_lending_market.to_account_info(),
+                    vault_authority:                ctx.accounts.vault_authority.to_account_info(),
+                    kamino_lending_market:          ctx.accounts.kamino_lending_market.to_account_info(),
+                    kamino_reserve:                 ctx.accounts.kamino_reserve.to_account_info(),
                     kamino_lending_market_authority: ctx.accounts.kamino_market_authority.to_account_info(),
+                    reserve_liquidity_mint:         ctx.accounts.kamino_liquidity_mint.to_account_info(),
+                    kamino_collateral_mint:         ctx.accounts.kamino_collateral_mint.to_account_info(),
                     kamino_reserve_liquidity_supply: ctx.accounts.kamino_liquidity_supply.to_account_info(),
-                    kamino_collateral_mint:        ctx.accounts.kamino_collateral_mint.to_account_info(),
-                    kamino_collateral_supply:      ctx.accounts.kamino_collateral_supply.to_account_info(),
-                    token_program:                 ctx.accounts.token_program.clone(),
-                    kamino_program:                ctx.accounts.kamino_program.to_account_info(),
+                    vault_collateral_account:       ctx.accounts.vault_collateral_account.clone(),
+                    vault_token_account:            ctx.accounts.vault_token_account.clone(),
+                    collateral_token_program:       ctx.accounts.token_program.to_account_info(),
+                    liquidity_token_program:        ctx.accounts.token_program.clone(),
+                    instruction_sysvar:             ctx.accounts.instruction_sysvar.to_account_info(),
+                    kamino_program:                 ctx.accounts.kamino_program.to_account_info(),
                 },
                 &[seeds],
             ),
@@ -663,6 +684,259 @@ pub mod yieldpilot {
         emit!(FundsRecalled { vault: v.key(), protocol_index, collateral_amount: msol_amount });
         Ok(())
     }
+
+    /// Deposit SOL into an SPL Stake Pool (Jito / BlazeStake) and receive LST tokens.
+    pub fn deploy_to_sol_lst(
+        ctx: Context<DeployToSolLst>,
+        protocol_index: u8,
+        lamports: u64,
+    ) -> Result<()> {
+        require!(lamports > 0, VaultError::ZeroAmount);
+        let v = &mut ctx.accounts.vault;
+        let idx = protocol_index as usize;
+        require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
+
+        let vault_key = v.key();
+        let seeds: &[&[u8]] = &[b"vault", vault_key.as_ref(), &[v.authority_bump]];
+
+        spl_stake_pool_deposit(
+            CpiContext::new_with_signer(
+                ctx.accounts.stake_pool_program.to_account_info(),
+                SplStakePoolDeposit {
+                    vault_authority:      ctx.accounts.vault_authority.to_account_info(),
+                    vault_lst_account:    ctx.accounts.vault_lst_account.clone(),
+                    stake_pool:           ctx.accounts.stake_pool.to_account_info(),
+                    withdraw_authority:   ctx.accounts.withdraw_authority.to_account_info(),
+                    reserve_stake:        ctx.accounts.reserve_stake.to_account_info(),
+                    manager_fee_account:  ctx.accounts.manager_fee_account.clone(),
+                    pool_mint:            ctx.accounts.pool_mint.clone(),
+                    clock_sysvar:         ctx.accounts.clock_sysvar.to_account_info(),
+                    stake_history_sysvar: ctx.accounts.stake_history_sysvar.to_account_info(),
+                    system_program:       ctx.accounts.system_program.clone(),
+                    token_program:        ctx.accounts.token_program.clone(),
+                    stake_pool_program:   ctx.accounts.stake_pool_program.to_account_info(),
+                },
+                &[seeds],
+            ),
+            lamports,
+            seeds,
+        )?;
+
+        v.protocols[idx].deployed_balance = v.protocols[idx].deployed_balance
+            .checked_add(lamports).ok_or(VaultError::MathOverflow)?;
+
+        emit!(FundsDeployed { vault: v.key(), protocol_index, amount: lamports });
+        Ok(())
+    }
+
+    /// Burn LST tokens to withdraw SOL from an SPL Stake Pool (Jito / BlazeStake).
+    pub fn recall_from_sol_lst(
+        ctx: Context<RecallFromSolLst>,
+        protocol_index: u8,
+        lst_amount: u64,
+    ) -> Result<()> {
+        require!(lst_amount > 0, VaultError::ZeroAmount);
+        let v = &mut ctx.accounts.vault;
+        let idx = protocol_index as usize;
+        require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
+
+        let vault_key = v.key();
+        let seeds: &[&[u8]] = &[b"vault", vault_key.as_ref(), &[v.authority_bump]];
+
+        spl_stake_pool_withdraw(
+            CpiContext::new_with_signer(
+                ctx.accounts.stake_pool_program.to_account_info(),
+                SplStakePoolWithdraw {
+                    vault_authority:      ctx.accounts.vault_authority.to_account_info(),
+                    vault_lst_account:    ctx.accounts.vault_lst_account.clone(),
+                    stake_pool:           ctx.accounts.stake_pool.to_account_info(),
+                    withdraw_authority:   ctx.accounts.withdraw_authority.to_account_info(),
+                    reserve_stake:        ctx.accounts.reserve_stake.to_account_info(),
+                    manager_fee_account:  ctx.accounts.manager_fee_account.clone(),
+                    pool_mint:            ctx.accounts.pool_mint.clone(),
+                    clock_sysvar:         ctx.accounts.clock_sysvar.to_account_info(),
+                    stake_history_sysvar: ctx.accounts.stake_history_sysvar.to_account_info(),
+                    stake_program:        ctx.accounts.stake_program.to_account_info(),
+                    token_program:        ctx.accounts.token_program.clone(),
+                    stake_pool_program:   ctx.accounts.stake_pool_program.to_account_info(),
+                },
+                &[seeds],
+            ),
+            lst_amount,
+            seeds,
+        )?;
+
+        v.protocols[idx].deployed_balance = v.protocols[idx].deployed_balance
+            .saturating_sub(lst_amount);
+
+        emit!(FundsRecalled { vault: v.key(), protocol_index, collateral_amount: lst_amount });
+        Ok(())
+    }
+
+    /// Deposit tokens into Solend, receive cTokens.
+    pub fn deploy_to_solend(
+        ctx: Context<DeployToSolend>,
+        protocol_index: u8,
+        amount: u64,
+    ) -> Result<()> {
+        require!(amount > 0, VaultError::ZeroAmount);
+        let v = &mut ctx.accounts.vault;
+        let idx = protocol_index as usize;
+        require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
+
+        let vault_key = v.key();
+        let seeds: &[&[u8]] = &[b"vault", vault_key.as_ref(), &[v.authority_bump]];
+
+        solend_deposit(
+            CpiContext::new_with_signer(
+                ctx.accounts.solend_program.to_account_info(),
+                SolendDeposit {
+                    vault_authority:          ctx.accounts.vault_authority.to_account_info(),
+                    vault_token_account:      ctx.accounts.vault_token_account.clone(),
+                    vault_collateral_account: ctx.accounts.vault_collateral_account.clone(),
+                    reserve:                  ctx.accounts.reserve.to_account_info(),
+                    reserve_liquidity_supply: ctx.accounts.reserve_liquidity_supply.to_account_info(),
+                    reserve_collateral_mint:  ctx.accounts.reserve_collateral_mint.clone(),
+                    lending_market:           ctx.accounts.lending_market.to_account_info(),
+                    lending_market_authority: ctx.accounts.lending_market_authority.to_account_info(),
+                    pyth_oracle:              ctx.accounts.pyth_oracle.to_account_info(),
+                    clock_sysvar:             ctx.accounts.clock_sysvar.to_account_info(),
+                    token_program:            ctx.accounts.token_program.clone(),
+                    solend_program:           ctx.accounts.solend_program.to_account_info(),
+                },
+                &[seeds],
+            ),
+            amount,
+            seeds,
+        )?;
+
+        v.protocols[idx].deployed_balance = v.protocols[idx].deployed_balance
+            .checked_add(amount).ok_or(VaultError::MathOverflow)?;
+        emit!(FundsDeployed { vault: v.key(), protocol_index, amount });
+        Ok(())
+    }
+
+    /// Redeem cTokens from Solend, receive liquidity.
+    pub fn recall_from_solend(
+        ctx: Context<RecallFromSolend>,
+        protocol_index: u8,
+        collateral_amount: u64,
+    ) -> Result<()> {
+        require!(collateral_amount > 0, VaultError::ZeroAmount);
+        let v = &mut ctx.accounts.vault;
+        let idx = protocol_index as usize;
+        require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
+
+        let vault_key = v.key();
+        let seeds: &[&[u8]] = &[b"vault", vault_key.as_ref(), &[v.authority_bump]];
+
+        solend_withdraw(
+            CpiContext::new_with_signer(
+                ctx.accounts.solend_program.to_account_info(),
+                SolendWithdraw {
+                    vault_authority:          ctx.accounts.vault_authority.to_account_info(),
+                    vault_collateral_account: ctx.accounts.vault_collateral_account.clone(),
+                    vault_token_account:      ctx.accounts.vault_token_account.clone(),
+                    reserve:                  ctx.accounts.reserve.to_account_info(),
+                    reserve_collateral_mint:  ctx.accounts.reserve_collateral_mint.clone(),
+                    reserve_liquidity_supply: ctx.accounts.reserve_liquidity_supply.to_account_info(),
+                    lending_market:           ctx.accounts.lending_market.to_account_info(),
+                    lending_market_authority: ctx.accounts.lending_market_authority.to_account_info(),
+                    pyth_oracle:              ctx.accounts.pyth_oracle.to_account_info(),
+                    clock_sysvar:             ctx.accounts.clock_sysvar.to_account_info(),
+                    token_program:            ctx.accounts.token_program.clone(),
+                    solend_program:           ctx.accounts.solend_program.to_account_info(),
+                },
+                &[seeds],
+            ),
+            collateral_amount,
+            seeds,
+        )?;
+
+        v.protocols[idx].deployed_balance = v.protocols[idx].deployed_balance
+            .saturating_sub(collateral_amount);
+        emit!(FundsRecalled { vault: v.key(), protocol_index, collateral_amount });
+        Ok(())
+    }
+
+    /// Deposit tokens into MarginFi. Balance tracked in marginfi_account, no receipt token.
+    pub fn deploy_to_marginfi(
+        ctx: Context<DeployToMarginFi>,
+        protocol_index: u8,
+        amount: u64,
+    ) -> Result<()> {
+        require!(amount > 0, VaultError::ZeroAmount);
+        let v = &mut ctx.accounts.vault;
+        let idx = protocol_index as usize;
+        require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
+
+        let vault_key = v.key();
+        let seeds: &[&[u8]] = &[b"vault", vault_key.as_ref(), &[v.authority_bump]];
+
+        marginfi_deposit(
+            CpiContext::new_with_signer(
+                ctx.accounts.marginfi_program.to_account_info(),
+                MarginFiDeposit {
+                    vault_authority:      ctx.accounts.vault_authority.to_account_info(),
+                    vault_token_account:  ctx.accounts.vault_token_account.clone(),
+                    marginfi_group:       ctx.accounts.marginfi_group.to_account_info(),
+                    marginfi_account:     ctx.accounts.marginfi_account.to_account_info(),
+                    bank:                 ctx.accounts.bank.to_account_info(),
+                    bank_liquidity_vault: ctx.accounts.bank_liquidity_vault.to_account_info(),
+                    token_program:        ctx.accounts.token_program.clone(),
+                    marginfi_program:     ctx.accounts.marginfi_program.to_account_info(),
+                },
+                &[seeds],
+            ),
+            amount,
+            seeds,
+        )?;
+
+        v.protocols[idx].deployed_balance = v.protocols[idx].deployed_balance
+            .checked_add(amount).ok_or(VaultError::MathOverflow)?;
+        emit!(FundsDeployed { vault: v.key(), protocol_index, amount });
+        Ok(())
+    }
+
+    /// Withdraw tokens from MarginFi.
+    pub fn recall_from_marginfi(
+        ctx: Context<RecallFromMarginFi>,
+        protocol_index: u8,
+        amount: u64,
+    ) -> Result<()> {
+        require!(amount > 0, VaultError::ZeroAmount);
+        let v = &mut ctx.accounts.vault;
+        let idx = protocol_index as usize;
+        require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
+
+        let vault_key = v.key();
+        let seeds: &[&[u8]] = &[b"vault", vault_key.as_ref(), &[v.authority_bump]];
+
+        marginfi_withdraw(
+            CpiContext::new_with_signer(
+                ctx.accounts.marginfi_program.to_account_info(),
+                MarginFiWithdraw {
+                    vault_authority:                ctx.accounts.vault_authority.to_account_info(),
+                    vault_token_account:            ctx.accounts.vault_token_account.clone(),
+                    marginfi_group:                 ctx.accounts.marginfi_group.to_account_info(),
+                    marginfi_account:               ctx.accounts.marginfi_account.to_account_info(),
+                    bank:                           ctx.accounts.bank.to_account_info(),
+                    bank_liquidity_vault:           ctx.accounts.bank_liquidity_vault.to_account_info(),
+                    bank_liquidity_vault_authority: ctx.accounts.bank_liquidity_vault_authority.to_account_info(),
+                    token_program:                  ctx.accounts.token_program.clone(),
+                    marginfi_program:               ctx.accounts.marginfi_program.to_account_info(),
+                },
+                &[seeds],
+            ),
+            amount,
+            seeds,
+        )?;
+
+        v.protocols[idx].deployed_balance = v.protocols[idx].deployed_balance
+            .saturating_sub(amount);
+        emit!(FundsRecalled { vault: v.key(), protocol_index, collateral_amount: amount });
+        Ok(())
+    }
 }
 
 // ── Vault state ───────────────────────────────────────────────────────────────
@@ -708,6 +982,13 @@ impl Vault {
         self.protocols[..self.protocol_count as usize]
             .iter().map(|p| p.deployed_balance).sum()
     }
+}
+
+/// Whitelist entry PDA — existence means the wallet pays zero performance fee on this vault.
+/// Seeds: ["wl", vault, wallet]
+#[account]
+pub struct WhitelistEntry {
+    pub bump: u8,
 }
 
 #[account]
@@ -889,10 +1170,52 @@ pub struct Withdraw<'info> {
     /// Optional: user's gate token account. Used to determine fee tier at withdrawal.
     pub user_gate_account: Option<Box<Account<'info, TokenAccount>>>,
 
+    /// Optional: whitelist entry PDA. If present, performance fee is waived entirely.
+    #[account(
+        seeds = [b"wl", vault.key().as_ref(), user.key().as_ref()],
+        bump,
+    )]
+    pub whitelist_entry: Option<Account<'info, WhitelistEntry>>,
+
     pub token_program: Program<'info, Token>,
 }
 
 #[derive(Accounts)]
+#[instruction(wallet: Pubkey)]
+pub struct AddToWhitelist<'info> {
+    #[account(mut)]
+    pub admin: Signer<'info>,
+    #[account(constraint = vault.admin == admin.key() @ VaultError::Unauthorized)]
+    pub vault: Account<'info, Vault>,
+    #[account(
+        init,
+        payer = admin,
+        space = 8 + 1,
+        seeds = [b"wl", vault.key().as_ref(), wallet.as_ref()],
+        bump,
+    )]
+    pub whitelist_entry: Account<'info, WhitelistEntry>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(wallet: Pubkey)]
+pub struct RemoveFromWhitelist<'info> {
+    #[account(mut)]
+    pub admin: Signer<'info>,
+    #[account(constraint = vault.admin == admin.key() @ VaultError::Unauthorized)]
+    pub vault: Account<'info, Vault>,
+    #[account(
+        mut,
+        close = admin,
+        seeds = [b"wl", vault.key().as_ref(), wallet.as_ref()],
+        bump = whitelist_entry.bump,
+    )]
+    pub whitelist_entry: Account<'info, WhitelistEntry>,
+}
+
+#[derive(Accounts)]
+#[instruction(wallet: Pubkey)]
 pub struct DeployToKamino<'info> {
     #[account(mut)]
     pub keeper: Signer<'info>,
@@ -912,13 +1235,16 @@ pub struct DeployToKamino<'info> {
     pub kamino_lending_market: UncheckedAccount<'info>,
     /// CHECK: Kamino validates
     pub kamino_market_authority: UncheckedAccount<'info>,
+    /// CHECK: Kamino validates - USDC mint
+    pub kamino_liquidity_mint: UncheckedAccount<'info>,
     /// CHECK: Kamino validates
     #[account(mut)] pub kamino_liquidity_supply: UncheckedAccount<'info>,
     /// CHECK: Kamino validates
     #[account(mut)] pub kamino_collateral_mint: UncheckedAccount<'info>,
-    /// CHECK: Kamino validates
-    #[account(mut)] pub kamino_collateral_supply: UncheckedAccount<'info>,
+    /// Token program (used for both liquidity and collateral - both are standard SPL)
     pub token_program: Program<'info, Token>,
+    /// CHECK: Sysvar instructions account required by Kamino
+    pub instruction_sysvar: UncheckedAccount<'info>,
     /// CHECK: address constraint
     #[account(address = KAMINO_LENDING_PROGRAM_ID)]
     pub kamino_program: UncheckedAccount<'info>,
@@ -944,13 +1270,16 @@ pub struct RecallFromKamino<'info> {
     pub kamino_lending_market: UncheckedAccount<'info>,
     /// CHECK: Kamino validates
     pub kamino_market_authority: UncheckedAccount<'info>,
+    /// CHECK: Kamino validates - USDC mint
+    pub kamino_liquidity_mint: UncheckedAccount<'info>,
     /// CHECK: Kamino validates
     #[account(mut)] pub kamino_liquidity_supply: UncheckedAccount<'info>,
     /// CHECK: Kamino validates
     #[account(mut)] pub kamino_collateral_mint: UncheckedAccount<'info>,
-    /// CHECK: Kamino validates
-    #[account(mut)] pub kamino_collateral_supply: UncheckedAccount<'info>,
+    /// Token program (used for both liquidity and collateral)
     pub token_program: Program<'info, Token>,
+    /// CHECK: Sysvar instructions account required by Kamino
+    pub instruction_sysvar: UncheckedAccount<'info>,
     /// CHECK: address constraint
     #[account(address = KAMINO_LENDING_PROGRAM_ID)]
     pub kamino_program: UncheckedAccount<'info>,
@@ -1007,6 +1336,188 @@ pub struct RecallFromMarinade<'info> {
     /// CHECK: address constraint
     #[account(address = adapters::marinade::MARINADE_MAINNET_PROGRAM)]
     pub marinade_program: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
+pub struct DeployToSolLst<'info> {
+    #[account(mut)]
+    pub keeper: Signer<'info>,
+    #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
+    pub vault: Account<'info, Vault>,
+    /// CHECK: PDA
+    #[account(mut, seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
+    pub vault_authority: UncheckedAccount<'info>,
+    /// Vault's LST ATA (jitoSOL or bSOL)
+    #[account(mut)]
+    pub vault_lst_account: Account<'info, TokenAccount>,
+    /// CHECK: Stake pool state account
+    #[account(mut)] pub stake_pool: UncheckedAccount<'info>,
+    /// CHECK: Withdraw authority PDA [pool, "withdraw"]
+    pub withdraw_authority: UncheckedAccount<'info>,
+    /// CHECK: Reserve stake account (from pool state)
+    #[account(mut)] pub reserve_stake: UncheckedAccount<'info>,
+    /// Manager fee account (from pool state)
+    #[account(mut)] pub manager_fee_account: Account<'info, TokenAccount>,
+    /// LST pool mint (jitoSOL or bSOL mint)
+    #[account(mut)] pub pool_mint: Account<'info, Mint>,
+    /// CHECK: clock
+    #[account(address = anchor_lang::solana_program::sysvar::clock::ID)]
+    pub clock_sysvar: UncheckedAccount<'info>,
+    /// CHECK: stake history
+    #[account(address = anchor_lang::solana_program::sysvar::stake_history::ID)]
+    pub stake_history_sysvar: UncheckedAccount<'info>,
+    pub system_program: Program<'info, System>,
+    pub token_program: Program<'info, Token>,
+    /// CHECK: SPL Stake Pool program or Jito fork
+    pub stake_pool_program: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
+pub struct RecallFromSolLst<'info> {
+    #[account(mut)]
+    pub keeper: Signer<'info>,
+    #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
+    pub vault: Account<'info, Vault>,
+    /// CHECK: PDA
+    #[account(mut, seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
+    pub vault_authority: UncheckedAccount<'info>,
+    /// Vault's LST ATA — LST burned from here
+    #[account(mut)]
+    pub vault_lst_account: Account<'info, TokenAccount>,
+    /// CHECK: Stake pool state account
+    #[account(mut)] pub stake_pool: UncheckedAccount<'info>,
+    /// CHECK: Withdraw authority PDA
+    pub withdraw_authority: UncheckedAccount<'info>,
+    /// CHECK: Reserve stake account
+    #[account(mut)] pub reserve_stake: UncheckedAccount<'info>,
+    /// Manager fee account
+    #[account(mut)] pub manager_fee_account: Account<'info, TokenAccount>,
+    /// LST pool mint
+    #[account(mut)] pub pool_mint: Account<'info, Mint>,
+    /// CHECK: clock
+    #[account(address = anchor_lang::solana_program::sysvar::clock::ID)]
+    pub clock_sysvar: UncheckedAccount<'info>,
+    /// CHECK: stake history
+    #[account(address = anchor_lang::solana_program::sysvar::stake_history::ID)]
+    pub stake_history_sysvar: UncheckedAccount<'info>,
+    /// CHECK: native stake program
+    #[account(address = anchor_lang::solana_program::stake::program::ID)]
+    pub stake_program: UncheckedAccount<'info>,
+    pub token_program: Program<'info, Token>,
+    /// CHECK: SPL Stake Pool program or Jito fork
+    pub stake_pool_program: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
+pub struct DeployToSolend<'info> {
+    #[account(mut)] pub keeper: Signer<'info>,
+    #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
+    pub vault: Account<'info, Vault>,
+    /// CHECK: PDA
+    #[account(mut, seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
+    pub vault_authority: UncheckedAccount<'info>,
+    #[account(mut, constraint = vault_token_account.key() == vault.vault_token_account)]
+    pub vault_token_account: Account<'info, TokenAccount>,
+    #[account(mut)] pub vault_collateral_account: Account<'info, TokenAccount>,
+    /// CHECK: Solend validates
+    #[account(mut)] pub reserve: UncheckedAccount<'info>,
+    /// CHECK: Solend validates
+    #[account(mut)] pub reserve_liquidity_supply: UncheckedAccount<'info>,
+    #[account(mut)] pub reserve_collateral_mint: Account<'info, Mint>,
+    /// CHECK: Solend validates
+    pub lending_market: UncheckedAccount<'info>,
+    /// CHECK: Solend validates
+    pub lending_market_authority: UncheckedAccount<'info>,
+    /// CHECK: Pyth oracle
+    pub pyth_oracle: UncheckedAccount<'info>,
+    /// CHECK: clock
+    #[account(address = anchor_lang::solana_program::sysvar::clock::ID)]
+    pub clock_sysvar: UncheckedAccount<'info>,
+    pub token_program: Program<'info, Token>,
+    /// CHECK: Solend program
+    #[account(address = adapters::solend::SOLEND_PROGRAM)]
+    pub solend_program: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
+pub struct RecallFromSolend<'info> {
+    #[account(mut)] pub keeper: Signer<'info>,
+    #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
+    pub vault: Account<'info, Vault>,
+    /// CHECK: PDA
+    #[account(mut, seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
+    pub vault_authority: UncheckedAccount<'info>,
+    #[account(mut)] pub vault_collateral_account: Account<'info, TokenAccount>,
+    #[account(mut, constraint = vault_token_account.key() == vault.vault_token_account)]
+    pub vault_token_account: Account<'info, TokenAccount>,
+    /// CHECK: Solend validates
+    #[account(mut)] pub reserve: UncheckedAccount<'info>,
+    #[account(mut)] pub reserve_collateral_mint: Account<'info, Mint>,
+    /// CHECK: Solend validates
+    #[account(mut)] pub reserve_liquidity_supply: UncheckedAccount<'info>,
+    /// CHECK: Solend validates
+    pub lending_market: UncheckedAccount<'info>,
+    /// CHECK: Solend validates
+    pub lending_market_authority: UncheckedAccount<'info>,
+    /// CHECK: Pyth oracle
+    pub pyth_oracle: UncheckedAccount<'info>,
+    /// CHECK: clock
+    #[account(address = anchor_lang::solana_program::sysvar::clock::ID)]
+    pub clock_sysvar: UncheckedAccount<'info>,
+    pub token_program: Program<'info, Token>,
+    /// CHECK: Solend program
+    #[account(address = adapters::solend::SOLEND_PROGRAM)]
+    pub solend_program: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
+pub struct DeployToMarginFi<'info> {
+    #[account(mut)] pub keeper: Signer<'info>,
+    #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
+    pub vault: Account<'info, Vault>,
+    /// CHECK: PDA
+    #[account(mut, seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
+    pub vault_authority: UncheckedAccount<'info>,
+    #[account(mut, constraint = vault_token_account.key() == vault.vault_token_account)]
+    pub vault_token_account: Account<'info, TokenAccount>,
+    /// CHECK: MarginFi validates
+    pub marginfi_group: UncheckedAccount<'info>,
+    /// CHECK: MarginFi validates — vault's marginfi_account PDA
+    #[account(mut)] pub marginfi_account: UncheckedAccount<'info>,
+    /// CHECK: MarginFi validates
+    #[account(mut)] pub bank: UncheckedAccount<'info>,
+    /// CHECK: MarginFi validates
+    #[account(mut)] pub bank_liquidity_vault: UncheckedAccount<'info>,
+    pub token_program: Program<'info, Token>,
+    /// CHECK: MarginFi program
+    #[account(address = adapters::marginfi::MARGINFI_PROGRAM)]
+    pub marginfi_program: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
+pub struct RecallFromMarginFi<'info> {
+    #[account(mut)] pub keeper: Signer<'info>,
+    #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
+    pub vault: Account<'info, Vault>,
+    /// CHECK: PDA
+    #[account(mut, seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
+    pub vault_authority: UncheckedAccount<'info>,
+    #[account(mut, constraint = vault_token_account.key() == vault.vault_token_account)]
+    pub vault_token_account: Account<'info, TokenAccount>,
+    /// CHECK: MarginFi validates
+    pub marginfi_group: UncheckedAccount<'info>,
+    /// CHECK: MarginFi validates
+    #[account(mut)] pub marginfi_account: UncheckedAccount<'info>,
+    /// CHECK: MarginFi validates
+    #[account(mut)] pub bank: UncheckedAccount<'info>,
+    /// CHECK: MarginFi validates
+    #[account(mut)] pub bank_liquidity_vault: UncheckedAccount<'info>,
+    /// CHECK: MarginFi validates
+    pub bank_liquidity_vault_authority: UncheckedAccount<'info>,
+    pub token_program: Program<'info, Token>,
+    /// CHECK: MarginFi program
+    #[account(address = adapters::marginfi::MARGINFI_PROGRAM)]
+    pub marginfi_program: UncheckedAccount<'info>,
 }
 
 // ── Events ────────────────────────────────────────────────────────────────────

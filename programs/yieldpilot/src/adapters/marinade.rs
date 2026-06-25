@@ -16,9 +16,9 @@ pub mod mainnet {
     pub const MSOL_MINT:         Pubkey = pubkey!("mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So");
     pub const LIQ_POOL_SOL_LEG:  Pubkey = pubkey!("UefNb6z6yvArqe4cJHTXCqStRsKmWhGxnZzuHbikP5Q");
     pub const LIQ_POOL_MSOL_LEG: Pubkey = pubkey!("7GgPYjS5Dza89wV6FpZ23kUJRG5vbQ1GM25ezspYFSoE");
-    pub const LIQ_POOL_MSOL_AUTH:Pubkey = pubkey!("Du3Ysj1wKbxPKkuPPnvzQLQh8oMSVifs3jGZjJWXFmHN");
-    pub const RESERVE_PDA:       Pubkey = pubkey!("Du3Ysj1wKbxPKkuPPnvzQLQh8oMSVifs3jGZjJWXFmHN");
-    pub const MSOL_MINT_AUTH:    Pubkey = pubkey!("Du3Ysj1wKbxPKkuPPnvzQLQh8oMSVifs3jGZjJWXFmHN");
+    pub const LIQ_POOL_MSOL_AUTH:Pubkey = pubkey!("JCDfVPvoz71ciFV2dy6gfazgja3ZMQKXkqkm5J6HP2j5"); // PDA seed "liq_pool_msol_mint"
+    pub const RESERVE_PDA:       Pubkey = pubkey!("Du3Ysj1wKbxPKkuPPnvzQLQh8oMSVifs3jGZjJWXFmHN"); // PDA seed "reserve"
+    pub const MSOL_MINT_AUTH:    Pubkey = pubkey!("3JLPCS1qM2zRw3Dp6V4hZnYHd4toMNPkNesXdX9tg6KM"); // PDA seed "st_mint"
     pub const TREASURY_MSOL_ACC: Pubkey = pubkey!("B1aLzaNMeFVAyQ6f3XbbUyKcH2YPHu2fqiEagmiF23VR");
 }
 
@@ -31,15 +31,15 @@ pub mod devnet {
     pub const MSOL_MINT:         Pubkey = pubkey!("mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So");
     pub const LIQ_POOL_SOL_LEG:  Pubkey = pubkey!("UefNb6z6yvArqe4cJHTXCqStRsKmWhGxnZzuHbikP5Q");
     pub const LIQ_POOL_MSOL_LEG: Pubkey = pubkey!("7GgPYjS5Dza89wV6FpZ23kUJRG5vbQ1GM25ezspYFSoE");
-    pub const LIQ_POOL_MSOL_AUTH:Pubkey = pubkey!("Du3Ysj1wKbxPKkuPPnvzQLQh8oMSVifs3jGZjJWXFmHN");
-    pub const RESERVE_PDA:       Pubkey = pubkey!("Du3Ysj1wKbxPKkuPPnvzQLQh8oMSVifs3jGZjJWXFmHN");
-    pub const MSOL_MINT_AUTH:    Pubkey = pubkey!("Du3Ysj1wKbxPKkuPPnvzQLQh8oMSVifs3jGZjJWXFmHN");
+    pub const LIQ_POOL_MSOL_AUTH:Pubkey = pubkey!("JCDfVPvoz71ciFV2dy6gfazgja3ZMQKXkqkm5J6HP2j5"); // PDA seed "liq_pool_msol_mint"
+    pub const RESERVE_PDA:       Pubkey = pubkey!("Du3Ysj1wKbxPKkuPPnvzQLQh8oMSVifs3jGZjJWXFmHN"); // PDA seed "reserve"
+    pub const MSOL_MINT_AUTH:    Pubkey = pubkey!("3JLPCS1qM2zRw3Dp6V4hZnYHd4toMNPkNesXdX9tg6KM"); // PDA seed "st_mint"
     pub const TREASURY_MSOL_ACC: Pubkey = pubkey!("B1aLzaNMeFVAyQ6f3XbbUyKcH2YPHu2fqiEagmiF23VR");
 }
 
 // Instruction discriminators from Marinade IDL
 const DEPOSIT_SOL_IX:      [u8; 8] = [0xf2, 0x23, 0xc6, 0x89, 0x52, 0xe1, 0xf2, 0xb6];
-const LIQUID_UNSTAKE_IX:   [u8; 8] = [0x30, 0x0c, 0xed, 0xa5, 0x8e, 0x09, 0x56, 0x8c];
+const LIQUID_UNSTAKE_IX:   [u8; 8] = [0x5c, 0x56, 0x68, 0xe7, 0x89, 0x5e, 0xb4, 0xc6]; // sha256("global:liquidUnstake")[:8]
 
 // ── Account contexts ──────────────────────────────────────────────────────────
 
