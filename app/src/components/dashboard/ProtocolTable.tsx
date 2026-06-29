@@ -207,7 +207,7 @@ export function ProtocolTable({ apys, loading }: Props) {
                   </div>
                   <div style={{ color: "var(--text-muted)", fontSize: 11 }}>{p.asset}</div>
                 </div>
-                <div><Pill label={isLP ? "LP" : p.name === "Marinade" || p.name === "Jito" || p.name === "BlazeStake" ? "Liquid Stake" : "Lending"} /></div>
+                <div><Pill label={isLP ? "LP" : p.name === "Marinade" || p.name === "Jito" ? "Liquid Stake" : "Lending"} /></div>
                 <div style={{ color: isLP ? "var(--red)" : isBest ? "var(--purple-light)" : "var(--green)", fontWeight: 700, fontFamily: "var(--mono)", fontSize: 14 }}>
                   {fmt(p.apyPercent)}%
                 </div>

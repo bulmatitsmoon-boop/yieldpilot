@@ -15,7 +15,7 @@ export interface ProtocolApy {
 // ─────────────────────────────────────────────────────────────────────────────
 // Individual protocol fetchers
 // All protocols here are lending or liquid staking — no LP impermanent loss.
-// Liquid staking exits (Jito, BlazeStake, Marinade) go via DEX at <0.3%
+// Liquid staking exits (Jito, Marinade) go via DEX at <0.3%
 // slippage, which the rebalancer accounts for before routing out of them.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -155,7 +155,6 @@ const FALLBACK_APYS: Record<string, Omit<ProtocolApy, "fetchedAt">> = {
   "marinade-sol":   { protocolId: "marinade-sol",   name: "Marinade",   asset: "SOL",  apyBps:  721, apyPercent: 7.21,  tvlUsd: 1_230_000_000, riskScore: 1 },
   "marginfi-sol":   { protocolId: "marginfi-sol",   name: "MarginFi",   asset: "SOL",  apyBps:  710, apyPercent: 7.10,  tvlUsd: 380_000_000,   riskScore: 1 },
   "kamino-sol":     { protocolId: "kamino-sol",     name: "Kamino",     asset: "SOL",  apyBps:  620, apyPercent: 6.20,  tvlUsd: 280_000_000,   riskScore: 1 },
-  "blazestake-sol": { protocolId: "blazestake-sol", name: "BlazeStake", asset: "SOL",  apyBps:  601, apyPercent: 6.01,  tvlUsd: 180_000_000,   riskScore: 1 },
   "drift-sol":      { protocolId: "drift-sol",      name: "Drift",      asset: "SOL",  apyBps:  588, apyPercent: 5.88,  tvlUsd: 220_000_000,   riskScore: 1 },
   "solend-usdc":    { protocolId: "solend-usdc",    name: "Solend",     asset: "USDC", apyBps:  510, apyPercent: 5.10,  tvlUsd: 95_000_000,    riskScore: 1 },
 };

@@ -685,7 +685,7 @@ pub mod yieldpilot {
         Ok(())
     }
 
-    /// Deposit SOL into an SPL Stake Pool (Jito / BlazeStake) and receive LST tokens.
+    /// Deposit SOL into an SPL Stake Pool (Jito) and receive LST tokens.
     pub fn deploy_to_sol_lst(
         ctx: Context<DeployToSolLst>,
         protocol_index: u8,
@@ -729,7 +729,7 @@ pub mod yieldpilot {
         Ok(())
     }
 
-    /// Burn LST tokens to withdraw SOL from an SPL Stake Pool (Jito / BlazeStake).
+    /// Burn LST tokens to withdraw SOL from an SPL Stake Pool (Jito).
     pub fn recall_from_sol_lst(
         ctx: Context<RecallFromSolLst>,
         protocol_index: u8,
@@ -1347,7 +1347,7 @@ pub struct DeployToSolLst<'info> {
     /// CHECK: PDA
     #[account(mut, seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
     pub vault_authority: UncheckedAccount<'info>,
-    /// Vault's LST ATA (jitoSOL or bSOL)
+    /// Vault's LST ATA (jitoSOL)
     #[account(mut)]
     pub vault_lst_account: Account<'info, TokenAccount>,
     /// CHECK: Stake pool state account
@@ -1358,7 +1358,7 @@ pub struct DeployToSolLst<'info> {
     #[account(mut)] pub reserve_stake: UncheckedAccount<'info>,
     /// Manager fee account (from pool state)
     #[account(mut)] pub manager_fee_account: Account<'info, TokenAccount>,
-    /// LST pool mint (jitoSOL or bSOL mint)
+    /// LST pool mint (jitoSOL)
     #[account(mut)] pub pool_mint: Account<'info, Mint>,
     /// CHECK: clock
     #[account(address = anchor_lang::solana_program::sysvar::clock::ID)]

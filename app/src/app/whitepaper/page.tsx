@@ -177,7 +177,7 @@ export default function Whitepaper() {
           ["Phase 1", "Admin / keeper wallet separation", "Complete"],
           ["Phase 1", "Mainnet launch with $YPILOT token gating", "Pending launch"],
           ["Phase 2", "Third-party smart contract audit", "Planned"],
-          ["Phase 2", "Additional protocols — Jito, BlazeStake, Solend", "Planned"],
+          ["Phase 2", "Additional protocols — Jito, Solend", "Planned"],
           ["Phase 2", "Referral system — earn a share of referred yield fees", "Planned"],
           ["Phase 3", "Cross-chain deposits via Wormhole", "Research"],
           ["Phase 3", "Auto-bridge to highest cross-chain yield", "Research"],

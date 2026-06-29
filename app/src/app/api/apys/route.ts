@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 // All protocols here are lending or liquid staking — no LP impermanent loss risk.
-// Liquid staking exits (Jito, BlazeStake, Marinade) go via DEX swap at <0.3% slippage,
+// Liquid staking exits (Jito, Marinade) go via DEX swap at <0.3% slippage,
 // which the keeper accounts for before deciding to rebalance out of them.
 
 const COLORS: Record<string, string> = {
@@ -12,7 +12,6 @@ const COLORS: Record<string, string> = {
   "marginfi-sol":     "#F97316",
   "jito-sol":         "#10B981",
   "marinade-sol":     "#06B6D4",
-  "blazestake-sol":   "#3B82F6",
   "drift-sol":        "#14B8A6",
   "solend-usdc":      "#8B5CF6",
   "raydium-usdc-sol": "#EF4444",
@@ -26,7 +25,6 @@ const FALLBACK = [
   { protocolId: "marinade-sol",     name: "Marinade",   asset: "SOL",      apyPercent: 7.21,  apyBps:  721, tvlUsd: 1_230_000_000, riskScore: 1 },
   { protocolId: "marginfi-sol",     name: "MarginFi",   asset: "SOL",      apyPercent: 7.10,  apyBps:  710, tvlUsd: 380_000_000,   riskScore: 1 },
   { protocolId: "kamino-sol",       name: "Kamino",     asset: "SOL",      apyPercent: 6.20,  apyBps:  620, tvlUsd: 280_000_000,   riskScore: 1 },
-  { protocolId: "blazestake-sol",   name: "BlazeStake", asset: "SOL",      apyPercent: 6.01,  apyBps:  601, tvlUsd: 180_000_000,   riskScore: 1 },
   { protocolId: "drift-sol",        name: "Drift",      asset: "SOL",      apyPercent: 5.88,  apyBps:  588, tvlUsd: 220_000_000,   riskScore: 1 },
   { protocolId: "solend-usdc",      name: "Solend",     asset: "USDC",     apyPercent: 5.10,  apyBps:  510, tvlUsd: 95_000_000,    riskScore: 1 },
   // LP protocols — shown only when user opts in via the LP toggle

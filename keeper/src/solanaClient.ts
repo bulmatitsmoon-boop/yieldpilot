@@ -45,15 +45,6 @@ const MARINADE_MSOL_MINT_AUTH = new PublicKey("3JLPCS1qM2zRw3Dp6V4hZnYHd4toMNPkN
 const MARINADE_TREASURY_MSOL = new PublicKey("B1aLzaNMeFVAyQ6f3XbbUyKcH2YPHu2fqiEagmiF23VR");
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BlazeStake mainnet constants (SPL Stake Pool)
-// ─────────────────────────────────────────────────────────────────────────────
-const SPL_STAKE_POOL_PROGRAM = new PublicKey("SPoo1Ku8WFXoNDMHPsrGSTx1iKKoGJ8GHC4NKVFJN3F");
-// WARNING: bSOL mint authority (6WecYymE) != SPL withdraw authority (63s2Tss) for this pool.
-// Pool migrated from old address; direct SPL CPI may need to route through Sanctum router.
-const BLAZE_POOL = new PublicKey("stk9ApL5HeVAwPLr3TLhDXdZS8ptVu7zp6ov8HFDuMi"); // pool state confirmed on-chain (pool_mint = bSOL)
-const BSOL_MINT = new PublicKey("bSo13r4TkiE4KumL71LsHTPpL2euBYLFx6h9HP3piy1");
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Jito mainnet constants — TODO: verify program and pool addresses
 // ─────────────────────────────────────────────────────────────────────────────
 const JITOSOL_MINT = new PublicKey("J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn");
@@ -521,7 +512,7 @@ export class SolanaClient {
 
   // ── BlazeStake / Jito (SPL Stake Pool) ───────────────────────────────────
 
-  /** Deploy SOL to an SPL Stake Pool (BlazeStake or Jito). Pool state accounts must be passed in. */
+  /** Deploy SOL to an SPL Stake Pool (Jito). Pool state accounts must be passed in. */
   async deployToSolLst(
     vaultAddress: string,
     protocolIndex: number,
