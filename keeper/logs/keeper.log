@@ -170,3 +170,157 @@
   ]
 }
 2026-06-16 18:39:47 [[32minfo[39m] ✓ Keeper running. Press Ctrl+C to stop.
+2026-06-29 03:49:35 [[32minfo[39m] ⚡ YieldPilot Keeper starting up...
+2026-06-29 03:49:36 [[32minfo[39m] SolanaClient initialized
+{
+  "rpc": "https://api.devnet.solana.com",
+  "keeper": "DzBe4ag5Ehjd3eE3wa5JVnqcVM2mQ8FFd2ZmxKjVvY2M"
+}
+2026-06-29 03:49:36 [[32minfo[39m] Keeper wallet: DzBe4ag5Ehjd3eE3wa5JVnqcVM2mQ8FFd2ZmxKjVvY2M (0.5096 SOL)
+2026-06-29 03:49:36 [[32minfo[39m] Scheduling cron jobs
+{
+  "apyCron": "*/15 * * * *",
+  "compoundCron": "0 * * * *"
+}
+2026-06-29 03:49:36 [[32minfo[39m] Running initial checks...
+2026-06-29 03:49:36 [[32minfo[39m] ── APY poll + rebalance check ──
+2026-06-29 03:49:36 [[32minfo[39m] Fetching APYs from all protocols...
+2026-06-29 03:49:36 [[33mwarn[39m] Failed to fetch MarginFi APY
+{
+  "error": "getaddrinfo ENOTFOUND production.marginfi.com"
+}
+2026-06-29 03:49:36 [[33mwarn[39m] Failed to fetch Drift APY
+{
+  "error": "Request failed with status code 502"
+}
+2026-06-29 03:49:36 [[33mwarn[39m] Failed to fetch Jito APY
+{
+  "error": "Request failed with status code 404"
+}
+2026-06-29 03:49:36 [[33mwarn[39m] Failed to fetch Kamino APY
+{
+  "error": "Request failed with status code 404"
+}
+2026-06-29 03:49:37 [[32minfo[39m] APY fetch complete
+{
+  "protocols": [
+    "MarginFi(USDC): 11.40%",
+    "Jito(SOL): 8.90%",
+    "Kamino(USDC): 8.42%",
+    "Marinade(SOL): 10.85%",
+    "MarginFi(SOL): 7.10%",
+    "Kamino(SOL): 6.20%",
+    "Drift(SOL): 5.88%",
+    "Solend(USDC): 5.10%"
+  ]
+}
+2026-06-29 03:49:37 [[32minfo[39m] Checking vault: 8KcoRt5D... (YieldPilot SOL)
+2026-06-29 03:49:37 [[32minfo[39m]   Rebalance decision: Drift 6000bps AND net APY gain 111bps
+{
+  "current": [
+    8000,
+    2000
+  ],
+  "proposed": [
+    2000,
+    8000
+  ],
+  "apyImprovementBps": 111
+}
+2026-06-29 03:49:37 [[32minfo[39m]   Sending rebalance transaction...
+2026-06-29 03:49:38 [[32minfo[39m] rebalance(8KcoRt5D...) confirmed
+{
+  "signature": "5rSCjem8XvRfdfiFJaUxAyUaKUndfP525fZGg1CoNku4QTtWEWfAq54GtSotz1rxRgWoXqMMoY3bjFMW4bBH2MDX",
+  "attempt": 1
+}
+2026-06-29 03:50:05 [[32minfo[39m] ⚡ YieldPilot Keeper starting up...
+2026-06-29 03:50:06 [[32minfo[39m] SolanaClient initialized
+{
+  "rpc": "https://api.devnet.solana.com",
+  "keeper": "DzBe4ag5Ehjd3eE3wa5JVnqcVM2mQ8FFd2ZmxKjVvY2M"
+}
+2026-06-29 03:50:06 [[32minfo[39m] Keeper wallet: DzBe4ag5Ehjd3eE3wa5JVnqcVM2mQ8FFd2ZmxKjVvY2M (0.5096 SOL)
+2026-06-29 03:50:06 [[32minfo[39m] Scheduling cron jobs
+{
+  "apyCron": "*/15 * * * *",
+  "compoundCron": "0 * * * *"
+}
+2026-06-29 03:50:06 [[32minfo[39m] Running initial checks...
+2026-06-29 03:50:06 [[32minfo[39m] ── APY poll + rebalance check ──
+2026-06-29 03:50:06 [[32minfo[39m] Fetching APYs from all protocols...
+2026-06-29 03:50:06 [[33mwarn[39m] Failed to fetch MarginFi APY
+{
+  "error": "getaddrinfo ENOTFOUND production.marginfi.com"
+}
+2026-06-29 03:50:06 [[33mwarn[39m] Failed to fetch Jito APY
+{
+  "error": "Request failed with status code 404"
+}
+2026-06-29 03:50:06 [[33mwarn[39m] Failed to fetch Drift APY
+{
+  "error": "Request failed with status code 502"
+}
+2026-06-29 03:50:06 [[33mwarn[39m] Failed to fetch Kamino APY
+{
+  "error": "Request failed with status code 404"
+}
+2026-06-29 03:50:06 [[32minfo[39m] APY fetch complete
+{
+  "protocols": [
+    "MarginFi(USDC): 11.40%",
+    "Jito(SOL): 8.90%",
+    "Kamino(USDC): 8.42%",
+    "Marinade(SOL): 10.85%",
+    "MarginFi(SOL): 7.10%",
+    "Kamino(SOL): 6.20%",
+    "Drift(SOL): 5.88%",
+    "Solend(USDC): 5.10%"
+  ]
+}
+2026-06-29 03:50:06 [[32minfo[39m] Checking vault: 8KcoRt5D... (YieldPilot SOL)
+2026-06-29 03:50:06 [[32minfo[39m]   Rebalance decision: No rebalance needed
+{
+  "current": [
+    2000,
+    8000
+  ],
+  "proposed": [
+    2000,
+    8000
+  ],
+  "apyImprovementBps": 0
+}
+2026-06-29 03:50:06 [[32minfo[39m] ── Compound check ──
+2026-06-29 03:50:07 [[32minfo[39m] Vault 8KcoRt5D...: 5891min since last compound
+2026-06-29 03:50:07 [[32minfo[39m]   Sending compound transaction...
+2026-06-29 03:50:07 [[32minfo[39m] compound(8KcoRt5D...) confirmed
+{
+  "signature": "1quiTxZCViSqRBa9d2SC5w7kpSC8CB47TCugcKCQadcJnJ47thtxnoT9hsiiXSaXBvZpWKZSPacNDgouvMJhox3",
+  "attempt": 1
+}
+2026-06-29 03:50:07 [[32minfo[39m]   ✓ Compounded
+{
+  "signature": "1quiTxZCViSqRBa9d2SC5w7kpSC8CB47TCugcKCQadcJnJ47thtxnoT9hsiiXSaXBvZpWKZSPacNDgouvMJhox3"
+}
+2026-06-29 03:50:08 [[32minfo[39m] Health check
+{
+  "keeperBalance": "0.5096 SOL",
+  "uptime": "0min",
+  "stats": {
+    "apyPolls": 1,
+    "rebalances": 0,
+    "compounds": 1,
+    "errors": 0
+  },
+  "latestApys": [
+    "MarginFi(USDC): 11.40%",
+    "Jito(SOL): 8.90%",
+    "Kamino(USDC): 8.42%",
+    "Marinade(SOL): 10.85%",
+    "MarginFi(SOL): 7.10%",
+    "Kamino(SOL): 6.20%",
+    "Drift(SOL): 5.88%",
+    "Solend(USDC): 5.10%"
+  ]
+}
+2026-06-29 03:50:08 [[32minfo[39m] ✓ Keeper running. Press Ctrl+C to stop.

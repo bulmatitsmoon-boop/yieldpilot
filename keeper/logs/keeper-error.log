@@ -1,0 +1,5 @@
+2026-06-29 03:49:38 [[31merror[39m] Uncaught exception
+{
+  "error": "write EPIPE",
+  "stack": "Error: write EPIPE\n    at afterWriteDispatched (node:internal/stream_base_commons:161:15)\n    at writeGeneric (node:internal/stream_base_commons:152:3)\n    at Socket._writeGeneric (node:net:958:11)\n    at Socket._write (node:net:970:8)\n    at writeOrBuffer (node:internal/streams/writable:572:12)\n    at _write (node:internal/streams/writable:501:10)\n    at Socket.Writable.write (node:internal/streams/writable:510:10)\n    at Console.log (/root/yieldpilot/keeper/node_modules/winston/lib/winston/transports/console.js:87:23)\n    at Console._write (/root/yieldpilot/keeper/node_modules/winston-transport/modern.js:82:19)\n    at doWrite (/root/yieldpilot/keeper/node_modules/readable-stream/lib/_stream_writable.js:390:139)"
+}
