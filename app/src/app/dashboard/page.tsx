@@ -21,6 +21,7 @@ export default function Dashboard() {
   const { publicKey, connected } = useWallet();
   const { setVisible } = useWalletModal();
   const [activeTab, setActiveTab] = useState<Tab>("overview");
+  const [selectedVaultIdx, setSelectedVaultIdx] = useState(0);
 
   const { vaults, positions, loading, txStatus, txError, vaultError, lastTxSig, deposit, withdraw, refresh } =
     useYieldPilot(VAULT_ADDRESSES);
@@ -33,8 +34,13 @@ export default function Dashboard() {
   const bestApy = apys.length ? Math.max(...apys.map((a) => a.apyPercent)) : 0;
   const bestProtocol = apys.find((a) => a.apyPercent === bestApy);
 
-  const primaryVault = vaults[0];
-  const primaryPosition = positions[0];
+  const WSOL = "So11111111111111111111111111111111111111112";
+  const usdcVaultIdx = vaults.findIndex(v => v.mint !== WSOL);
+  const solVaultIdx  = vaults.findIndex(v => v.mint === WSOL);
+  const safeIdx = selectedVaultIdx < vaults.length ? selectedVaultIdx : 0;
+  const primaryVault = vaults[safeIdx];
+  const primaryPosition = positions[safeIdx];
+  const vaultLabel = primaryVault?.mint === WSOL ? "SOL" : "USDC";
 
   // ── Global vault stats ────────────────────────────────────────────────────
   const totalTvl = vaults.reduce((s, v) => s + v.totalDeposits, 0);
@@ -298,6 +304,23 @@ export default function Dashboard() {
       {/* ── Deposit/Withdraw ─────────────────────────────────────────────── */}
       {(activeTab === "deposit" || activeTab === "withdraw") && (
         <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
+          {/* Vault selector (USDC / SOL) */}
+          {vaults.length > 1 && (
+            <div style={{ width: "100%", display: "flex", gap: 8, marginBottom: 4 }}>
+              {[{ label: "USDC", idx: usdcVaultIdx }, { label: "SOL", idx: solVaultIdx }]
+                .filter(v => v.idx >= 0)
+                .map(({ label, idx }) => (
+                  <button key={label} onClick={() => setSelectedVaultIdx(idx)} style={{
+                    padding: "6px 18px", borderRadius: 8, fontWeight: 600, fontSize: 13,
+                    border: "1px solid var(--border)", cursor: "pointer", fontFamily: "Inter",
+                    background: safeIdx === idx ? "var(--purple)" : "var(--surface-2)",
+                    color: safeIdx === idx ? "#fff" : "var(--text-muted)",
+                  }}>
+                    {label}
+                  </button>
+                ))}
+            </div>
+          )}
           {primaryVault ? (
             <DepositWithdrawPanel
               vault={primaryVault}
