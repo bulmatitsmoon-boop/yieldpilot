@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+const RPC_URL = 'https://api.devnet.solana.com';
+
 export async function POST(req: NextRequest) {
   const body = await req.text();
-  const res = await fetch('https://api.mainnet-beta.solana.com', {
+  const res = await fetch(RPC_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body,
