@@ -103,16 +103,13 @@ export function useYieldPilot(vaultAddresses: string[]) {
 
   const fetchVaults = useCallback(async () => {
     if (vaultAddresses.length === 0) return;
-    console.log("[YP] fetchVaults", vaultAddresses, (connection as any)._rpcEndpoint);
     setLoading(true);
     try {
       const program = getProgram();
       const results = await Promise.allSettled(
         vaultAddresses.map(async (addr) => {
           const pubkey = new PublicKey(addr);
-          console.log("[YP] fetching:", addr);
           const raw = await (program.account as any)["vault"].fetch(pubkey);
-          console.log("[YP] ok:", addr);
           return {
             address: addr,
             name: raw.name as string,
@@ -135,7 +132,6 @@ export function useYieldPilot(vaultAddresses: string[]) {
           } as VaultInfo;
         })
       );
-      results.filter(r => r.status === "rejected").forEach((r: any) => console.error("[YP] rejected:", r.reason?.message || r.reason));
       setVaults(
         results
           .filter((r): r is PromiseFulfilledResult<VaultInfo> => r.status === "fulfilled")
