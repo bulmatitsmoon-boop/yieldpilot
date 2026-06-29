@@ -96,10 +96,13 @@ async function runApyPollAndRebalance(client: SolanaClient) {
       if (sig) {
         stats.rebalances++;
         stats.lastRebalance = new Date();
-        logger.info(`  ✓ Rebalanced`, {
+        logger.info(`  ✓ Target allocations updated`, {
           signature: sig,
           newAllocations: decision.newAllocations,
         });
+        // Now move the actual funds to match the new targets
+        logger.info("  Executing fund movements...");
+        await client.executeRebalance(address, state);
       } else {
         stats.errors++;
       }
