@@ -10,7 +10,8 @@ export default function Home() {
   const { setVisible } = useWalletModal();
   const { connected } = useWallet();
   const { apys } = useApys();
-  const sorted = [...apys].sort((a, b) => b.apyBps - a.apyBps);
+  const lpProtocols = apys.filter(a => a.riskScore >= 3);
+  const sorted = [...apys].filter(a => a.riskScore < 3).sort((a, b) => b.apyBps - a.apyBps);
   const best = sorted[0];
 
   return (
@@ -176,6 +177,31 @@ export default function Home() {
               </span>
             </div>
           ))}
+          {lpProtocols.map((p) => (
+            <div key={p.protocolId} style={{
+              display: "grid", gridTemplateColumns: "1fr 100px 100px",
+              padding: "14px 20px", borderTop: "1px solid var(--border)",
+              alignItems: "center",
+              background: "var(--surface)",
+              opacity: 0.5,
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ width: 6, height: 6, borderRadius: "50%", background: p.color, flexShrink: 0 }} />
+                <span style={{ fontWeight: 600, fontSize: 13 }}>{p.name}</span>
+                <span style={{
+                  fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4,
+                  background: "rgba(139,92,246,0.12)", color: "var(--purple-light)",
+                  border: "1px solid rgba(139,92,246,0.2)", letterSpacing: "0.04em",
+                }}>COMING SOON</span>
+              </div>
+              <span style={{ textAlign: "right", color: "var(--text-muted)", fontSize: 12, fontFamily: "var(--mono)" }}>
+                {p.asset}
+              </span>
+              <span style={{ textAlign: "right", fontFamily: "var(--mono)", fontWeight: 700, fontSize: 15, color: "var(--text-muted)" }}>
+                {fmt(p.apyPercent)}%
+              </span>
+            </div>
+          ))}
         </div>
       </div>
 
@@ -278,7 +304,7 @@ export default function Home() {
             display: "flex", flexDirection: "column", gap: 8,
           }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Built with</div>
-            {["Solana", "Anchor 0.31", "Solend", "Kamino", "Marinade"].map(t => (
+            {["Anchor 0.31", "Solend", "Kamino", "Marinade"].map(t => (
               <span key={t} style={{ fontSize: 13, color: "var(--text-muted)" }}>{t}</span>
             ))}
           </div>
