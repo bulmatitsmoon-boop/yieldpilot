@@ -28,6 +28,15 @@ export default function Dashboard() {
   const { apys, loading: apyLoading } = useApys();
 
   // ── Derived stats ─────────────────────────────────────────────────────────
+  const WSOL_MINT = "So11111111111111111111111111111111111111112";
+  const usdcPos = positions.find((_, i) => vaults[i]?.mint !== WSOL_MINT);
+  const solPos  = positions.find((_, i) => vaults[i]?.mint === WSOL_MINT);
+  const usdcDeposited = usdcPos ? usdcPos.currentValue / 1e6 : 0;
+  const solDeposited  = solPos  ? solPos.currentValue  / 1e9 : 0;
+  const usdcEarned    = usdcPos ? usdcPos.earnedValue  / 1e6 : 0;
+  const solEarned     = solPos  ? solPos.earnedValue   / 1e9 : 0;
+  const hasDeposits   = usdcDeposited > 0 || solDeposited > 0;
+  // Legacy single-value fallback for other uses
   const totalDeposited = positions.reduce((s, p) => s + p.currentValue / 1e6, 0);
   const totalEarned    = positions.reduce((s, p) => s + p.earnedValue / 1e6, 0);
   const avgApy = apys.length ? apys.reduce((s, a) => s + a.apyPercent, 0) / apys.length : 0;
@@ -161,8 +170,20 @@ export default function Dashboard() {
 
       {/* Stats row */}
       <div style={{ display: "flex", gap: 12, marginBottom: 24, flexWrap: "wrap" }}>
-        <StatCard label="Your Deposits" value={`$${fmt(totalDeposited)}`} sub={positions.length ? `${positions.length} active position${positions.length > 1 ? "s" : ""}` : "No positions yet"} />
-        <StatCard label="Total Earned" value={`$${fmt(totalEarned)}`} sub="all time" accent="var(--green)" />
+        <StatCard
+          label="Your Deposits"
+          value={hasDeposits
+            ? [usdcDeposited > 0 ? `${fmt(usdcDeposited)} USDC` : null, solDeposited > 0 ? `${solDeposited.toFixed(4)} SOL` : null].filter(Boolean).join(" · ")
+            : "—"}
+          sub={positions.length ? `${positions.length} active position${positions.length > 1 ? "s" : ""}` : "No positions yet"}
+        />
+        <StatCard
+          label="Total Earned"
+          value={usdcEarned > 0 || solEarned > 0
+            ? [usdcEarned > 0 ? `${fmt(usdcEarned)} USDC` : null, solEarned > 0 ? `${solEarned.toFixed(4)} SOL` : null].filter(Boolean).join(" · ")
+            : "$0.00"}
+          sub="all time" accent="var(--green)"
+        />
         <StatCard label="Avg Protocol APY" value={`${fmt(avgApy)}%`} sub="across protocols" accent="var(--purple-light)" />
         <StatCard label="Best Available" value={`${fmt(bestApy)}%`} sub={bestProtocol ? `${bestProtocol.name} · ${bestProtocol.asset}` : ""} accent="var(--yellow)" />
       </div>
