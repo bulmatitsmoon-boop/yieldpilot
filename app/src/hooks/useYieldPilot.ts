@@ -127,10 +127,10 @@ export function useYieldPilot(vaultAddresses: string[]) {
             protocols: (raw.protocols as any[])
               .slice(0, raw.protocolCount as number)
               .map((p) => ({
-                name: Buffer.from(p.name).toString("utf8").replace(/\0/g, ""),
+                name: Buffer.from(p.label).toString("utf8").replace(/\0/g, ""),
                 targetBps: p.targetBps.toNumber(),
-                currentBalance: p.currentBalance.toNumber(),
-                enabled: p.enabled,
+                currentBalance: p.deployedBalance.toNumber(),
+                enabled: p.targetBps > 0,
               })),
           } as VaultInfo;
         })
