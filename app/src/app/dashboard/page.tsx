@@ -15,7 +15,7 @@ const VAULT_ADDRESSES = (process.env.NEXT_PUBLIC_VAULT_ADDRESSES || "FcEVxvADkv9
   .map((s) => s.trim())
   .filter(Boolean);
 
-type Tab = "overview" | "protocols" | "deposit";
+type Tab = "overview" | "protocols" | "deposit" | "withdraw";
 
 export default function Dashboard() {
   const { publicKey, connected } = useWallet();
@@ -189,7 +189,7 @@ export default function Dashboard() {
 
       {/* Tabs */}
       <div style={{ display: "flex", gap: 4, marginBottom: 20, background: "var(--surface)", padding: 4, borderRadius: 10, border: "1px solid var(--border)", width: "fit-content" }}>
-        {(["overview", "protocols", "deposit"] as Tab[]).map((t) => (
+        {(["overview", "protocols", "deposit", "withdraw"] as Tab[]).map((t) => (
           <button key={t} onClick={() => setActiveTab(t)} style={tabStyle(t)}>
             {t.charAt(0).toUpperCase() + t.slice(1)}
           </button>
@@ -296,7 +296,7 @@ export default function Dashboard() {
       )}
 
       {/* ── Deposit/Withdraw ─────────────────────────────────────────────── */}
-      {activeTab === "deposit" && (
+      {(activeTab === "deposit" || activeTab === "withdraw") && (
         <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
           {primaryVault ? (
             <DepositWithdrawPanel
@@ -305,7 +305,7 @@ export default function Dashboard() {
               onDeposit={deposit}
               onWithdraw={withdraw}
               userShares={primaryPosition?.shares || 0}
-              mode="deposit"
+              mode={activeTab === "withdraw" ? "withdraw" : "deposit"}
             />
           ) : (
             <div style={{ color: "var(--text-muted)", padding: 20 }}>
