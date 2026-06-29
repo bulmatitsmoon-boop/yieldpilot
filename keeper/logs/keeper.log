@@ -324,3 +324,139 @@
   ]
 }
 2026-06-29 03:50:08 [[32minfo[39m] ✓ Keeper running. Press Ctrl+C to stop.
+2026-06-29 03:54:16 [[32minfo[39m] Fetching APYs from all protocols...
+2026-06-29 03:54:16 [[33mwarn[39m] Failed to fetch MarginFi APY
+{
+  "error": "bank account too small"
+}
+2026-06-29 03:54:16 [[33mwarn[39m] Failed to fetch Drift APY
+{
+  "error": "Request failed with status code 502"
+}
+2026-06-29 03:54:16 [[33mwarn[39m] Failed to fetch Kamino APY
+{
+  "error": "Request failed with status code 404"
+}
+2026-06-29 03:54:16 [[33mwarn[39m] jito-sol: APY 105317537.6300138% exceeds sanity cap 50%, rejecting
+2026-06-29 03:54:17 [[32minfo[39m] APY fetch complete
+{
+  "protocols": [
+    "MarginFi(USDC): 11.40%",
+    "Jito(SOL): 8.90%",
+    "Kamino(USDC): 8.42%",
+    "Marinade(SOL): 10.85%",
+    "MarginFi(SOL): 7.10%",
+    "Kamino(SOL): 6.20%",
+    "Drift(SOL): 5.88%",
+    "Solend(USDC): 5.10%"
+  ]
+}
+2026-06-29 04:05:30 [[32minfo[39m] Fetching APYs from all protocols...
+2026-06-29 04:05:31 [[33mwarn[39m] Failed to fetch Drift APY
+{
+  "error": "Request failed with status code 502"
+}
+2026-06-29 04:05:31 [[33mwarn[39m] Failed to fetch Kamino APY
+{
+  "error": "Request failed with status code 404"
+}
+2026-06-29 04:05:31 [[32minfo[39m] APY fetch complete
+{
+  "protocols": [
+    "MarginFi(USDC): 11.40%",
+    "Jito(SOL): 6.61%",
+    "Kamino(USDC): 8.42%",
+    "Marinade(SOL): 10.85%",
+    "MarginFi(SOL): 7.10%",
+    "Kamino(SOL): 6.20%",
+    "Drift(SOL): 5.88%",
+    "Solend(USDC): 5.10%"
+  ]
+}
+2026-06-29 04:32:39 [[32minfo[39m] Fetching APYs from all protocols...
+2026-06-29 04:32:39 [[33mwarn[39m] Failed to fetch Drift APY
+{
+  "error": "Request failed with status code 502"
+}
+2026-06-29 04:32:40 [[32minfo[39m] APY fetch complete
+{
+  "protocols": [
+    "MarginFi(USDC): 11.40%",
+    "Jito(SOL): 6.61%",
+    "Kamino(USDC): 3.89%",
+    "Marinade(SOL): 10.85%",
+    "MarginFi(SOL): 7.10%",
+    "Kamino(SOL): 3.82%",
+    "Drift(SOL): 5.88%",
+    "Solend(USDC): 5.10%"
+  ]
+}
+2026-06-29 04:33:14 [[32minfo[39m] ⚡ YieldPilot Keeper starting up...
+2026-06-29 04:33:14 [[32minfo[39m] SolanaClient initialized
+{
+  "rpc": "https://api.devnet.solana.com",
+  "keeper": "DzBe4ag5Ehjd3eE3wa5JVnqcVM2mQ8FFd2ZmxKjVvY2M"
+}
+2026-06-29 04:33:15 [[32minfo[39m] Keeper wallet: DzBe4ag5Ehjd3eE3wa5JVnqcVM2mQ8FFd2ZmxKjVvY2M (0.5096 SOL)
+2026-06-29 04:33:15 [[32minfo[39m] Scheduling cron jobs
+{
+  "apyCron": "*/15 * * * *",
+  "compoundCron": "0 * * * *"
+}
+2026-06-29 04:33:15 [[32minfo[39m] Running initial checks...
+2026-06-29 04:33:15 [[32minfo[39m] ── APY poll + rebalance check ──
+2026-06-29 04:33:15 [[32minfo[39m] Fetching APYs from all protocols...
+2026-06-29 04:33:15 [[33mwarn[39m] Failed to fetch Drift APY
+{
+  "error": "Request failed with status code 502"
+}
+2026-06-29 04:33:15 [[32minfo[39m] APY fetch complete
+{
+  "protocols": [
+    "MarginFi(USDC): 11.40%",
+    "Jito(SOL): 6.61%",
+    "Kamino(USDC): 3.89%",
+    "Marinade(SOL): 10.85%",
+    "MarginFi(SOL): 7.10%",
+    "Kamino(SOL): 3.82%",
+    "Drift(SOL): 5.88%",
+    "Solend(USDC): 5.10%"
+  ]
+}
+2026-06-29 04:33:15 [[32minfo[39m] Checking vault: 8KcoRt5D... (YieldPilot SOL)
+2026-06-29 04:33:15 [[32minfo[39m]   Rebalance decision: No rebalance needed
+{
+  "current": [
+    2000,
+    8000
+  ],
+  "proposed": [
+    2000,
+    8000
+  ],
+  "apyImprovementBps": 0
+}
+2026-06-29 04:33:15 [[32minfo[39m] ── Compound check ──
+2026-06-29 04:33:15 [[32minfo[39m] Vault 8KcoRt5D...: Too early — 17min until compound interval
+2026-06-29 04:33:15 [[32minfo[39m] Health check
+{
+  "keeperBalance": "0.5096 SOL",
+  "uptime": "0min",
+  "stats": {
+    "apyPolls": 1,
+    "rebalances": 0,
+    "compounds": 0,
+    "errors": 0
+  },
+  "latestApys": [
+    "MarginFi(USDC): 11.40%",
+    "Jito(SOL): 6.61%",
+    "Kamino(USDC): 3.89%",
+    "Marinade(SOL): 10.85%",
+    "MarginFi(SOL): 7.10%",
+    "Kamino(SOL): 3.82%",
+    "Drift(SOL): 5.88%",
+    "Solend(USDC): 5.10%"
+  ]
+}
+2026-06-29 04:33:15 [[32minfo[39m] ✓ Keeper running. Press Ctrl+C to stop.

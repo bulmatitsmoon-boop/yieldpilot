@@ -36,31 +36,40 @@ function sanitizeApy(rawPercent: number, source: string): number {
   return rawPercent;
 }
 
+// DeFiLlama pool IDs for the pools we care about (Kamino main market, highest TVL)
+const DEFILLAMA_POOL_IDS: Record<string, string> = {
+  "kamino-usdc": "d2141a59-c199-4be7-8d4b-c8223954836b", // Kamino main market USDC, $19M TVL
+  "kamino-sol":  "525b2dab-ea6a-4cbc-a07f-84ce561d1f83", // Kamino main market SOL, highest TVL
+  "marinade-sol":"b3f93865-5ec8-4662-90a0-11808e0aa2bd", // Marinade mSOL
+  "jito-sol":    "0e7d0722-9054-4907-8593-567b353c0900", // Jito jitoSOL
+};
+
 async function fetchKaminoApy(): Promise<ProtocolApy[]> {
   try {
-    const { data } = await axios.get(
-      `${process.env.KAMINO_API_URL || "https://api.kamino.finance"}/markets`,
-      { timeout: 8000 }
+    // Fetch both pools in one call via DeFiLlama
+    const ids = [DEFILLAMA_POOL_IDS["kamino-usdc"], DEFILLAMA_POOL_IDS["kamino-sol"]];
+    const responses = await Promise.all(
+      ids.map(id => axios.get(`https://yields.llama.fi/chart/${id}`, { timeout: 8000 }))
     );
-
     const results: ProtocolApy[] = [];
-    const allReserves = data?.markets?.flatMap((m: any) => m.reserves || []) || [];
-
-    const usdcReserve = allReserves.find((r: any) =>
-      r.symbol === "USDC" || r.mintAddress === "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
-    );
-    if (usdcReserve) {
-      const apy = sanitizeApy(parseFloat(usdcReserve.supplyInterestAPY || usdcReserve.supplyApy || "0") * 100, "kamino-usdc");
-      if (apy > 0) results.push({ protocolId: "kamino-usdc", name: "Kamino", asset: "USDC", apyBps: Math.round(apy * 100), apyPercent: apy, tvlUsd: parseFloat(usdcReserve.totalSupplyUsd || "0"), riskScore: 1, fetchedAt: new Date() });
+    const labels: Array<{ protocolId: "kamino-usdc" | "kamino-sol"; asset: string; tvl: number }> = [
+      { protocolId: "kamino-usdc", asset: "USDC", tvl: 19_320_000 },
+      { protocolId: "kamino-sol",  asset: "SOL",  tvl: 280_000_000 },
+    ];
+    for (let i = 0; i < responses.length; i++) {
+      const history: any[] = responses[i].data?.data ?? [];
+      if (!history.length) continue;
+      const latest = history[history.length - 1];
+      const apyPercent = sanitizeApy(parseFloat(latest.apy ?? "0"), labels[i].protocolId);
+      if (apyPercent > 0) results.push({
+        protocolId: labels[i].protocolId,
+        name: "Kamino", asset: labels[i].asset,
+        apyBps: Math.round(apyPercent * 100), apyPercent,
+        tvlUsd: latest.tvlUsd ?? labels[i].tvl,
+        riskScore: 1, fetchedAt: new Date(),
+      });
     }
-
-    const solReserve = allReserves.find((r: any) => r.symbol === "SOL");
-    if (solReserve) {
-      const apy = sanitizeApy(parseFloat(solReserve.supplyInterestAPY || solReserve.supplyApy || "0") * 100, "kamino-sol");
-      if (apy > 0) results.push({ protocolId: "kamino-sol", name: "Kamino", asset: "SOL", apyBps: Math.round(apy * 100), apyPercent: apy, tvlUsd: parseFloat(solReserve.totalSupplyUsd || "0"), riskScore: 1, fetchedAt: new Date() });
-    }
-
-    logger.debug("Kamino APYs fetched", { count: results.length });
+    logger.debug("Kamino APYs fetched via DeFiLlama", { count: results.length });
     return results.length ? results : getFallbackApys(["kamino-usdc", "kamino-sol"]);
   } catch (err: any) {
     logger.warn("Failed to fetch Kamino APY", { error: err.message });
@@ -95,7 +104,7 @@ async function fetchJitoApy(): Promise<ProtocolApy[]> {
     // Base staking yield ~6.5% APY; MEV adds on top
     const BASE_STAKING_APY = 6.5;
     const EPOCHS_PER_YEAR = 182.5;
-    const mevApy = mevPerLamport * 1e9 * EPOCHS_PER_YEAR * 100;
+    const mevApy = mevPerLamport * EPOCHS_PER_YEAR * 100;
     const apyPercent = sanitizeApy(BASE_STAKING_APY + mevApy, "jito-sol");
     if (!apyPercent) return getFallbackApys(["jito-sol"]);
     return [{ protocolId: "jito-sol", name: "Jito", asset: "SOL", apyBps: Math.round(apyPercent * 100), apyPercent, tvlUsd: 2_100_000_000, riskScore: 1, fetchedAt: new Date() }];
@@ -120,17 +129,11 @@ async function fetchMarginFiApy(): Promise<ProtocolApy[]> {
   //
   // APY ≈ plateau_rate * utilization (simplified; accurate within ~5% of true rate)
   try {
-    const { data } = await axios.get(
-      `${process.env.RPC_URL || "https://api.mainnet-beta.solana.com"}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        data: JSON.stringify({
-          jsonrpc: "2.0", id: 1, method: "getAccountInfo",
-          params: ["2s37akK2eyBbp8DZgCm7RtsaEz8eJP3Nxd4urLHQv7yB", { encoding: "base64" }]
-        }),
-        timeout: 8000,
-      } as any
+    const { data } = await axios.post(
+      "https://api.mainnet-beta.solana.com",
+      { jsonrpc: "2.0", id: 1, method: "getAccountInfo",
+        params: ["2s37akK2eyBbp8DZgCm7RtsaEz8eJP3Nxd4urLHQv7yB", { encoding: "base64" }] },
+      { headers: { "Content-Type": "application/json" }, timeout: 8000 }
     );
     const raw = Buffer.from(data?.result?.value?.data?.[0] ?? "", "base64");
     if (raw.length < 480) throw new Error("bank account too small");

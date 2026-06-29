@@ -9,13 +9,6 @@ pub const SPL_STAKE_POOL_PROGRAM: Pubkey = pubkey!("SPoo1Ku8WFXoNDMHPsrGSTx1iKKo
 // withdraw_authority is PDA: [pool, "withdraw"] with the respective program.
 // reserve_stake and manager_fee_account are read from the pool state by the keeper.
 
-pub mod blaze {
-    use anchor_lang::prelude::{pubkey, Pubkey};
-    pub const PROGRAM:          Pubkey = pubkey!("SPoo1Ku8WFXoNDMHPsrGSTx1iKKoGJ8GHC4NKVFJN3F");
-    pub const POOL:             Pubkey = pubkey!("stk9ApL5HeVAwPLr3TLhDXdZS8ptVu7zp6ov8HFDuMi"); // WARNING: bSOL mint auth (6WecYymE) != SPL withdraw auth (63s2Tss) — pool migrated, direct CPI may need Sanctum router
-    pub const BSOL_MINT:        Pubkey = pubkey!("bSo13r4TkiE4KumL71LsHTPpL2euBYLFx6h9HP3piy1");
-}
-
 pub mod jito {
     use anchor_lang::prelude::{pubkey, Pubkey};
     // Jito uses their own fork of SPL Stake Pool — verified from mainnet tx 3WUKLZFZSGJNZG...
