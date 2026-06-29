@@ -2,8 +2,7 @@ use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, Token, TokenAccount};
 
 // ── SPL Stake Pool program ────────────────────────────────────────────────────
-// Standard SPL Stake Pool program used by BlazeStake and others.
-// Jito uses a fork — handled separately via the same interface.
+// SPL Stake Pool program. Jito uses a fork — same interface, different program ID.
 pub const SPL_STAKE_POOL_PROGRAM: Pubkey = pubkey!("SPoo1Ku8WFXoNDMHPsrGSTx1iKKoGJ8GHC4NKVFJN3F");
 
 // ── Known LST pool addresses ──────────────────────────────────────────────────
@@ -31,7 +30,7 @@ pub const WITHDRAW_SOL_TAG: u8 = 16; // WithdrawSol
 
 // ── Account contexts ──────────────────────────────────────────────────────────
 
-/// Accounts for depositing SOL into an SPL Stake Pool (Jito / BlazeStake).
+/// Accounts for depositing SOL into an SPL Stake Pool (Jito).
 /// The keeper reads the pool state to populate reserve_stake and manager_fee_account.
 #[derive(Accounts)]
 pub struct SplStakePoolDeposit<'info> {
@@ -40,7 +39,7 @@ pub struct SplStakePoolDeposit<'info> {
     #[account(mut)]
     pub vault_authority: AccountInfo<'info>,
 
-    /// Vault's LST token account (jitoSOL or bSOL ATA).
+    /// Vault's LST token account (jitoSOL ATA).
     #[account(mut)]
     pub vault_lst_account: Account<'info, TokenAccount>,
 
@@ -62,7 +61,7 @@ pub struct SplStakePoolDeposit<'info> {
     #[account(mut)]
     pub manager_fee_account: Account<'info, TokenAccount>,
 
-    /// LST pool mint (jitoSOL or bSOL).
+    /// LST pool mint (jitoSOL).
     #[account(mut)]
     pub pool_mint: Account<'info, Mint>,
 
@@ -81,7 +80,7 @@ pub struct SplStakePoolDeposit<'info> {
     pub stake_pool_program: AccountInfo<'info>,
 }
 
-/// Accounts for withdrawing SOL from an SPL Stake Pool.
+/// Accounts for withdrawing SOL from an SPL Stake Pool (Jito).
 #[derive(Accounts)]
 pub struct SplStakePoolWithdraw<'info> {
     /// Vault authority PDA — burns LST tokens, receives SOL.
