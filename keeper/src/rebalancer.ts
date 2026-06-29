@@ -20,7 +20,6 @@ const EXIT_COST_BPS: Record<string, number> = {
   "solend-usdc":      0,
   "marinade-sol":     30, // ~0.3% liquid unstake fee
   "jito-sol":         10, // ~0.1% DEX swap slippage to exit jitoSOL
-  "blazestake-sol":   8,  // <0.1% DEX swap slippage to exit bSOL
 };
 
 export interface RebalanceDecision {
@@ -151,7 +150,6 @@ const SAFE_PROTOCOLS = new Set([
   "solend-usdc",
   "marinade-sol",
   "jito-sol",
-  "blazestake-sol",
 ]);
 
 function computeOptimalAllocations(
