@@ -37,8 +37,8 @@ export default function Dashboard() {
   const solEarned     = solPos  ? solPos.earnedValue   / 1e9 : 0;
   const hasDeposits   = usdcDeposited > 0 || solDeposited > 0;
   // Legacy single-value fallback for other uses
-  const totalDeposited = positions.reduce((s, p) => s + p.currentValue / 1e6, 0);
-  const totalEarned    = positions.reduce((s, p) => s + p.earnedValue / 1e6, 0);
+  const totalDeposited = (usdcDeposited || 0) + (solDeposited || 0);
+  const totalEarned    = (usdcEarned || 0) + (solEarned || 0);
   const avgApy = apys.length ? apys.reduce((s, a) => s + a.apyPercent, 0) / apys.length : 0;
   const bestApy = apys.length ? Math.max(...apys.map((a) => a.apyPercent)) : 0;
   const bestProtocol = apys.find((a) => a.apyPercent === bestApy);
@@ -52,8 +52,9 @@ export default function Dashboard() {
   const vaultLabel = primaryVault?.mint === WSOL ? "SOL" : "USDC";
 
   // ── Global vault stats ────────────────────────────────────────────────────
-  const totalTvl = vaults.reduce((s, v) => s + v.totalDeposits, 0);
-  const totalTvlUsd = totalTvl / 1e6; // USDC vault is 6 decimals; approximate for display
+
+  const WSOL_MINT2 = "So11111111111111111111111111111111111111112";
+  const totalTvlUsd = vaults.reduce((s, v) => s + v.totalDeposits / (v.mint === WSOL_MINT2 ? 1e9 : 1e6), 0);
   const lastCompound = primaryVault ? new Date(primaryVault.lastCompoundTs * 1000) : null;
   const minutesSinceCompound = lastCompound ? Math.floor((Date.now() - lastCompound.getTime()) / 60000) : null;
   const onChainAllocation = primaryVault?.protocols.filter(p => p.targetBps > 0) || [];
