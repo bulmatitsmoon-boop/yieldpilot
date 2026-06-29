@@ -10,7 +10,7 @@ import { useYieldPilot } from "@/hooks/useYieldPilot";
 import { useApys } from "@/hooks/useApys";
 
 // Load vault addresses from env
-const VAULT_ADDRESSES = (process.env.NEXT_PUBLIC_VAULT_ADDRESSES || "FcEVxvADkv9dvWNb6wYtsMv1Meit1QE6yoSoueC4FLdc,8KcoRt5DcCbXBaqDVDorEbW2J6GofTrRyy9Afzb8wwaE")
+const VAULT_ADDRESSES = (process.env.NEXT_PUBLIC_VAULT_ADDRESSES || "")
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);

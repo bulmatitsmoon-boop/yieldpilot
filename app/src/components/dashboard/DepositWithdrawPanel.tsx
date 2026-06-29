@@ -15,7 +15,7 @@ const WSOL_MINT = "So11111111111111111111111111111111111111112";
 
 function mintToSymbol(mint: string): string {
   if (mint === WSOL_MINT) return "SOL";
-  if (mint === "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU") return "USDC";
+  if (mint === "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v") return "USDC";
   return mint.slice(0, 4);
 }
 
