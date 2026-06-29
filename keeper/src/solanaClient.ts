@@ -773,6 +773,137 @@ export class SolanaClient {
       return 0;
     }
   }
+
+  // ── Token account balance helper ─────────────────────────────────────────
+
+  async getTokenBalance(account: PublicKey): Promise<number> {
+    try {
+      const bal = await this.connection.getTokenAccountBalance(account);
+      return Number(bal.value.amount);
+    } catch {
+      return 0;
+    }
+  }
+
+  // ── Jito pool config (decoded from on-chain stake pool state) ─────────────
+
+  async getJitoPoolConfig() {
+    const data = (await this.connection.getAccountInfo(JITO_POOL))?.data;
+    if (!data || data.length < 226) throw new Error("Jito pool account not found or too small");
+    const reserveStake = new PublicKey(data.slice(130, 162));
+    const managerFeeAccount = new PublicKey(data.slice(194, 226));
+    const [withdrawAuthority] = PublicKey.findProgramAddressSync(
+      [JITO_POOL.toBuffer(), Buffer.from("withdraw")],
+      JITO_PROGRAM
+    );
+    return {
+      stakePool: JITO_POOL,
+      withdrawAuthority,
+      reserveStake,
+      managerFeeAccount,
+      poolMint: JITOSOL_MINT,
+      lstMint: JITOSOL_MINT,
+      stakePoolProgram: JITO_PROGRAM,
+    };
+  }
+
+  // ── Execute rebalance: move funds to match target allocations ─────────────
+  //
+  // Phase 1 - recall from over-deployed protocols (frees idle vault balance)
+  // Phase 2 - deploy to under-deployed protocols (uses idle vault balance)
+
+  async executeRebalance(vaultAddress: string, vault: VaultState): Promise<void> {
+    const totalDeposits = vault.totalDeposits.toNumber();
+    if (totalDeposits === 0) {
+      logger.info("executeRebalance: vault empty, skipping");
+      return;
+    }
+
+    const protocols = vault.protocols.slice(0, vault.protocolCount);
+    const deltas = protocols.map((p, i) => ({
+      index: i,
+      label: Buffer.from(p.label).toString("utf8").replace(/ /g, ""),
+      deployed: p.deployedBalance.toNumber(),
+      target: Math.floor(totalDeposits * p.targetBps.toNumber() / 10_000),
+      receiptAccount: p.vaultReceiptAccount,
+    }));
+
+    // Phase 1: Recalls
+    const toRecall = deltas
+      .map(d => ({ ...d, excess: d.deployed - d.target }))
+      .filter(d => d.excess > 0)
+      .sort((a, b) => b.excess - a.excess);
+
+    for (const d of toRecall) {
+      logger.info("Recall from protocol", { label: d.label, excess: d.excess, deployed: d.deployed, target: d.target });
+      try {
+        if (d.label === "marginfi-usdc" || d.label === "marginfi-sol") {
+          const withdrawAll = d.target === 0;
+          await this.recallFromMarginFi(vaultAddress, d.index, new anchor.BN(d.excess), withdrawAll);
+        } else {
+          const receiptBalance = await this.getTokenBalance(d.receiptAccount);
+          if (receiptBalance === 0) { logger.warn("No receipt balance, skipping", { label: d.label }); continue; }
+          const receiptToWithdraw = new anchor.BN(Math.max(1, Math.floor(receiptBalance * d.excess / d.deployed)));
+          if (d.label === "kamino-usdc") {
+            await this.recallFromKamino(vaultAddress, d.index, receiptToWithdraw);
+          } else if (d.label === "kamino-sol") {
+            await this.recallFromKaminoSol(vaultAddress, d.index, receiptToWithdraw);
+          } else if (d.label === "marinade-sol") {
+            await this.recallFromMarinade(vaultAddress, d.index, receiptToWithdraw);
+          } else if (d.label === "jito-sol") {
+            const cfg = await this.getJitoPoolConfig();
+            await this.recallFromSolLst(vaultAddress, d.index, receiptToWithdraw, cfg);
+          } else if (d.label === "solend-usdc") {
+            await this.recallFromSolend(vaultAddress, d.index, receiptToWithdraw);
+          } else {
+            logger.warn("No recall handler for protocol", { label: d.label });
+          }
+        }
+      } catch (err: any) {
+        logger.error("Recall failed", { label: d.label, error: err.message });
+      }
+    }
+
+    // Phase 2: Deploys
+    const toDeposit = deltas
+      .map(d => ({ ...d, deficit: d.target - d.deployed }))
+      .filter(d => d.deficit > 0)
+      .sort((a, b) => b.deficit - a.deficit);
+
+    let available = await this.getTokenBalance(vault.vaultTokenAccount);
+    logger.info("Idle vault balance after recalls", { available });
+
+    for (const d of toDeposit) {
+      if (available <= 0) break;
+      const amount = new anchor.BN(Math.min(d.deficit, available));
+      if (amount.isZero()) continue;
+
+      logger.info("Deploy to protocol", { label: d.label, amount: amount.toString(), deficit: d.deficit });
+      try {
+        if (d.label === "kamino-usdc") {
+          await this.deployToKamino(vaultAddress, d.index, amount);
+        } else if (d.label === "kamino-sol") {
+          await this.deployToKaminoSol(vaultAddress, d.index, amount);
+        } else if (d.label === "marinade-sol") {
+          await this.deployToMarinade(vaultAddress, d.index, amount);
+        } else if (d.label === "jito-sol") {
+          const cfg = await this.getJitoPoolConfig();
+          await this.deployToSolLst(vaultAddress, d.index, amount, cfg);
+        } else if (d.label === "marginfi-usdc" || d.label === "marginfi-sol") {
+          await this.deployToMarginFi(vaultAddress, d.index, amount);
+        } else if (d.label === "solend-usdc") {
+          await this.deployToSolend(vaultAddress, d.index, amount);
+        } else {
+          logger.warn("No deploy handler for protocol", { label: d.label });
+          continue;
+        }
+        available -= amount.toNumber();
+      } catch (err: any) {
+        logger.error("Deploy failed", { label: d.label, error: err.message });
+      }
+    }
+  }
+
 }
 
 function sleep(ms: number) {
