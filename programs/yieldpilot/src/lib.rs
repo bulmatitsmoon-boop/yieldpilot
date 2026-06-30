@@ -423,6 +423,16 @@ pub mod yieldpilot {
         Ok(())
     }
 
+    pub fn set_gate_mint(ctx: Context<AdminOnly>, gate_mint: Pubkey) -> Result<()> {
+        let v = &mut ctx.accounts.vault;
+        require!(
+            v.gate_mint == anchor_lang::solana_program::system_program::ID,
+            VaultError::GateMintAlreadySet
+        );
+        v.gate_mint = gate_mint;
+        Ok(())
+    }
+
     pub fn update_tier_thresholds(ctx: Context<UpdateTierThresholds>, gold: u64, silver: u64, bronze: u64) -> Result<()> {
         let v = &mut ctx.accounts.vault;
         v.gold_threshold = gold;
