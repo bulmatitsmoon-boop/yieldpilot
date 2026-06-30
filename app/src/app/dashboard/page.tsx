@@ -190,7 +190,7 @@ export default function Dashboard() {
       if (json.success) setFaucetMsg("50,000 YPLT added to your wallet!");
       else setFaucetMsg("Error: " + json.error);
     } catch (e) {
-      setFaucetMsg("Error: " + e.message);
+      setFaucetMsg("Error: " + (e instanceof Error ? e.message : String(e)));
     } finally {
       setFaucetBusy(false);
     }
