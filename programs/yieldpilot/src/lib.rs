@@ -1595,5 +1595,6 @@ pub enum VaultError {
     #[msg("No pending admin transfer")]                        NoPendingAdmin,
     #[msg("Not the pending admin")]                            NotPendingAdmin,
     #[msg("Output below minimum — slippage exceeded")]         SlippageExceeded,
+    #[msg("Gate mint already set and cannot be changed")]     GateMintAlreadySet,
     #[msg("Deploy would breach minimum idle buffer (10%)")]    IdleBufferBreach,
 }
