@@ -1188,6 +1188,35 @@
           "type": "u64"
         }
       ]
+    },
+    {
+      "name": "updateTierThresholds",
+      "accounts": [
+        {
+          "name": "admin",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "vault",
+          "isMut": true,
+          "isSigner": false
+        }
+      ],
+      "args": [
+        {
+          "name": "gold",
+          "type": "u64"
+        },
+        {
+          "name": "silver",
+          "type": "u64"
+        },
+        {
+          "name": "bronze",
+          "type": "u64"
+        }
+      ]
     }
   ],
   "accounts": [
@@ -1457,6 +1486,18 @@
           {
             "name": "gate_mint",
             "type": "pubkey"
+          },
+          {
+            "name": "gold_threshold",
+            "type": "u64"
+          },
+          {
+            "name": "silver_threshold",
+            "type": "u64"
+          },
+          {
+            "name": "bronze_threshold",
+            "type": "u64"
           },
           {
             "name": "keeper",
