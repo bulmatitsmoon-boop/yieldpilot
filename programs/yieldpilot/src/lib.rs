@@ -1109,7 +1109,7 @@ pub struct EmergencyClose<'info> {
     #[account(mut)]
     pub admin: Signer<'info>,
     /// CHECK: emergency close — we intentionally skip deserialization
-    #[account(mut, constraint = admin.key() == &anchor_lang::prelude::pubkey!("8i7kydJHwi3Cdp46Xugyux2vWJmTScYDvnJrBiBihBnP") @ VaultError::Unauthorized)]
+    #[account(mut, constraint = admin.key() == anchor_lang::prelude::pubkey!("8i7kydJHwi3Cdp46Xugyux2vWJmTScYDvnJrBiBihBnP") @ VaultError::Unauthorized)]
     pub vault: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
 }
