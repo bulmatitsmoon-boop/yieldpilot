@@ -15,7 +15,7 @@ const VAULT_ADDRESSES = (process.env.NEXT_PUBLIC_VAULT_ADDRESSES || "")
   .map((s) => s.trim())
   .filter(Boolean);
 
-type Tab = "overview" | "protocols" | "deposit";
+type Tab = "overview" | "protocols" | "deposit" | "withdraw";
 
 export default function Dashboard() {
   const { publicKey, connected } = useWallet();
@@ -213,7 +213,7 @@ export default function Dashboard() {
 
       {/* Tabs */}
       <div style={{ display: "flex", gap: 4, marginBottom: 20, background: "var(--surface)", padding: 4, borderRadius: 10, border: "1px solid var(--border)", width: "fit-content" }}>
-        {(["overview", "protocols", "deposit"] as Tab[]).map((t) => (
+        {(["overview", "protocols", "deposit", "withdraw"] as Tab[]).map((t) => (
           <button key={t} onClick={() => setActiveTab(t)} style={tabStyle(t)}>
             {t.charAt(0).toUpperCase() + t.slice(1)}
           </button>
@@ -325,7 +325,7 @@ export default function Dashboard() {
         <ProtocolTable apys={apys} loading={apyLoading} />
       )}
 
-      {/* ── Deposit/Withdraw ─────────────────────────────────────────────── */}
+      {/* ── Deposit ──────────────────────────────────────────────────────── */}
       {activeTab === "deposit" && (
         <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
           {primaryVault ? (
@@ -335,15 +335,12 @@ export default function Dashboard() {
               onDeposit={deposit}
               onWithdraw={withdraw}
               userShares={primaryPosition?.shares || 0}
-              mode="deposit"
             />
           ) : (
             <div style={{ color: "var(--text-muted)", padding: 20 }}>
               {loading ? "Loading vault..." : "No vault configured. Set NEXT_PUBLIC_VAULT_ADDRESSES in .env.local"}
             </div>
           )}
-
-          {/* Info panel */}
           <div style={{ flex: 1, minWidth: 260 }}>
             <Card>
               <CardHeader title="How it works" />
@@ -362,6 +359,32 @@ export default function Dashboard() {
               </div>
             </Card>
           </div>
+        </div>
+      )}
+
+      {/* ── Withdraw ─────────────────────────────────────────────────────── */}
+      {activeTab === "withdraw" && (
+        <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
+          {vaults.length > 0 ? (
+            vaults.map((vault, i) => {
+              const pos = positions.find(p => p.vault === vault.address);
+              return (
+                <DepositWithdrawPanel
+                  key={vault.address}
+                  vault={vault}
+                  apys={apys}
+                  onDeposit={deposit}
+                  onWithdraw={withdraw}
+                  userShares={pos?.shares || 0}
+                  initialTab="withdraw"
+                />
+              );
+            })
+          ) : (
+            <div style={{ color: "var(--text-muted)", padding: 20 }}>
+              {loading ? "Loading vaults..." : "No vaults found."}
+            </div>
+          )}
         </div>
       )}
     </div>
