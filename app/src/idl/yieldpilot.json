@@ -7,6 +7,32 @@
   },
   "instructions": [
     {
+      "name": "closeVault",
+      "discriminator": [
+        141,
+        103,
+        17,
+        126,
+        72,
+        75,
+        29,
+        29
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "vault",
+          "isMut": true,
+          "isSigner": false
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "accept_admin",
       "discriminator": [
         112,
@@ -1208,6 +1234,16 @@
           "name": "gateMint",
           "type": "pubkey"
         }
+      ],
+      "discriminator": [
+        127,
+        39,
+        248,
+        229,
+        20,
+        204,
+        166,
+        10
       ]
     },
     {
@@ -1237,6 +1273,16 @@
           "name": "bronze",
           "type": "u64"
         }
+      ],
+      "discriminator": [
+        253,
+        196,
+        79,
+        35,
+        61,
+        76,
+        169,
+        85
       ]
     }
   ],
@@ -1397,6 +1443,11 @@
       "code": 6001,
       "name": "GateMintAlreadySet",
       "msg": "Gate mint already set and cannot be changed"
+    },
+    {
+      "code": 6002,
+      "name": "VaultNotEmpty",
+      "msg": "Vault still has deposits \u2014 withdraw all before closing"
     }
   ],
   "types": [
