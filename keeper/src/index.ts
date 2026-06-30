@@ -100,13 +100,15 @@ async function runApyPollAndRebalance(client: SolanaClient) {
           signature: sig,
           newAllocations: decision.newAllocations,
         });
-        // Now move the actual funds to match the new targets
-        logger.info("  Executing fund movements...");
-        await client.executeRebalance(address, state);
       } else {
         stats.errors++;
       }
     }
+
+    // Always sync funds to current targets even if targets did not change.
+    // Handles newly-deposited funds that have not been deployed yet.
+    logger.info("  Syncing fund deployment to current targets...");
+    await client.executeRebalance(address, state);
   }
 }
 
@@ -170,6 +172,15 @@ async function main() {
   // Confirm keeper has funds
   const balance = await client.getKeeperBalance();
   logger.info(`Keeper wallet: ${client.keeper.publicKey.toBase58()} (${balance.toFixed(4)} SOL)`);
+
+  // Initialize protocol token accounts (ATAs) for each vault — safe to run every startup
+  const setupVaults = process.env.VAULT_ADDRESSES?.split(",").map(a => a.trim()) ?? [];
+  for (const vaultAddr of setupVaults) {
+    logger.info(`Setting up vault token accounts: ${vaultAddr.slice(0, 8)}...`);
+    await client.setupVaultTokenAccounts(vaultAddr).catch(err => {
+      logger.warn(`Vault account setup failed (non-fatal): ${vaultAddr.slice(0, 8)}... — ${err.message}`);
+    });
+  }
 
   if (balance < 0.02) {
     logger.error("Keeper wallet has insufficient SOL for transactions. Fund it and restart.");
