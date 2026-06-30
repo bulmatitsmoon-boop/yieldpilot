@@ -22,14 +22,16 @@ const KAMINO_MARKET_AUTHORITY = new PublicKey("9DrvZvyWh1HuAoZxvYWMvkf2XCzryCpGg
 // USDC reserve on Kamino main market
 const KAMINO_USDC_RESERVE = new PublicKey("D6q6wuQSrifJKZYpR1M8R4YawnLDtDsMmWM1NbBmgJ59");
 const USDC_MINT = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
-const KAMINO_USDC_LIQUIDITY_SUPPLY = new PublicKey("HUBsveNpjo5pWqNkH57QzxjQASdTVXcSK7bVKTSZtcSX");
-const KAMINO_USDC_COLLATERAL_MINT = new PublicKey("FzMDnMHYkEMFU6JHZX2BHPJ6L4PZkLEpRXFcbGMGaPS");
+const KAMINO_USDC_LIQUIDITY_SUPPLY = new PublicKey("Bgq7trRgVMeq33yt235zM2onQ4bRDBsY5EWiTetF4qw6"); // verified from reserve.liquidity.supplyVault
+const KAMINO_USDC_COLLATERAL_MINT = new PublicKey("B8V6WVjPxW1UGwVDfxH2d2r8SyT4cqn7dQRK6XneVa7D"); // verified from reserve.collateral.mintPubkey
+const KAMINO_USDC_COLLATERAL_SUPPLY = new PublicKey("3DzjXRfxRm6iejfyyMynR4tScddaanrePJ1NJU2XnPPL"); // verified from reserve.collateral.supplyVault
 
 // SOL (wSOL) reserve on Kamino main market — TODO: verify addresses at mainnet launch
 const WSOL_MINT = new PublicKey("So11111111111111111111111111111111111111112");
 const KAMINO_SOL_RESERVE = new PublicKey("d4A2prbA2whesmvHaL88BH6Ewn5N4bTSU2Ze8P6Bc4Q"); // verified: owner=KLend
 const KAMINO_SOL_LIQUIDITY_SUPPLY = new PublicKey("GafNuUXj9rxGLn4y79dPu6MHSuPWeJR6UtTWuexpGh3U"); // verified: 347k SOL balance
 const KAMINO_SOL_COLLATERAL_MINT = new PublicKey("2UywZrUdyqs5vDchy7fKQJKau2RVyuzBev2XKGPDSiX1"); // verified: mintAuth=KaminoMarketAuth
+const KAMINO_SOL_COLLATERAL_SUPPLY = new PublicKey("8NXMyRD91p3nof61BTkJvrfpGTASHygz1cUvc3HvwyGS"); // verified from reserve.collateral.supplyVault
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Marinade mainnet constants
@@ -111,6 +113,7 @@ export interface KaminoAccounts {
   liquidityMint: PublicKey;
   liquiditySupply: PublicKey;
   collateralMint: PublicKey;
+  collateralSupply: PublicKey;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -212,6 +215,7 @@ export class SolanaClient {
       liquidityMint: USDC_MINT,
       liquiditySupply: KAMINO_USDC_LIQUIDITY_SUPPLY,
       collateralMint: KAMINO_USDC_COLLATERAL_MINT,
+      collateralSupply: KAMINO_USDC_COLLATERAL_SUPPLY,
     };
   }
 
@@ -302,8 +306,8 @@ export class SolanaClient {
             kaminoLiquidityMint: kamino.liquidityMint,
             kaminoLiquiditySupply: kamino.liquiditySupply,
             kaminoCollateralMint: kamino.collateralMint,
+            kaminoCollateralSupply: kamino.collateralSupply,
             tokenProgram: TOKEN_PROGRAM_ID,
-            instructionSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
             kaminoProgram: KAMINO_PROGRAM_ID,
           })
           .remainingAccounts(
@@ -344,8 +348,8 @@ export class SolanaClient {
             kaminoLiquidityMint: kamino.liquidityMint,
             kaminoLiquiditySupply: kamino.liquiditySupply,
             kaminoCollateralMint: kamino.collateralMint,
+            kaminoCollateralSupply: kamino.collateralSupply,
             tokenProgram: TOKEN_PROGRAM_ID,
-            instructionSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
             kaminoProgram: KAMINO_PROGRAM_ID,
           })
           .remainingAccounts(
@@ -393,8 +397,8 @@ export class SolanaClient {
             kaminoLiquidityMint: WSOL_MINT,
             kaminoLiquiditySupply: KAMINO_SOL_LIQUIDITY_SUPPLY,
             kaminoCollateralMint: KAMINO_SOL_COLLATERAL_MINT,
+            kaminoCollateralSupply: KAMINO_SOL_COLLATERAL_SUPPLY,
             tokenProgram: TOKEN_PROGRAM_ID,
-            instructionSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
             kaminoProgram: KAMINO_PROGRAM_ID,
           })
           .remainingAccounts(
@@ -436,8 +440,8 @@ export class SolanaClient {
             kaminoLiquidityMint: WSOL_MINT,
             kaminoLiquiditySupply: KAMINO_SOL_LIQUIDITY_SUPPLY,
             kaminoCollateralMint: KAMINO_SOL_COLLATERAL_MINT,
+            kaminoCollateralSupply: KAMINO_SOL_COLLATERAL_SUPPLY,
             tokenProgram: TOKEN_PROGRAM_ID,
-            instructionSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
             kaminoProgram: KAMINO_PROGRAM_ID,
           })
           .remainingAccounts(
