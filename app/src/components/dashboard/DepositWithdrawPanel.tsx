@@ -30,18 +30,35 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
 
   const asset = vault.name.toUpperCase().includes("SOL") ? "SOL" : "USDC";
   const decimals = DECIMALS[asset] || 6;
-  const bestApy = apys.sort((a, b) => b.apyBps - a.apyBps)[0];
+  const bestApy = [...apys].sort((a, b) => b.apyBps - a.apyBps)[0];
 
-  // Fetch user wallet balance when they interact
+  // Derive user's position value in tokens from shares
+  const sharePrice = vault.totalShares > 0 ? vault.totalDeposits / vault.totalShares : 1;
+  const positionTokens = (userShares * sharePrice) / 10 ** decimals; // ui amount
+  const positionRaw = userShares * sharePrice; // in raw units (same decimals as totalDeposits)
+
+  // Convert a token ui-amount to shares to burn
+  const tokenAmountToShares = (uiAmount: number): anchor.BN => {
+    if (vault.totalDeposits === 0 || vault.totalShares === 0) return new anchor.BN(0);
+    const rawAmount = uiAmount * 10 ** decimals;
+    const shares = Math.floor((rawAmount / vault.totalDeposits) * vault.totalShares);
+    return new anchor.BN(shares);
+  };
+
   const fetchBalance = async () => {
     if (!publicKey) return;
     try {
-      const ata = await getAssociatedTokenAddress(
-        new (await import("@solana/web3.js")).PublicKey(vault.mint),
-        publicKey
-      );
-      const info = await connection.getTokenAccountBalance(ata);
-      setWalletBalance(info.value.uiAmount || 0);
+      if (asset === "SOL") {
+        const lamports = await connection.getBalance(publicKey);
+        setWalletBalance(lamports / 1e9);
+      } else {
+        const ata = await getAssociatedTokenAddress(
+          new (await import("@solana/web3.js")).PublicKey(vault.mint),
+          publicKey
+        );
+        const info = await connection.getTokenAccountBalance(ata);
+        setWalletBalance(info.value.uiAmount || 0);
+      }
     } catch {
       setWalletBalance(0);
     }
@@ -51,19 +68,32 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
     if (!amount || busy) return;
     setBusy(true);
     try {
-      const raw = new anchor.BN(Math.floor(parseFloat(amount) * 10 ** decimals));
+      const uiAmount = parseFloat(amount);
       if (tab === "deposit") {
+        const raw = new anchor.BN(Math.floor(uiAmount * 10 ** decimals));
         await onDeposit(vault.address, vault.mint, raw);
       } else {
-        // For withdraw, treat input as share amount (simplified; in prod show $ value)
-        const sharesToBurn = new anchor.BN(Math.floor(parseFloat(amount) * 10 ** decimals));
-        await onWithdraw(vault.address, vault.mint, sharesToBurn);
+        const shares = tokenAmountToShares(uiAmount);
+        await onWithdraw(vault.address, vault.mint, shares);
       }
       setAmount("");
     } finally {
       setBusy(false);
     }
   };
+
+  const setMax = () => {
+    if (tab === "deposit" && walletBalance !== null) {
+      setAmount(String(walletBalance));
+    } else if (tab === "withdraw") {
+      setAmount(positionTokens.toFixed(decimals === 9 ? 4 : 2));
+    }
+  };
+
+  const parsedAmount = parseFloat(amount) || 0;
+  const estimatedReceive = tab === "withdraw" && parsedAmount > 0
+    ? Math.max(0, parsedAmount - parsedAmount * (vault.perfFeeBps / 10000))
+    : null;
 
   const tabStyle = (t: string): React.CSSProperties => ({
     flex: 1, padding: "9px 0", border: "none", cursor: "pointer",
@@ -74,22 +104,38 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
   });
 
   return (
-    <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 24, maxWidth: 400 }}>
+    <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 24, minWidth: 340, maxWidth: 420 }}>
       <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 20 }}>{vault.name}</div>
 
       {/* Tab switcher */}
       <div style={{ display: "flex", background: "var(--bg)", padding: 3, borderRadius: 8, marginBottom: 20, gap: 3 }}>
-        <button onClick={() => setTab("deposit")} style={tabStyle("deposit")}>Deposit</button>
-        <button onClick={() => setTab("withdraw")} style={tabStyle("withdraw")}>Withdraw</button>
+        <button onClick={() => { setTab("deposit"); setAmount(""); }} style={tabStyle("deposit")}>Deposit</button>
+        <button onClick={() => { setTab("withdraw"); setAmount(""); }} style={tabStyle("withdraw")}>Withdraw</button>
       </div>
+
+      {/* Withdraw: position summary */}
+      {tab === "withdraw" && (
+        <div style={{ background: "var(--bg)", borderRadius: 8, padding: "12px 14px", marginBottom: 16, fontSize: 13 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+            <span style={{ color: "var(--text-muted)" }}>Your position</span>
+            <span style={{ fontFamily: "var(--mono)", fontWeight: 700 }}>
+              {userShares > 0 ? `${fmt(positionTokens, decimals === 9 ? 4 : 2)} ${asset}` : "No position"}
+            </span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <span style={{ color: "var(--text-muted)" }}>Performance fee</span>
+            <span>{(vault.perfFeeBps / 100).toFixed(1)}% on profit only</span>
+          </div>
+        </div>
+      )}
 
       {/* Amount input */}
       <div style={{ marginBottom: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
           <label style={{ color: "var(--text-muted)", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-            {tab === "deposit" ? "Amount to deposit" : "Shares to burn"}
+            {tab === "deposit" ? `Amount to deposit` : `Amount to withdraw`}
           </label>
-          {walletBalance !== null && (
+          {tab === "deposit" && walletBalance !== null && (
             <span style={{ color: "var(--text-muted)", fontSize: 12 }}>
               Balance: {fmt(walletBalance)} {asset}
             </span>
@@ -104,13 +150,16 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
             placeholder="0.00"
             style={{
               width: "100%", background: "var(--bg)", border: "1px solid var(--border)",
-              borderRadius: 8, padding: "12px 60px 12px 14px", color: "var(--text)",
+              borderRadius: 8, padding: "12px 70px 12px 14px", color: "var(--text)",
               fontSize: 18, fontFamily: "var(--mono)", outline: "none", boxSizing: "border-box",
             }}
           />
-          {walletBalance !== null && tab === "deposit" && (
+          <span style={{ position: "absolute", right: 52, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", fontSize: 13, fontWeight: 600 }}>
+            {asset}
+          </span>
+          {(tab === "deposit" ? walletBalance !== null : userShares > 0) && (
             <button
-              onClick={() => setAmount(String(walletBalance))}
+              onClick={setMax}
               style={{
                 position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)",
                 background: "var(--surface-2)", border: "none", color: "var(--purple-light)",
@@ -121,7 +170,7 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
         </div>
       </div>
 
-      {/* Route preview */}
+      {/* Deposit: route preview */}
       {tab === "deposit" && bestApy && (
         <div style={{ background: "var(--bg)", borderRadius: 8, padding: "12px 14px", marginBottom: 20 }}>
           <div style={{ color: "var(--text-muted)", fontSize: 12, marginBottom: 4 }}>Auto-routed to best APY</div>
@@ -132,16 +181,14 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
         </div>
       )}
 
-      {/* Withdraw info */}
-      {tab === "withdraw" && userShares > 0 && (
+      {/* Withdraw: estimated receive */}
+      {tab === "withdraw" && parsedAmount > 0 && estimatedReceive !== null && (
         <div style={{ background: "var(--bg)", borderRadius: 8, padding: "12px 14px", marginBottom: 20, fontSize: 13 }}>
           <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <span style={{ color: "var(--text-muted)" }}>Your shares</span>
-            <span style={{ fontFamily: "var(--mono)" }}>{fmt(userShares / 1e6)}</span>
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
-            <span style={{ color: "var(--text-muted)" }}>Perf fee (on profit)</span>
-            <span>{(vault.perfFeeBps / 100).toFixed(1)}%</span>
+            <span style={{ color: "var(--text-muted)" }}>You will receive ~</span>
+            <span style={{ fontFamily: "var(--mono)", fontWeight: 700, color: "var(--green)" }}>
+              {fmt(estimatedReceive, decimals === 9 ? 4 : 2)} {asset}
+            </span>
           </div>
         </div>
       )}
@@ -150,15 +197,17 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
         fullWidth
         size="lg"
         onClick={handleAction}
-        disabled={!publicKey || !amount || parseFloat(amount) <= 0 || busy}
+        disabled={!publicKey || !amount || parsedAmount <= 0 || busy || (tab === "withdraw" && userShares === 0)}
       >
         {!publicKey
           ? "Connect wallet first"
           : busy
           ? "Processing..."
           : tab === "deposit"
-          ? `Deposit ${amount || "0"} ${asset}`
-          : `Withdraw ${amount || "0"} shares`}
+          ? `Deposit ${parsedAmount > 0 ? fmt(parsedAmount, decimals === 9 ? 4 : 2) : "0"} ${asset}`
+          : userShares === 0
+          ? "No position to withdraw"
+          : `Withdraw ${parsedAmount > 0 ? fmt(parsedAmount, decimals === 9 ? 4 : 2) : "0"} ${asset}`}
       </Button>
 
       {!publicKey && (
