@@ -17,10 +17,11 @@ interface Props {
   onDeposit: (vaultAddress: string, mint: string, amount: anchor.BN) => Promise<any>;
   onWithdraw: (vaultAddress: string, mint: string, shares: anchor.BN) => Promise<any>;
   userShares: number;
+  depositedAmount?: number; // raw on-chain units — used for accurate fee preview
   initialTab?: "deposit" | "withdraw";
 }
 
-export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userShares, initialTab = "deposit" }: Props) {
+export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userShares, depositedAmount = 0, initialTab = "deposit" }: Props) {
   const { publicKey } = useWallet();
   const { connection } = useConnection();
   const [tab, setTab] = useState<"deposit" | "withdraw">(initialTab);
@@ -91,9 +92,16 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
   };
 
   const parsedAmount = parseFloat(amount) || 0;
-  const estimatedReceive = tab === "withdraw" && parsedAmount > 0
-    ? Math.max(0, parsedAmount - parsedAmount * (vault.perfFeeBps / 10000))
-    : null;
+  const estimatedReceive = tab === "withdraw" && parsedAmount > 0 ? (() => {
+    // Fee applies only to profit, not principal
+    const originalTokens = depositedAmount / 10 ** decimals; // what user put in
+    const profitTokens = Math.max(0, positionTokens - originalTokens); // yield earned
+    // Fraction of position being withdrawn
+    const withdrawFraction = positionTokens > 0 ? Math.min(parsedAmount / positionTokens, 1) : 0;
+    const profitBeingWithdrawn = profitTokens * withdrawFraction;
+    const fee = profitBeingWithdrawn * (vault.perfFeeBps / 10000);
+    return Math.max(0, parsedAmount - fee);
+  })() : null;
 
   const tabStyle = (t: string): React.CSSProperties => ({
     flex: 1, padding: "9px 0", border: "none", cursor: "pointer",

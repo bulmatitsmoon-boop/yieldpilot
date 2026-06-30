@@ -355,6 +355,7 @@ export default function Dashboard() {
                   onDeposit={deposit}
                   onWithdraw={withdraw}
                   userShares={selectedPos?.shares || 0}
+                  depositedAmount={selectedPos?.depositedAmount || 0}
                 />
               </div>
             );
