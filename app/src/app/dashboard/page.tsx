@@ -21,6 +21,7 @@ export default function Dashboard() {
   const { publicKey, connected } = useWallet();
   const { setVisible } = useWalletModal();
   const [activeTab, setActiveTab] = useState<Tab>("overview");
+  const [selectedVaultAddr, setSelectedVaultAddr] = useState<string | null>(null);
 
   const { vaults, positions, loading, txStatus, txError, lastTxSig, deposit, withdraw, refresh } =
     useYieldPilot(VAULT_ADDRESSES);
@@ -328,15 +329,36 @@ export default function Dashboard() {
       {/* ── Deposit ──────────────────────────────────────────────────────── */}
       {activeTab === "deposit" && (
         <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
-          {primaryVault ? (
-            <DepositWithdrawPanel
-              vault={primaryVault}
-              apys={apys}
-              onDeposit={deposit}
-              onWithdraw={withdraw}
-              userShares={primaryPosition?.shares || 0}
-            />
-          ) : (
+          {vaults.length > 0 ? (() => {
+            const selectedVault = vaults.find(v => v.address === selectedVaultAddr) || vaults[0];
+            const selectedPos = positions.find(p => p.vault === selectedVault.address);
+            return (
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {vaults.length > 1 && (
+                  <div style={{ display: "flex", background: "var(--surface)", border: "1px solid var(--border)", padding: 4, borderRadius: 10, gap: 4, width: "fit-content" }}>
+                    {vaults.map(v => {
+                      const sym = v.name.toUpperCase().includes("SOL") ? "SOL" : "USDC";
+                      return (
+                        <button key={v.address} onClick={() => setSelectedVaultAddr(v.address)} style={{
+                          padding: "7px 18px", borderRadius: 7, border: "none", cursor: "pointer",
+                          background: (selectedVaultAddr === v.address || (!selectedVaultAddr && v === vaults[0])) ? "var(--purple)" : "transparent",
+                          color: (selectedVaultAddr === v.address || (!selectedVaultAddr && v === vaults[0])) ? "#fff" : "var(--text-muted)",
+                          fontWeight: 600, fontSize: 13, fontFamily: "Inter, sans-serif",
+                        }}>{sym}</button>
+                      );
+                    })}
+                  </div>
+                )}
+                <DepositWithdrawPanel
+                  vault={selectedVault}
+                  apys={apys}
+                  onDeposit={deposit}
+                  onWithdraw={withdraw}
+                  userShares={selectedPos?.shares || 0}
+                />
+              </div>
+            );
+          })() : (
             <div style={{ color: "var(--text-muted)", padding: 20 }}>
               {loading ? "Loading vault..." : "No vault configured. Set NEXT_PUBLIC_VAULT_ADDRESSES in .env.local"}
             </div>
@@ -365,22 +387,37 @@ export default function Dashboard() {
       {/* ── Withdraw ─────────────────────────────────────────────────────── */}
       {activeTab === "withdraw" && (
         <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
-          {vaults.length > 0 ? (
-            vaults.map((vault, i) => {
-              const pos = positions.find(p => p.vault === vault.address);
-              return (
+          {vaults.length > 0 ? (() => {
+            const selectedVault = vaults.find(v => v.address === selectedVaultAddr) || vaults[0];
+            const selectedPos = positions.find(p => p.vault === selectedVault.address);
+            return (
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {vaults.length > 1 && (
+                  <div style={{ display: "flex", background: "var(--surface)", border: "1px solid var(--border)", padding: 4, borderRadius: 10, gap: 4, width: "fit-content" }}>
+                    {vaults.map(v => {
+                      const sym = v.name.toUpperCase().includes("SOL") ? "SOL" : "USDC";
+                      return (
+                        <button key={v.address} onClick={() => setSelectedVaultAddr(v.address)} style={{
+                          padding: "7px 18px", borderRadius: 7, border: "none", cursor: "pointer",
+                          background: (selectedVaultAddr === v.address || (!selectedVaultAddr && v === vaults[0])) ? "var(--purple)" : "transparent",
+                          color: (selectedVaultAddr === v.address || (!selectedVaultAddr && v === vaults[0])) ? "#fff" : "var(--text-muted)",
+                          fontWeight: 600, fontSize: 13, fontFamily: "Inter, sans-serif",
+                        }}>{sym}</button>
+                      );
+                    })}
+                  </div>
+                )}
                 <DepositWithdrawPanel
-                  key={vault.address}
-                  vault={vault}
+                  vault={selectedVault}
                   apys={apys}
                   onDeposit={deposit}
                   onWithdraw={withdraw}
-                  userShares={pos?.shares || 0}
+                  userShares={selectedPos?.shares || 0}
                   initialTab="withdraw"
                 />
-              );
-            })
-          ) : (
+              </div>
+            );
+          })() : (
             <div style={{ color: "var(--text-muted)", padding: 20 }}>
               {loading ? "Loading vaults..." : "No vaults found."}
             </div>

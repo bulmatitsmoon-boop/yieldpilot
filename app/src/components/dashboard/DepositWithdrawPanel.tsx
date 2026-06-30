@@ -28,7 +28,7 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
   const [busy, setBusy] = useState(false);
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
 
-  const asset = vault.mint.slice(0, 4); // rough guess; in prod map mint→symbol
+  const asset = vault.name.toUpperCase().includes("SOL") ? "SOL" : "USDC";
   const decimals = DECIMALS[asset] || 6;
   const bestApy = apys.sort((a, b) => b.apyBps - a.apyBps)[0];
 
