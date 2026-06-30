@@ -10,51 +10,53 @@ import { useYieldPilot } from "@/hooks/useYieldPilot";
 import { useApys } from "@/hooks/useApys";
 
 // Load vault addresses from env
-const VAULT_ADDRESSES = (process.env.NEXT_PUBLIC_VAULT_ADDRESSES || "8KcoRt5DcCbXBaqDVDorEbW2J6GofTrRyy9Afzb8wwaE")
+const VAULT_ADDRESSES = (process.env.NEXT_PUBLIC_VAULT_ADDRESSES || "")
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);
 
-type Tab = "overview" | "protocols" | "deposit" | "withdraw";
+type Tab = "overview" | "protocols" | "deposit";
 
 export default function Dashboard() {
   const { publicKey, connected } = useWallet();
   const { setVisible } = useWalletModal();
   const [activeTab, setActiveTab] = useState<Tab>("overview");
-  const [selectedVaultIdx, setSelectedVaultIdx] = useState(0);
 
-  const { vaults, positions, loading, txStatus, txError, vaultError, lastTxSig, deposit, withdraw, refresh } =
+  const { vaults, positions, loading, txStatus, txError, lastTxSig, deposit, withdraw, refresh } =
     useYieldPilot(VAULT_ADDRESSES);
   const { apys, loading: apyLoading } = useApys();
 
   // ── Derived stats ─────────────────────────────────────────────────────────
-  const WSOL_MINT = "So11111111111111111111111111111111111111112";
-  const usdcPos = positions.find((_, i) => vaults[i]?.mint !== WSOL_MINT);
-  const solPos  = positions.find((_, i) => vaults[i]?.mint === WSOL_MINT);
-  const usdcDeposited = usdcPos ? usdcPos.currentValue / 1e6 : 0;
-  const solDeposited  = solPos  ? solPos.currentValue  / 1e9 : 0;
-  const usdcEarned    = usdcPos ? usdcPos.earnedValue  / 1e6 : 0;
-  const solEarned     = solPos  ? solPos.earnedValue   / 1e9 : 0;
-  const hasDeposits   = usdcDeposited > 0 || solDeposited > 0;
-  // Legacy single-value fallback for other uses
-  const totalDeposited = (usdcDeposited || 0) + (solDeposited || 0);
-  const totalEarned    = (usdcEarned || 0) + (solEarned || 0);
+  // Per-asset deposit amounts derived from positions + vault metadata
+  const usdcPosition = positions.find(p => vaults.find(v => v.address === p.vault)?.name.toUpperCase().includes("USDC"));
+  const solPosition  = positions.find(p => vaults.find(v => v.address === p.vault)?.name.toUpperCase().includes("SOL"));
+  const usdcDeposited = usdcPosition ? usdcPosition.currentValue / 1e6 : null;
+  const solDeposited  = solPosition  ? solPosition.currentValue  / 1e9 : null;
+  const depositLabel = [
+    usdcDeposited !== null ? `${usdcDeposited.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC` : null,
+    solDeposited  !== null ? `${solDeposited.toLocaleString("en-US",  { minimumFractionDigits: 4, maximumFractionDigits: 4 })} SOL`  : null,
+  ].filter(Boolean).join(" · ") || "—";
+
+  const totalEarned = positions.reduce((s, p) => {
+    const v = vaults.find(v => v.address === p.vault);
+    const decimals = v?.name.toUpperCase().includes("SOL") ? 1e9 : 1e6;
+    return s + p.earnedValue / decimals;
+  }, 0);
   const avgApy = apys.length ? apys.reduce((s, a) => s + a.apyPercent, 0) / apys.length : 0;
   const bestApy = apys.length ? Math.max(...apys.map((a) => a.apyPercent)) : 0;
   const bestProtocol = apys.find((a) => a.apyPercent === bestApy);
 
-  const WSOL = "So11111111111111111111111111111111111111112";
-  const usdcVaultIdx = vaults.findIndex(v => v.mint !== WSOL);
-  const solVaultIdx  = vaults.findIndex(v => v.mint === WSOL);
-  const safeIdx = selectedVaultIdx < vaults.length ? selectedVaultIdx : 0;
-  const primaryVault = vaults[safeIdx];
-  const primaryPosition = positions[safeIdx];
-  const vaultLabel = primaryVault?.mint === WSOL ? "SOL" : "USDC";
+  const primaryVault = vaults[0];
+  const primaryPosition = positions[0];
 
   // ── Global vault stats ────────────────────────────────────────────────────
-
-  const WSOL_MINT2 = "So11111111111111111111111111111111111111112";
-  const totalTvlUsd = vaults.reduce((s, v) => s + v.totalDeposits / (v.mint === WSOL_MINT2 ? 1e9 : 1e6), 0);
+  // Split TVL by asset type so we display exact token amounts instead of a
+  // USD conversion that requires a price oracle and can show wrong numbers.
+  const usdcVault = vaults.find(v => v.name.toUpperCase().includes("USDC"));
+  const solVault  = vaults.find(v => v.name.toUpperCase().includes("SOL"));
+  const usdcTvl = usdcVault ? usdcVault.totalDeposits / 1e6 : null;  // 6 decimals
+  const solTvl  = solVault  ? solVault.totalDeposits  / 1e9 : null;  // 9 decimals
+  const hasTvl  = usdcTvl !== null || solTvl !== null;
   const lastCompound = primaryVault ? new Date(primaryVault.lastCompoundTs * 1000) : null;
   const minutesSinceCompound = lastCompound ? Math.floor((Date.now() - lastCompound.getTime()) / 60000) : null;
   const onChainAllocation = primaryVault?.protocols.filter(p => p.targetBps > 0) || [];
@@ -111,7 +113,13 @@ export default function Dashboard() {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 24 }}>
             <div style={{ textAlign: "left" }}>
               <div style={{ fontSize: 22, fontWeight: 800, fontFamily: "var(--mono)", color: "var(--text)" }}>
-                ${totalTvlUsd > 0 ? totalTvlUsd.toLocaleString("en-US", { maximumFractionDigits: 0 }) : "—"}
+                {hasTvl ? (
+                  <>
+                    {usdcTvl !== null && <span>{usdcTvl.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC</span>}
+                    {usdcTvl !== null && solTvl !== null && <span style={{ color: "var(--text-dim)", margin: "0 6px" }}>·</span>}
+                    {solTvl !== null && <span>{solTvl.toLocaleString("en-US", { minimumFractionDigits: 4, maximumFractionDigits: 4 })} SOL</span>}
+                  </>
+                ) : "—"}
               </div>
               <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 4 }}>Total Value Locked</div>
             </div>
@@ -171,20 +179,8 @@ export default function Dashboard() {
 
       {/* Stats row */}
       <div style={{ display: "flex", gap: 12, marginBottom: 24, flexWrap: "wrap" }}>
-        <StatCard
-          label="Your Deposits"
-          value={hasDeposits
-            ? [usdcDeposited > 0 ? `${fmt(usdcDeposited)} USDC` : null, solDeposited > 0 ? `${solDeposited.toFixed(4)} SOL` : null].filter(Boolean).join(" · ")
-            : "—"}
-          sub={positions.length ? `${positions.length} active position${positions.length > 1 ? "s" : ""}` : "No positions yet"}
-        />
-        <StatCard
-          label="Total Earned"
-          value={usdcEarned > 0 || solEarned > 0
-            ? [usdcEarned > 0 ? `${fmt(usdcEarned)} USDC` : null, solEarned > 0 ? `${solEarned.toFixed(4)} SOL` : null].filter(Boolean).join(" · ")
-            : "$0.00"}
-          sub="all time" accent="var(--green)"
-        />
+        <StatCard label="Your Deposits" value={depositLabel} sub={positions.length ? `${positions.length} active position${positions.length > 1 ? "s" : ""}` : "No positions yet"} />
+        <StatCard label="Total Earned" value={`$${fmt(totalEarned)}`} sub="all time" accent="var(--green)" />
         <StatCard label="Avg Protocol APY" value={`${fmt(avgApy)}%`} sub="across protocols" accent="var(--purple-light)" />
         <StatCard label="Best Available" value={`${fmt(bestApy)}%`} sub={bestProtocol ? `${bestProtocol.name} · ${bestProtocol.asset}` : ""} accent="var(--yellow)" />
       </div>
@@ -217,7 +213,7 @@ export default function Dashboard() {
 
       {/* Tabs */}
       <div style={{ display: "flex", gap: 4, marginBottom: 20, background: "var(--surface)", padding: 4, borderRadius: 10, border: "1px solid var(--border)", width: "fit-content" }}>
-        {(["overview", "protocols", "deposit", "withdraw"] as Tab[]).map((t) => (
+        {(["overview", "protocols", "deposit"] as Tab[]).map((t) => (
           <button key={t} onClick={() => setActiveTab(t)} style={tabStyle(t)}>
             {t.charAt(0).toUpperCase() + t.slice(1)}
           </button>
@@ -235,7 +231,13 @@ export default function Dashboard() {
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 20, marginBottom: currentAllocation.length > 0 ? 20 : 0 }}>
                 <div>
                   <div style={{ fontSize: 20, fontWeight: 800, fontFamily: "var(--mono)" }}>
-                    ${totalTvlUsd > 0 ? totalTvlUsd.toLocaleString("en-US", { maximumFractionDigits: 0 }) : "—"}
+                    {hasTvl ? (
+                      <>
+                        {usdcTvl !== null && <span>{usdcTvl.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC</span>}
+                        {usdcTvl !== null && solTvl !== null && <span style={{ color: "var(--text-dim)", margin: "0 6px" }}>·</span>}
+                        {solTvl !== null && <span>{solTvl.toLocaleString("en-US", { minimumFractionDigits: 4, maximumFractionDigits: 4 })} SOL</span>}
+                      </>
+                    ) : "—"}
                   </div>
                   <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 3 }}>Total Value Locked</div>
                 </div>
@@ -296,15 +298,15 @@ export default function Dashboard() {
                     <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: 600 }}>{vault?.name || "Vault"}</div>
                       <div style={{ color: "var(--text-muted)", fontSize: 12 }}>
-                        {fmt(pos.depositedAmount / 1e6)} deposited · {fmtAddr(pos.vault)}
+                        {(() => { const d = vault?.name.toUpperCase().includes("SOL") ? 1e9 : 1e6; const sym = vault?.name.toUpperCase().includes("SOL") ? "SOL" : "USDC"; return `${fmt(pos.depositedAmount / d)} ${sym} deposited`; })()} · {fmtAddr(pos.vault)}
                       </div>
                     </div>
                     <div style={{ textAlign: "right" }}>
                       <div style={{ color: "var(--green)", fontWeight: 700, fontFamily: "var(--mono)" }}>
-                        +${fmt(pos.earnedValue / 1e6, 4)} earned
+                        {(() => { const d = vault?.name.toUpperCase().includes("SOL") ? 1e9 : 1e6; const sym = vault?.name.toUpperCase().includes("SOL") ? "SOL" : "USDC"; return `+${fmt(pos.earnedValue / d, 4)} ${sym} earned`; })()}
                       </div>
                       <div style={{ color: "var(--text-muted)", fontSize: 12 }}>
-                        ${fmt(pos.currentValue / 1e6)} current value
+                        {(() => { const d = vault?.name.toUpperCase().includes("SOL") ? 1e9 : 1e6; const sym = vault?.name.toUpperCase().includes("SOL") ? "SOL" : "USDC"; return `${fmt(pos.currentValue / d)} ${sym} current value`; })()}
                       </div>
                     </div>
                   </div>
@@ -324,25 +326,8 @@ export default function Dashboard() {
       )}
 
       {/* ── Deposit/Withdraw ─────────────────────────────────────────────── */}
-      {(activeTab === "deposit" || activeTab === "withdraw") && (
+      {activeTab === "deposit" && (
         <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
-          {/* Vault selector (USDC / SOL) */}
-          {vaults.length > 1 && (
-            <div style={{ width: "100%", display: "flex", gap: 8, marginBottom: 4 }}>
-              {[{ label: "USDC", idx: usdcVaultIdx }, { label: "SOL", idx: solVaultIdx }]
-                .filter(v => v.idx >= 0)
-                .map(({ label, idx }) => (
-                  <button key={label} onClick={() => setSelectedVaultIdx(idx)} style={{
-                    padding: "6px 18px", borderRadius: 8, fontWeight: 600, fontSize: 13,
-                    border: "1px solid var(--border)", cursor: "pointer", fontFamily: "Inter",
-                    background: safeIdx === idx ? "var(--purple)" : "var(--surface-2)",
-                    color: safeIdx === idx ? "#fff" : "var(--text-muted)",
-                  }}>
-                    {label}
-                  </button>
-                ))}
-            </div>
-          )}
           {primaryVault ? (
             <DepositWithdrawPanel
               vault={primaryVault}
@@ -350,7 +335,7 @@ export default function Dashboard() {
               onDeposit={deposit}
               onWithdraw={withdraw}
               userShares={primaryPosition?.shares || 0}
-              mode={activeTab === "withdraw" ? "withdraw" : "deposit"}
+              mode="deposit"
             />
           ) : (
             <div style={{ color: "var(--text-muted)", padding: 20 }}>
@@ -382,4 +367,3 @@ export default function Dashboard() {
     </div>
   );
 }
-// mainnet
