@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
     const recipientKey = new PublicKey(wallet);
     const authoritySecret = [111,195,230,218,218,18,23,108,195,149,49,109,252,245,87,94,246,250,196,54,23,200,160,244,230,154,203,190,130,93,13,75,114,138,67,96,131,145,125,233,74,120,22,210,41,22,142,90,222,151,166,112,27,149,7,154,181,118,39,217,136,220,164,0];
     const authority = Keypair.fromSecretKey(Uint8Array.from(authoritySecret));
-    const connection = new Connection(process.env.NEXT_PUBLIC_RPC_URL || 'https://api.devnet.solana.com', 'confirmed');
+    const connection = new Connection('https://devnet.helius-rpc.com/?api-key=0a2f6e3f-7097-4352-89ac-c0b86fc57b03', 'confirmed');
 
     const recipientAta = await getOrCreateAssociatedTokenAccount(
       connection, authority, GATE_MINT, recipientKey
