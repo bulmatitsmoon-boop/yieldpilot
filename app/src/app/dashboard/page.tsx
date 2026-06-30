@@ -25,7 +25,7 @@ export default function Dashboard() {
   const [faucetMsg, setFaucetMsg] = useState<string | null>(null);
   const [selectedVaultAddr, setSelectedVaultAddr] = useState<string | null>(null);
 
-  const { vaults, positions, loading, txStatus, txError, vaultError, lastTxSig, deposit, withdraw, refresh } =
+  const { vaults, positions, loading, txStatus, txError, vaultError, lastTxSig, userGateBalance, deposit, withdraw, refresh } =
     useYieldPilot(VAULT_ADDRESSES);
   const { apys, loading: apyLoading } = useApys();
 
@@ -387,6 +387,7 @@ export default function Dashboard() {
                   onWithdraw={withdraw}
                   userShares={selectedPos?.shares || 0}
                   depositedAmount={selectedPos?.depositedAmount || 0}
+                  userGateBalance={userGateBalance}
                 />
               </div>
             );
@@ -447,6 +448,7 @@ export default function Dashboard() {
                   userShares={selectedPos?.shares || 0}
                   depositedAmount={selectedPos?.depositedAmount || 0}
                   initialTab="withdraw"
+                  userGateBalance={userGateBalance}
                 />
               </div>
             );

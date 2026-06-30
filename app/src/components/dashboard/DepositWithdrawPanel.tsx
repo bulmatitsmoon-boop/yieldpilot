@@ -19,9 +19,10 @@ interface Props {
   userShares: number;
   depositedAmount?: number; // raw on-chain units — used for accurate fee preview
   initialTab?: "deposit" | "withdraw";
+  userGateBalance?: number; // raw gate token balance for tier calculation
 }
 
-export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userShares, depositedAmount = 0, initialTab = "deposit" }: Props) {
+export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userShares, depositedAmount = 0, initialTab = "deposit", userGateBalance = 0 }: Props) {
   const { publicKey } = useWallet();
   const { connection } = useConnection();
   const tab = initialTab;
@@ -34,7 +35,21 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
   const bestApy = [...apys].sort((a, b) => b.apyBps - a.apyBps)[0];
   const SYSTEM_PROGRAM = '11111111111111111111111111111111';
   const gatingActive = vault.gateMint && vault.gateMint !== SYSTEM_PROGRAM && vault.gateMint !== '';
-  const effectiveFeeBps = gatingActive ? vault.perfFeeBps : 900;
+  // Tier-based fee: compare raw gate token balance against vault thresholds
+  const effectiveFeeBps = (() => {
+    if (!gatingActive) return vault.perfFeeBps;
+    if (userGateBalance >= (vault.goldThreshold ?? 1_000_000)) return 0;
+    if (userGateBalance >= (vault.silverThreshold ?? 100_000)) return 300;
+    if (userGateBalance >= (vault.bronzeThreshold ?? 10_000)) return 600;
+    return vault.perfFeeBps;
+  })();
+  const tierLabel = (() => {
+    if (!gatingActive) return null;
+    if (userGateBalance >= (vault.goldThreshold ?? 1_000_000)) return "Gold";
+    if (userGateBalance >= (vault.silverThreshold ?? 100_000)) return "Silver";
+    if (userGateBalance >= (vault.bronzeThreshold ?? 10_000)) return "Bronze";
+    return null;
+  })();
 
   // Derive user's position value in tokens from shares
   const sharePrice = vault.totalShares > 0 ? vault.totalDeposits / vault.totalShares : 1;
@@ -119,7 +134,7 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
             </span>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <span style={{ color: "var(--text-muted)" }}>Performance fee</span>
+            <span style={{ color: "var(--text-muted)" }}>Performance fee{tierLabel ? <span style={{ marginLeft: 6, fontSize: 10, background: tierLabel === "Gold" ? "#c9a227" : tierLabel === "Silver" ? "#aaa" : "#cd7f32", color: "#fff", borderRadius: 4, padding: "1px 5px" }}>{tierLabel}</span> : null}</span>
             <span>{(effectiveFeeBps / 100).toFixed(1)}% on profit only</span>
           </div>
         </div>
