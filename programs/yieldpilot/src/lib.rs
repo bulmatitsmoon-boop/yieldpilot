@@ -37,7 +37,8 @@ const BRONZE_CAP:       u64 =  1_000_000_000; // $1k in base-6
 // Tiered performance fees (in bps). Applied on profit at withdrawal.
 const GOLD_FEE_BPS:   u64 =   0; // 0%
 const SILVER_FEE_BPS: u64 = 300; // 3%
-const BRONZE_FEE_BPS: u64 = 600; // 6%
+const BRONZE_FEE_BPS:    u64 = 600; // 6%
+const STANDARD_FEE_BPS:  u64 = 900; // 9% — Tier 4 (sub 0.1% or no gate token)
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq)]
 pub enum HolderTier { Gold, Silver, Bronze, None }
@@ -156,7 +157,6 @@ pub mod yieldpilot {
             } else {
                 HolderTier::None
             };
-            require!(tier != HolderTier::None, VaultError::NotTokenHolder);
             let pos_deposits = ctx.accounts.user_position.deposited_amount;
             if tier == HolderTier::Silver {
                 require!(pos_deposits.saturating_add(amount) <= SILVER_CAP, VaultError::TierCapExceeded);
@@ -298,10 +298,11 @@ pub mod yieldpilot {
             match effective_tier {
                 0 => GOLD_FEE_BPS,
                 1 => SILVER_FEE_BPS,
-                _ => BRONZE_FEE_BPS,
+                2 => BRONZE_FEE_BPS,
+                _ => STANDARD_FEE_BPS,
             }
         } else {
-            v.perf_fee_bps // fallback to vault-level rate when gating is disabled
+            STANDARD_FEE_BPS // no gate token active — everyone is Tier 4el rate when gating is disabled
         };
 
         // Whitelist check: waive fee entirely for whitelisted wallets
