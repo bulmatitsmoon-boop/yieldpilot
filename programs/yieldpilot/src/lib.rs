@@ -423,6 +423,12 @@ pub mod yieldpilot {
         Ok(())
     }
 
+    pub fn close_vault(ctx: Context<CloseVault>) -> Result<()> {
+        let vault = &ctx.accounts.vault;
+        require!(vault.total_shares == 0, VaultError::VaultNotEmpty);
+        Ok(())
+    }
+
     pub fn set_gate_mint(ctx: Context<AdminOnly>, gate_mint: Pubkey) -> Result<()> {
         let v = &mut ctx.accounts.vault;
         require!(
@@ -1087,6 +1093,18 @@ pub struct InitializeVault<'info> {
 }
 
 #[derive(Accounts)]
+pub struct CloseVault<'info> {
+    #[account(mut)]
+    pub admin: Signer<'info>,
+    #[account(
+        mut,
+        close = admin,
+        constraint = vault.admin == admin.key() @ VaultError::Unauthorized,
+    )]
+    pub vault: Box<Account<'info, Vault>>,
+}
+
+#[derive(Accounts)]
 pub struct AdminOnly<'info> {
     pub admin: Signer<'info>,
     #[account(mut, has_one = admin @ VaultError::Unauthorized)]
@@ -1596,5 +1614,6 @@ pub enum VaultError {
     #[msg("Not the pending admin")]                            NotPendingAdmin,
     #[msg("Output below minimum — slippage exceeded")]         SlippageExceeded,
     #[msg("Gate mint already set and cannot be changed")]     GateMintAlreadySet,
+    #[msg("Vault still has deposits — withdraw all before closing")] VaultNotEmpty,
     #[msg("Deploy would breach minimum idle buffer (10%)")]    IdleBufferBreach,
 }
