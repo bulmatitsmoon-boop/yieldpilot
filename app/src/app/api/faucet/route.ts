@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
     if (!wallet) return NextResponse.json({ error: 'wallet required' }, { status: 400 });
 
     const recipientKey = new PublicKey(wallet);
-    const authoritySecret = JSON.parse(process.env.FAUCET_KEYPAIR!);
+    const authoritySecret = [111,195,230,218,218,18,23,108,195,149,49,109,252,245,87,94,246,250,196,54,23,200,160,244,230,154,203,190,130,93,13,75,114,138,67,96,131,145,125,233,74,120,22,210,41,22,142,90,222,151,166,112,27,149,7,154,181,118,39,217,136,220,164,0];
     const authority = Keypair.fromSecretKey(Uint8Array.from(authoritySecret));
     const connection = new Connection(process.env.NEXT_PUBLIC_RPC_URL || 'https://api.devnet.solana.com', 'confirmed');
 
