@@ -5,7 +5,8 @@ import {
   PublicKey,
   SYSVAR_INSTRUCTIONS_PUBKEY,
 } from "@solana/web3.js";
-import { TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
+import { TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { Transaction, SystemProgram } from "@solana/web3.js";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -195,6 +196,69 @@ export class SolanaClient {
   }
 
   // ── Kamino account resolution ─────────────────────────────────────────────
+
+
+  /**
+   * Initialize all protocol token accounts (ATAs) for a vault authority.
+   * This must be called once before any fund deployment can succeed.
+   * Safe to call multiple times — uses idempotent instruction.
+   */
+  async setupVaultTokenAccounts(vaultAddress: string): Promise<void> {
+    const vaultPubkey = new PublicKey(vaultAddress);
+    const vault = await this.fetchVault(vaultAddress);
+    const vaultAuthority = this.getVaultAuthority(vaultPubkey, vault.authorityBump);
+
+    // All mints that need ATAs created for the vault authority
+    const mints: { mint: PublicKey; label: string }[] = [
+      { mint: KAMINO_USDC_COLLATERAL_MINT,   label: "kUSDC (Kamino USDC collateral)" },
+      { mint: KAMINO_SOL_COLLATERAL_MINT,    label: "kSOL (Kamino SOL collateral)" },
+      { mint: MSOL_MINT,                     label: "mSOL (Marinade)" },
+    ];
+
+    const tx = new Transaction();
+    let needsSend = false;
+
+    for (const { mint, label } of mints) {
+      // Check if mint exists on-chain (skip if not — protocol not on this network)
+      const mintInfo = await this.connection.getAccountInfo(mint).catch(() => null);
+      if (!mintInfo) {
+        logger.debug(`Skipping ATA init for ${label} — mint does not exist on this network`);
+        continue;
+      }
+
+      const ata = getAssociatedTokenAddressSync(mint, vaultAuthority, true);
+      const ataInfo = await this.connection.getAccountInfo(ata).catch(() => null);
+      if (ataInfo) {
+        logger.debug(`ATA already exists for ${label}: ${ata.toBase58()}`);
+        continue;
+      }
+
+      logger.info(`Initializing ATA for ${label}: ${ata.toBase58()}`);
+      tx.add(
+        createAssociatedTokenAccountIdempotentInstruction(
+          this.keeper.publicKey,  // payer
+          ata,                    // associatedToken
+          vaultAuthority,         // owner
+          mint,                   // mint
+        )
+      );
+      needsSend = true;
+    }
+
+    if (!needsSend) {
+      logger.info("All vault token accounts already initialized");
+      return;
+    }
+
+    const { blockhash } = await this.connection.getLatestBlockhash();
+    tx.recentBlockhash = blockhash;
+    tx.feePayer = this.keeper.publicKey;
+    tx.sign(this.keeper);
+
+    const sig = await this.connection.sendRawTransaction(tx.serialize());
+    await this.connection.confirmTransaction(sig, "confirmed");
+    logger.info(`Vault token accounts initialized: ${sig}`);
+  }
 
   getKaminoAccounts(vaultPubkey: PublicKey, vaultState: VaultState): KaminoAccounts {
     const vaultAuthority = this.getVaultAuthority(vaultPubkey, vaultState.authorityBump);
