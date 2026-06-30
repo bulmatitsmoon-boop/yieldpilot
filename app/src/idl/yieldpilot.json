@@ -1190,6 +1190,27 @@
       ]
     },
     {
+      "name": "setGateMint",
+      "accounts": [
+        {
+          "name": "admin",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "vault",
+          "isMut": true,
+          "isSigner": false
+        }
+      ],
+      "args": [
+        {
+          "name": "gateMint",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
       "name": "updateTierThresholds",
       "accounts": [
         {
@@ -1371,6 +1392,11 @@
       "code": 6000,
       "name": "ReserveDataTooShort",
       "msg": "Reserve account data too short to parse"
+    },
+    {
+      "code": 6001,
+      "name": "GateMintAlreadySet",
+      "msg": "Gate mint already set and cannot be changed"
     }
   ],
   "types": [
