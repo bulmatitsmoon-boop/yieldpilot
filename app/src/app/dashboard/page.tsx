@@ -21,6 +21,8 @@ export default function Dashboard() {
   const { publicKey, connected } = useWallet();
   const { setVisible } = useWalletModal();
   const [activeTab, setActiveTab] = useState<Tab>("overview");
+  const [faucetBusy, setFaucetBusy] = useState(false);
+  const [faucetMsg, setFaucetMsg] = useState<string | null>(null);
   const [selectedVaultAddr, setSelectedVaultAddr] = useState<string | null>(null);
 
   const { vaults, positions, loading, txStatus, txError, lastTxSig, deposit, withdraw, refresh } =
