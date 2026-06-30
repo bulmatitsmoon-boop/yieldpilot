@@ -189,7 +189,7 @@ export function useYieldPilot(vaultAddresses: string[]) {
         results
           .filter((r): r is PromiseFulfilledResult<UserPosition> => r.status === "fulfilled")
           .map((r) => r.value)
-          .filter((p) => p.shares > 0 && vaults.find(v => v.address === p.vault)?.totalShares > 0)
+          .filter((p) => p.shares > 0 && (vaults.find(v => v.address === p.vault)?.totalShares ?? 0) > 0)
       );
     } catch (err) {
       console.error("fetchPositions error", err);
