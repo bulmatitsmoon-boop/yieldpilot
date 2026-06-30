@@ -1,0 +1,43 @@
+name: Build Solana Program
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'programs/**'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Solana CLI 2.1.0
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/v2.1.0/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build program
+        run: |
+          cd programs/yieldpilot
+          cargo-build-sbf --manifest-path Cargo.toml
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: yieldpilot-so
+          path: target/deploy/yieldpilot.so
+          retention-days: 7
