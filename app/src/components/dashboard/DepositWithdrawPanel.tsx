@@ -113,7 +113,6 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
 
   return (
     <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 24, minWidth: 340, maxWidth: 420 }}>
-      <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 20 }}>{vault.name}</div>
 
       {/* Tab switcher */}
       <div style={{ display: "flex", background: "var(--bg)", padding: 3, borderRadius: 8, marginBottom: 20, gap: 3 }}>
