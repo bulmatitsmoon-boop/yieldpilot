@@ -40,6 +40,9 @@ export interface VaultInfo {
   lastCompoundTs: number;
   protocolCount: number;
   gateMint: string;
+  goldThreshold: number;
+  silverThreshold: number;
+  bronzeThreshold: number;
   protocols: {
     name: string;
     targetBps: number;
@@ -84,6 +87,7 @@ export function useYieldPilot(vaultAddresses: string[]) {
   const [lastTxSig, setLastTxSig] = useState<string | null>(null);
   const [vaultError, setVaultError] = useState<string | null>(null);
   const [txHistory, setTxHistory] = useState<{ sig: string; type: string; ts: number }[]>([]);
+  const [userGateBalance, setUserGateBalance] = useState<number>(0);
 
   // Build Anchor program (read-only, no wallet needed for fetching)
   const getProgram = useCallback(() => {
@@ -123,6 +127,9 @@ export function useYieldPilot(vaultAddresses: string[]) {
             lastCompoundTs: (raw.lastCompoundTs as anchor.BN).toNumber(),
             protocolCount: raw.protocolCount as number,
             gateMint: ((raw.gateMint as any)?.toBase58 ? (raw.gateMint as any).toBase58() : ""),
+            goldThreshold: (raw.goldThreshold as anchor.BN).toNumber(),
+            silverThreshold: (raw.silverThreshold as anchor.BN).toNumber(),
+            bronzeThreshold: (raw.bronzeThreshold as anchor.BN).toNumber(),
             protocols: (raw.protocols as any[])
               .slice(0, raw.protocolCount as number)
               .map((p) => ({
@@ -153,6 +160,19 @@ export function useYieldPilot(vaultAddresses: string[]) {
     if (!publicKey || vaults.length === 0) return;
     try {
       const program = getProgram();
+      // Fetch user's gate token balance for tier calculation
+      const gateMint = vaults.find(v => v.gateMint && v.gateMint !== '11111111111111111111111111111111')?.gateMint;
+      if (gateMint) {
+        try {
+          const gateAta = await (await import("@solana/spl-token")).getAssociatedTokenAddress(
+            new PublicKey(gateMint), publicKey
+          );
+          const gateAcct = await connection.getTokenAccountBalance(gateAta);
+          setUserGateBalance(gateAcct.value.amount ? parseInt(gateAcct.value.amount) : 0);
+        } catch {
+          setUserGateBalance(0);
+        }
+      }
       const results = await Promise.allSettled(
         vaults.map(async (vault) => {
           const vaultPubkey = new PublicKey(vault.address);
@@ -383,6 +403,7 @@ export function useYieldPilot(vaultAddresses: string[]) {
     vaultError,
     lastTxSig,
     txHistory,
+    userGateBalance,
     deposit,
     withdraw,
     refresh: () => { fetchVaults(); fetchPositions(); },
