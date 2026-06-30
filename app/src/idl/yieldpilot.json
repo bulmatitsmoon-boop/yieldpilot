@@ -7,6 +7,37 @@
   },
   "instructions": [
     {
+      "name": "emergencyClose",
+      "discriminator": [
+        72,
+        5,
+        66,
+        138,
+        108,
+        194,
+        37,
+        175
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "vault",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "closeVault",
       "discriminator": [
         141,
