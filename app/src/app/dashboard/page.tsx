@@ -60,7 +60,7 @@ export default function Dashboard() {
   const usdcTvl = usdcVault ? usdcVault.totalDeposits / 1e6 : null;  // 6 decimals
   const solTvl  = solVault  ? solVault.totalDeposits  / 1e9 : null;  // 9 decimals
   const hasTvl  = usdcTvl !== null || solTvl !== null;
-  const lastCompound = primaryVault ? new Date(primaryVault.lastCompoundTs * 1000) : null;
+  const lastCompound = primaryVault && primaryVault.lastCompoundTs > 0 ? new Date(primaryVault.lastCompoundTs * 1000) : null;
   const minutesSinceCompound = lastCompound ? Math.floor((Date.now() - lastCompound.getTime()) / 60000) : null;
   const onChainAllocation = primaryVault?.protocols.filter(p => p.targetBps > 0) || [];
   // Fall back to APY-derived 80/20 allocation if on-chain hasn't rebalanced yet
@@ -136,7 +136,7 @@ export default function Dashboard() {
             </div>
             <div style={{ textAlign: "left" }}>
               <div style={{ fontSize: 22, fontWeight: 800, fontFamily: "var(--mono)", color: "var(--purple-light)" }}>
-                {minutesSinceCompound !== null ? `${minutesSinceCompound}m ago` : "—"}
+                {minutesSinceCompound !== null ? minutesSinceCompound < 60 ? `${minutesSinceCompound}m ago` : minutesSinceCompound < 1440 ? `${Math.floor(minutesSinceCompound/60)}h ago` : `${Math.floor(minutesSinceCompound/1440)}d ago` : "—"}
               </div>
               <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 4 }}>Last Compounded</div>
             </div>
@@ -281,7 +281,7 @@ export default function Dashboard() {
                 </div>
                 <div>
                   <div style={{ fontSize: 20, fontWeight: 800, fontFamily: "var(--mono)", color: "var(--purple-light)" }}>
-                    {minutesSinceCompound !== null ? `${minutesSinceCompound}m ago` : "—"}
+                    {minutesSinceCompound !== null ? minutesSinceCompound < 60 ? `${minutesSinceCompound}m ago` : minutesSinceCompound < 1440 ? `${Math.floor(minutesSinceCompound/60)}h ago` : `${Math.floor(minutesSinceCompound/1440)}d ago` : "—"}
                   </div>
                   <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 3 }}>Last Compounded</div>
                 </div>
