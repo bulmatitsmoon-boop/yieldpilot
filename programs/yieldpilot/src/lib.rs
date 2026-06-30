@@ -1292,7 +1292,7 @@ pub struct DeployToMarinade<'info> {
     #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
     pub vault: Account<'info, Vault>,
     /// CHECK: PDA
-    #[account(seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
+    #[account(mut, seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
     pub vault_authority: UncheckedAccount<'info>,
     /// CHECK: Marinade validates
     #[account(mut)] pub marinade_state: UncheckedAccount<'info>,
@@ -1321,7 +1321,7 @@ pub struct RecallFromMarinade<'info> {
     #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
     pub vault: Account<'info, Vault>,
     /// CHECK: PDA
-    #[account(seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
+    #[account(mut, seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
     pub vault_authority: UncheckedAccount<'info>,
     /// CHECK: Marinade validates
     #[account(mut)] pub marinade_state: UncheckedAccount<'info>,
