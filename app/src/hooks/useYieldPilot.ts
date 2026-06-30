@@ -294,7 +294,7 @@ export function useYieldPilot(vaultAddresses: string[]) {
           })
           .preInstructions(preIxs)
           .postInstructions(postIxs)
-          .rpc({ skipPreflight: true });
+          .rpc({ skipPreflight: true, commitment: "confirmed", preflightCommitment: "confirmed" });
       });
     },
     [publicKey, getProgram, wrapTx]
@@ -366,7 +366,7 @@ export function useYieldPilot(vaultAddresses: string[]) {
           })
           .preInstructions(preIxs)
           .postInstructions(postIxs)
-          .rpc({ skipPreflight: true });
+          .rpc({ skipPreflight: true, commitment: "confirmed", preflightCommitment: "confirmed" });
       });
     },
     [publicKey, getProgram, wrapTx]
