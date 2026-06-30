@@ -1866,6 +1866,18 @@
             "type": "u64"
           },
           {
+            "name": "gold_threshold",
+            "type": "u64"
+          },
+          {
+            "name": "silver_threshold",
+            "type": "u64"
+          },
+          {
+            "name": "bronze_threshold",
+            "type": "u64"
+          },
+          {
             "name": "name",
             "type": "string"
           },
