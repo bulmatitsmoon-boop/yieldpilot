@@ -63,6 +63,9 @@ pub mod yieldpilot {
         v.vault_token_account = ctx.accounts.vault_token_account.key();
         v.shares_mint         = ctx.accounts.shares_mint.key();
         v.treasury  = params.treasury;
+        v.gold_threshold   = GOLD_THRESHOLD;
+        v.silver_threshold = SILVER_THRESHOLD;
+        v.bronze_threshold = BRONZE_THRESHOLD;
         // Normalize: zero pubkey also means no gating
         v.gate_mint = if params.gate_mint == Pubkey::default() {
             anchor_lang::solana_program::system_program::ID
@@ -148,11 +151,11 @@ pub mod yieldpilot {
                 .as_ref()
                 .map(|a| a.amount)
                 .unwrap_or(0);
-            let tier = if gate_balance >= GOLD_THRESHOLD {
+            let tier = if gate_balance >= v.gold_threshold {
                 HolderTier::Gold
-            } else if gate_balance >= SILVER_THRESHOLD {
+            } else if gate_balance >= v.silver_threshold {
                 HolderTier::Silver
-            } else if gate_balance >= BRONZE_THRESHOLD {
+            } else if gate_balance >= v.bronze_threshold {
                 HolderTier::Bronze
             } else {
                 HolderTier::None
@@ -417,6 +420,14 @@ pub mod yieldpilot {
 
     pub fn propose_admin(ctx: Context<AdminOnly>, new_admin: Pubkey) -> Result<()> {
         ctx.accounts.vault.pending_admin = new_admin;
+        Ok(())
+    }
+
+    pub fn update_tier_thresholds(ctx: Context<UpdateTierThresholds>, gold: u64, silver: u64, bronze: u64) -> Result<()> {
+        let v = &mut ctx.accounts.vault;
+        v.gold_threshold = gold;
+        v.silver_threshold = silver;
+        v.bronze_threshold = bronze;
         Ok(())
     }
 
@@ -950,7 +961,10 @@ pub struct Vault {
     pub vault_token_account: Pubkey,
     pub shares_mint:         Pubkey,
     pub treasury:            Pubkey,  // receives perf fees
-    pub gate_mint:           Pubkey,  // pump.fun token for access gating (Pubkey::default = no gate)
+    pub gate_mint:           Pubkey,
+    pub gold_threshold:      u64,
+    pub silver_threshold:    u64,
+    pub bronze_threshold:    u64,
     pub pending_admin:       Pubkey,  // two-step admin transfer; Pubkey::default = no pending transfer
     pub total_deposits:      u64,
     pub total_shares:        u64,
@@ -1179,6 +1193,14 @@ pub struct Withdraw<'info> {
     pub whitelist_entry: Option<Account<'info, WhitelistEntry>>,
 
     pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct UpdateTierThresholds<'info> {
+    #[account(mut)]
+    pub admin: Signer<'info>,
+    #[account(mut, constraint = vault.admin == admin.key() @ VaultError::Unauthorized)]
+    pub vault: Box<Account<'info, Vault>>,
 }
 
 #[derive(Accounts)]
