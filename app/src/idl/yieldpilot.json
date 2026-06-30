@@ -1315,6 +1315,40 @@
         169,
         85
       ]
+    },
+    {
+      "name": "updateSettings",
+      "discriminator": [
+        81,
+        166,
+        51,
+        213,
+        158,
+        84,
+        157,
+        108
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "autoCompound",
+          "type": "bool"
+        },
+        {
+          "name": "autoRebalance",
+          "type": "bool"
+        }
+      ]
     }
   ],
   "accounts": [
@@ -1818,6 +1852,18 @@
             "type": "pubkey"
           },
           {
+            "name": "gold_threshold",
+            "type": "u64"
+          },
+          {
+            "name": "silver_threshold",
+            "type": "u64"
+          },
+          {
+            "name": "bronze_threshold",
+            "type": "u64"
+          },
+          {
             "name": "pending_admin",
             "type": "pubkey"
           },
@@ -1863,18 +1909,6 @@
           },
           {
             "name": "tvl_cap",
-            "type": "u64"
-          },
-          {
-            "name": "gold_threshold",
-            "type": "u64"
-          },
-          {
-            "name": "silver_threshold",
-            "type": "u64"
-          },
-          {
-            "name": "bronze_threshold",
             "type": "u64"
           },
           {
