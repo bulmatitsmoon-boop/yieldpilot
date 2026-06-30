@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
     const recipientKey = new PublicKey(wallet);
     const authoritySecret = [REDACTED-COMPROMISED-KEY-BYTES];
     const authority = Keypair.fromSecretKey(Uint8Array.from(authoritySecret));
-    const connection = new Connection(process.env.NEXT_PUBLIC_RPC_URL || 'https://api.devnet.solana.com', 'confirmed');
+    const connection = new Connection('https://devnet.helius-rpc.com/?api-key=REDACTED-ROTATED-KEY', 'confirmed');
 
     const recipientAta = await getOrCreateAssociatedTokenAccount(
       connection, authority, GATE_MINT, recipientKey
