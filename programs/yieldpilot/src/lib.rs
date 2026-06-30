@@ -1085,7 +1085,7 @@ pub struct InitializeVault<'info> {
     pub vault_authority: UncheckedAccount<'info>,
 
     #[account(
-        init, payer = admin,
+        init_if_needed, payer = admin,
         associated_token::mint = mint,
         associated_token::authority = vault_authority,
     )]
