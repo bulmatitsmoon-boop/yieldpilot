@@ -173,6 +173,27 @@ export default function Dashboard() {
     );
   }
 
+
+  const claimTestTokens = async () => {
+    if (!publicKey || faucetBusy) return;
+    setFaucetBusy(true);
+    setFaucetMsg(null);
+    try {
+      const res = await fetch("/api/faucet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet: publicKey.toBase58() }),
+      });
+      const json = await res.json();
+      if (json.success) setFaucetMsg("50,000 YPLT added to your wallet!");
+      else setFaucetMsg("Error: " + json.error);
+    } catch (e) {
+      setFaucetMsg("Error: " + e.message);
+    } finally {
+      setFaucetBusy(false);
+    }
+  };
+
   return (
     <div style={{ maxWidth: 1020, margin: "0 auto", padding: "32px 16px 80px" }}>
       {/* Tx status */}
@@ -208,6 +229,14 @@ export default function Dashboard() {
             >
               ↻ Refresh
             </button>
+            {publicKey && (
+              <button onClick={claimTestTokens} disabled={faucetBusy} style={{ marginLeft: 8, background: "var(--purple)", border: "none", color: "#fff", borderRadius: 7, fontSize: 12, cursor: faucetBusy ? "wait" : "pointer", fontFamily: "Inter", padding: "6px 12px" }}>
+                {faucetBusy ? "Sending..." : "Get Test Tokens"}
+              </button>
+            )}
+            {faucetMsg && (
+              <span style={{ marginLeft: 8, fontSize: 11, color: faucetMsg.startsWith("Error") ? "var(--red)" : "var(--green)" }}>{faucetMsg}</span>
+            )}
           </div>
         </div>
       )}
