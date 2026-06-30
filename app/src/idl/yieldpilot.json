@@ -1167,6 +1167,13 @@
           "optional": true
         },
         {
+          "name": "whitelist_entry",
+          "docs": [
+            "Optional: whitelist entry PDA. If present, performance fee is waived."
+          ],
+          "optional": true
+        },
+        {
           "name": "token_program",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         }
@@ -1493,7 +1500,7 @@
           {
             "name": "external_state",
             "docs": [
-              "Kamino → reserve pubkey.  Marinade → state pubkey."
+              "Kamino \u2192 reserve pubkey.  Marinade \u2192 state pubkey."
             ],
             "type": "pubkey"
           },
