@@ -32,6 +32,9 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
   const asset = vault.name.toUpperCase().includes("SOL") ? "SOL" : "USDC";
   const decimals = DECIMALS[asset] || 6;
   const bestApy = [...apys].sort((a, b) => b.apyBps - a.apyBps)[0];
+  const SYSTEM_PROGRAM = '11111111111111111111111111111111';
+  const gatingActive = vault.gateMint && vault.gateMint !== SYSTEM_PROGRAM && vault.gateMint !== '';
+  const effectiveFeeBps = gatingActive ? vault.perfFeeBps : 900;
 
   // Derive user's position value in tokens from shares
   const sharePrice = vault.totalShares > 0 ? vault.totalDeposits / vault.totalShares : 1;
@@ -99,7 +102,7 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
     // Fraction of position being withdrawn
     const withdrawFraction = positionTokens > 0 ? Math.min(parsedAmount / positionTokens, 1) : 0;
     const profitBeingWithdrawn = profitTokens * withdrawFraction;
-    const fee = profitBeingWithdrawn * (vault.perfFeeBps / 10000);
+    const fee = profitBeingWithdrawn * (effectiveFeeBps / 10000);
     return Math.max(0, parsedAmount - fee);
   })() : null;
 
@@ -117,7 +120,7 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
           </div>
           <div style={{ display: "flex", justifyContent: "space-between" }}>
             <span style={{ color: "var(--text-muted)" }}>Performance fee</span>
-            <span>{(vault.perfFeeBps / 100).toFixed(1)}% on profit only</span>
+            <span>{(effectiveFeeBps / 100).toFixed(1)}% on profit only</span>
           </div>
         </div>
       )}

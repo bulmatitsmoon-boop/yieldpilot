@@ -39,6 +39,7 @@ export interface VaultInfo {
   autoRebalance: boolean;
   lastCompoundTs: number;
   protocolCount: number;
+  gateMint: string;
   protocols: {
     name: string;
     targetBps: number;
@@ -121,6 +122,7 @@ export function useYieldPilot(vaultAddresses: string[]) {
             autoRebalance: raw.autoRebalance as boolean,
             lastCompoundTs: (raw.lastCompoundTs as anchor.BN).toNumber(),
             protocolCount: raw.protocolCount as number,
+            gateMint: ((raw.gateMint as any)?.toBase58 ? (raw.gateMint as any).toBase58() : ""),
             protocols: (raw.protocols as any[])
               .slice(0, raw.protocolCount as number)
               .map((p) => ({
