@@ -287,6 +287,7 @@ export function useYieldPilot(vaultAddresses: string[]) {
             userPosition: positionPda,
             userSharesAccount,
             userGateAccount: userGateAccount as any,
+            whitelistEntry: null as any,
             tokenProgram: TOKEN_PROGRAM_ID,
             associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
             systemProgram: SystemProgram.programId,
@@ -360,6 +361,7 @@ export function useYieldPilot(vaultAddresses: string[]) {
             userSharesAccount,
             treasuryTokenAccount: null as any,
             userGateAccount: userGateAccount as any,
+            whitelistEntry: null as any,
             tokenProgram: TOKEN_PROGRAM_ID,
           })
           .preInstructions(preIxs)
