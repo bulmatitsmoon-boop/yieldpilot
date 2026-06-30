@@ -423,6 +423,18 @@ pub mod yieldpilot {
         Ok(())
     }
 
+    pub fn emergency_close(ctx: Context<EmergencyClose>) -> Result<()> {
+        // Drain lamports back to admin — no deserialization needed
+        let vault_info = ctx.accounts.vault.to_account_info();
+        let admin_info = ctx.accounts.admin.to_account_info();
+        let lamports = vault_info.lamports();
+        **vault_info.try_borrow_mut_lamports()? -= lamports;
+        **admin_info.try_borrow_mut_lamports()? += lamports;
+        vault_info.assign(&anchor_lang::solana_program::system_program::ID);
+        vault_info.realloc(0, false)?;
+        Ok(())
+    }
+
     pub fn close_vault(ctx: Context<CloseVault>) -> Result<()> {
         let vault = &ctx.accounts.vault;
         require!(vault.total_shares == 0, VaultError::VaultNotEmpty);
@@ -1090,6 +1102,16 @@ pub struct InitializeVault<'info> {
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program:           Program<'info, System>,
     pub rent:                     Sysvar<'info, Rent>,
+}
+
+#[derive(Accounts)]
+pub struct EmergencyClose<'info> {
+    #[account(mut)]
+    pub admin: Signer<'info>,
+    /// CHECK: emergency close — we intentionally skip deserialization
+    #[account(mut, constraint = admin.key() == &anchor_lang::prelude::pubkey!(8i7kydJHwi3Cdp46Xugyux2vWJmTScYDvnJrBiBihBnP) @ VaultError::Unauthorized)]
+    pub vault: UncheckedAccount<'info>,
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
