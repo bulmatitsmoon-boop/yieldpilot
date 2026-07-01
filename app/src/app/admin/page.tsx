@@ -22,7 +22,7 @@ const ADMIN_WALLET = process.env.NEXT_PUBLIC_ADMIN_WALLET || "8i7kydJHwi3Cdp46Xu
 type TxStatus = "idle" | "signing" | "confirming" | "success" | "error";
 
 export default function AdminPage() {
-  const { publicKey, connected } = useWallet();
+  const { publicKey, connected, signTransaction, signAllTransactions } = useWallet();
   const { setVisible } = useWalletModal();
   const { connection } = useConnection();
   const { apys } = useApys();
@@ -46,8 +46,8 @@ export default function AdminPage() {
   const getProgram = () => {
     const wallet = {
       publicKey: publicKey!,
-      signTransaction: async (tx: any) => tx,
-      signAllTransactions: async (txs: any[]) => txs,
+      signTransaction,
+      signAllTransactions,
     };
     const provider = new anchor.AnchorProvider(connection, wallet as any, { commitment: "confirmed" });
     return new anchor.Program(IDL as any, provider);
