@@ -297,10 +297,13 @@ pub mod yieldpilot {
                 .as_ref()
                 .map(|a| a.amount)
                 .unwrap_or(0);
-            // Current tier based on live gate balance
-            let current_tier_u8: u8 = if gate_balance >= GOLD_THRESHOLD { 0 }
-                else if gate_balance >= SILVER_THRESHOLD { 1 }
-                else { 2 };
+            // Current tier based on live gate balance. Must use the vault's configurable
+            // thresholds (not the hardcoded constants) so update_tier_thresholds actually
+            // affects withdrawal fees, matching the tier assignment logic in deposit().
+            let current_tier_u8: u8 = if gate_balance >= v.gold_threshold { 0 }
+                else if gate_balance >= v.silver_threshold { 1 }
+                else if gate_balance >= v.bronze_threshold { 2 }
+                else { 3 };
             // Use WORSE of current tier and snapshotted tier at deposit.
             // Prevents flash-borrowing gate tokens right before withdrawal to get a lower fee.
             let effective_tier = current_tier_u8.max(pos.tier_at_deposit);
@@ -430,7 +433,10 @@ pub mod yieldpilot {
     }
 
     pub fn emergency_close(ctx: Context<EmergencyClose>) -> Result<()> {
-        // Drain lamports back to admin — no deserialization needed
+        // SECURITY: vault must be empty. Without this, admin could delete a live vault's
+        // share/position bookkeeping while user funds remain stranded in vault_token_account.
+        require!(ctx.accounts.vault.total_shares == 0, VaultError::VaultNotEmpty);
+        // Drain lamports back to admin
         let vault_info = ctx.accounts.vault.to_account_info();
         let admin_info = ctx.accounts.admin.to_account_info();
         let lamports = vault_info.lamports();
@@ -1114,9 +1120,13 @@ pub struct InitializeVault<'info> {
 pub struct EmergencyClose<'info> {
     #[account(mut)]
     pub admin: Signer<'info>,
-    /// CHECK: emergency close — we intentionally skip deserialization
-    #[account(mut, constraint = admin.key() == anchor_lang::prelude::pubkey!("8i7kydJHwi3Cdp46Xugyux2vWJmTScYDvnJrBiBihBnP") @ VaultError::Unauthorized)]
-    pub vault: UncheckedAccount<'info>,
+    // SECURITY: vault must properly deserialize as a real Vault owned by this program
+    // (Account<Vault>, not UncheckedAccount) and has_one=admin ties this to the vault's
+    // actual admin field, not a pubkey hardcoded into the program binary. This means
+    // transferring admin via propose_admin/accept_admin correctly carries this privilege
+    // to the new admin, and this instruction can no longer target an arbitrary account.
+    #[account(mut, has_one = admin @ VaultError::Unauthorized)]
+    pub vault: Account<'info, Vault>,
     pub system_program: Program<'info, System>,
 }
 
