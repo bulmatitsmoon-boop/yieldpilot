@@ -130,6 +130,7 @@ export default function Whitepaper() {
         <P>YieldPilot charges a single fee type: a <strong style={{ color: "var(--text)" }}>performance fee on profits at withdrawal</strong>, tiered by $YPILOT holdings. The fee is automatically deducted and routed to the YieldPilot treasury wallet on-chain — fully transparent and verifiable by anyone.</P>
         <Table rows={[
           ["Fee Type", "Amount", "When Charged"],
+          ["Performance fee (no tier)", "9% of profit", "On withdrawal, profits only"],
           ["Performance fee (Bronze)", "6% of profit", "On withdrawal, profits only"],
           ["Performance fee (Silver)", "3% of profit", "On withdrawal, profits only"],
           ["Performance fee (Gold)", "0%", "No fee"],
@@ -141,15 +142,15 @@ export default function Whitepaper() {
       </Section>
 
       <Section title="6. Token-Gated Access Tiers">
-        <P>Access to YieldPilot vaults is gated by holding $YPILOT tokens. Your token balance determines your tier, which sets both your maximum deposit cap and your performance fee rate. The more $YPILOT you hold, the less you pay and the more you can deposit.</P>
+        <P>Access to YieldPilot's fee tiers is gated by holding $YPILOT tokens, measured as a percentage of total token supply held. The more of the total supply you hold, the lower your performance fee. Absolute token amounts will be published once the token's total supply is finalized at launch.</P>
         <Table rows={[
-          ["Tier", "Token Requirement", "Deposit Cap", "Performance Fee"],
-          ["Gold",   "1,000,000+ $YPILOT", "Unlimited",    "0%"],
-          ["Silver", "100,000+ $YPILOT",   "$10,000 USDC", "3%"],
-          ["Bronze", "10,000+ $YPILOT",    "$1,000 USDC",  "6%"],
-          ["None",   "< 10,000 $YPILOT",   "No access",    "—"],
+          ["Tier", "% of Total Supply Held", "Performance Fee"],
+          ["Gold",   "≥ 1%",         "0%"],
+          ["Silver", "0.5% – 0.99%", "3%"],
+          ["Bronze", "0.1% – 0.49%", "6%"],
+          ["None",   "< 0.1%",       "9%"],
         ]} />
-        <P>This tiered model rewards long-term $YPILOT holders with progressively better terms. Gold holders pay zero performance fees — all yield is theirs. The $YPILOT token is available on pump.fun.</P>
+        <P>This tiered model rewards long-term $YPILOT holders with progressively better terms. Gold holders pay zero performance fees — all yield is theirs. Everyone can deposit and withdraw regardless of tier; the tier only affects the performance fee rate. The $YPILOT token is available on pump.fun.</P>
       </Section>
 
       <Section title="7. Security Model">
