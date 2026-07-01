@@ -27,9 +27,9 @@ jobs:
           rustc --version
           cargo --version
 
-      - name: Install Solana CLI (pinned recent version)
+      - name: Install Solana CLI
         run: |
-          sh -c "$(curl -sSfL https://release.anza.xyz/v2.1.21/install)"
+          sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
           echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
 
       - name: Cache cargo
@@ -49,11 +49,13 @@ jobs:
             cargo +1.86.0 install anchor-cli --version 0.31.0 --locked
           fi
 
-      - name: Pre-install platform-tools (newer, edition2024-capable) and build
+      - name: Build program binary (does NOT touch program id / keys)
         run: |
-          export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
-          cargo-build-sbf --version
-          anchor build -- --tools-version v1.48
+          cd programs/yieldpilot
+          cargo-build-sbf --manifest-path Cargo.toml
+
+      - name: Generate IDL only (does NOT touch program id / keys)
+        run: anchor idl build -o target/idl/yieldpilot.json
 
       - name: Sync IDL to app and keeper
         run: |
@@ -63,7 +65,7 @@ jobs:
       - name: Commit updated IDL
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: 'chore: sync IDL from anchor build [skip ci]'
+          commit_message: 'chore: sync IDL from anchor idl build [skip ci]'
           file_pattern: 'app/src/idl/yieldpilot.json keeper/src/idl/yieldpilot.json'
 
       - name: Upload artifact
