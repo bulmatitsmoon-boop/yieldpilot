@@ -661,6 +661,15 @@ pub mod yieldpilot {
         require!(v.protocols[idx].kind == ProtocolKind::Marinade, AdapterError::UnsupportedProtocol);
         assert_state_matches(&v.protocols[idx], ctx.accounts.marinade_state.key)?;
 
+        // SECURITY: enforce the same minimum idle liquidity buffer as deploy_to_kamino,
+        // so this protocol can't be used to deploy 100% of funds and block withdrawals.
+        let idle = v.total_deposits.saturating_sub(v.total_deployed());
+        let min_idle = v.total_deposits
+            .checked_mul(MIN_IDLE_BPS)
+            .and_then(|x| x.checked_div(BPS_DENOM))
+            .unwrap_or(0);
+        require!(idle.saturating_sub(lamports) >= min_idle, VaultError::InsufficientIdle);
+
         let vault_key = v.key();
         let seeds: &[&[u8]] = &[b"vault", vault_key.as_ref(), &[v.authority_bump]];
 
@@ -745,8 +754,18 @@ pub mod yieldpilot {
     ) -> Result<()> {
         require!(lamports > 0, VaultError::ZeroAmount);
         let v = &mut ctx.accounts.vault;
+        require!(!v.paused, AdapterError::VaultPaused);
         let idx = protocol_index as usize;
         require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
+
+        // SECURITY: enforce the same minimum idle liquidity buffer as deploy_to_kamino,
+        // so this protocol can't be used to deploy 100% of funds and block withdrawals.
+        let idle = v.total_deposits.saturating_sub(v.total_deployed());
+        let min_idle = v.total_deposits
+            .checked_mul(MIN_IDLE_BPS)
+            .and_then(|x| x.checked_div(BPS_DENOM))
+            .unwrap_or(0);
+        require!(idle.saturating_sub(lamports) >= min_idle, VaultError::InsufficientIdle);
 
         let vault_key = v.key();
         let seeds: &[&[u8]] = &[b"vault", vault_key.as_ref(), &[v.authority_bump]];
@@ -833,8 +852,18 @@ pub mod yieldpilot {
     ) -> Result<()> {
         require!(amount > 0, VaultError::ZeroAmount);
         let v = &mut ctx.accounts.vault;
+        require!(!v.paused, AdapterError::VaultPaused);
         let idx = protocol_index as usize;
         require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
+
+        // SECURITY: enforce the same minimum idle liquidity buffer as deploy_to_kamino,
+        // so this protocol can't be used to deploy 100% of funds and block withdrawals.
+        let idle = v.total_deposits.saturating_sub(v.total_deployed());
+        let min_idle = v.total_deposits
+            .checked_mul(MIN_IDLE_BPS)
+            .and_then(|x| x.checked_div(BPS_DENOM))
+            .unwrap_or(0);
+        require!(idle.saturating_sub(amount) >= min_idle, VaultError::InsufficientIdle);
 
         let vault_key = v.key();
         let seeds: &[&[u8]] = &[b"vault", vault_key.as_ref(), &[v.authority_bump]];
@@ -919,8 +948,18 @@ pub mod yieldpilot {
     ) -> Result<()> {
         require!(amount > 0, VaultError::ZeroAmount);
         let v = &mut ctx.accounts.vault;
+        require!(!v.paused, AdapterError::VaultPaused);
         let idx = protocol_index as usize;
         require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
+
+        // SECURITY: enforce the same minimum idle liquidity buffer as deploy_to_kamino,
+        // so this protocol can't be used to deploy 100% of funds and block withdrawals.
+        let idle = v.total_deposits.saturating_sub(v.total_deployed());
+        let min_idle = v.total_deposits
+            .checked_mul(MIN_IDLE_BPS)
+            .and_then(|x| x.checked_div(BPS_DENOM))
+            .unwrap_or(0);
+        require!(idle.saturating_sub(amount) >= min_idle, VaultError::InsufficientIdle);
 
         let vault_key = v.key();
         let seeds: &[&[u8]] = &[b"vault", vault_key.as_ref(), &[v.authority_bump]];
