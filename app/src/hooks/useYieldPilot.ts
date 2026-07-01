@@ -350,6 +350,15 @@ export function useYieldPilot(vaultAddresses: string[]) {
           ? await getAssociatedTokenAddress(gateMint, publicKey)
           : null;
 
+        // Resolve whitelist entry PDA — only pass it if it actually exists on-chain,
+        // otherwise the program treats the account as absent (no fee waiver).
+        const [whitelistPda] = PublicKey.findProgramAddressSync(
+          [Buffer.from("wl"), vaultPubkey.toBuffer(), publicKey.toBuffer()],
+          PROGRAM_ID
+        );
+        const whitelistInfo = await connection.getAccountInfo(whitelistPda);
+        const whitelistEntry = whitelistInfo ? whitelistPda : null;
+
         const isSOL = mintPubkey.toBase58() === NATIVE_MINT.toBase58();
         const preIxs: anchor.web3.TransactionInstruction[] = [];
         const postIxs: anchor.web3.TransactionInstruction[] = [];
@@ -383,7 +392,7 @@ export function useYieldPilot(vaultAddresses: string[]) {
             userSharesAccount,
             treasuryTokenAccount: null as any,
             userGateAccount: userGateAccount as any,
-            whitelistEntry: null as any,
+            whitelistEntry: whitelistEntry as any,
             tokenProgram: TOKEN_PROGRAM_ID,
           })
           .preInstructions(preIxs)
@@ -409,6 +418,69 @@ export function useYieldPilot(vaultAddresses: string[]) {
     [publicKey, getProgram, wrapTx]
   );
 
+  const addToWhitelist = useCallback(
+    async (vaultAddress: string, wallet: string) => {
+      if (!publicKey) return;
+      return wrapTx(async () => {
+        const program = getProgram();
+        const vaultPubkey = new PublicKey(vaultAddress);
+        const walletPubkey = new PublicKey(wallet);
+        const [whitelistPda] = PublicKey.findProgramAddressSync(
+          [Buffer.from("wl"), vaultPubkey.toBuffer(), walletPubkey.toBuffer()],
+          PROGRAM_ID
+        );
+        return program.methods
+          .addToWhitelist(walletPubkey)
+          .accounts({
+            admin: publicKey,
+            vault: vaultPubkey,
+            whitelistEntry: whitelistPda,
+            systemProgram: SystemProgram.programId,
+          })
+          .rpc({ commitment: "confirmed" });
+      });
+    },
+    [publicKey, getProgram, wrapTx]
+  );
+
+  const removeFromWhitelist = useCallback(
+    async (vaultAddress: string, wallet: string) => {
+      if (!publicKey) return;
+      return wrapTx(async () => {
+        const program = getProgram();
+        const vaultPubkey = new PublicKey(vaultAddress);
+        const walletPubkey = new PublicKey(wallet);
+        const [whitelistPda] = PublicKey.findProgramAddressSync(
+          [Buffer.from("wl"), vaultPubkey.toBuffer(), walletPubkey.toBuffer()],
+          PROGRAM_ID
+        );
+        return program.methods
+          .removeFromWhitelist(walletPubkey)
+          .accounts({
+            admin: publicKey,
+            vault: vaultPubkey,
+            whitelistEntry: whitelistPda,
+          })
+          .rpc({ commitment: "confirmed" });
+      });
+    },
+    [publicKey, getProgram, wrapTx]
+  );
+
+  const isWhitelisted = useCallback(
+    async (vaultAddress: string, wallet: string) => {
+      const vaultPubkey = new PublicKey(vaultAddress);
+      const walletPubkey = new PublicKey(wallet);
+      const [whitelistPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("wl"), vaultPubkey.toBuffer(), walletPubkey.toBuffer()],
+        PROGRAM_ID
+      );
+      const info = await connection.getAccountInfo(whitelistPda);
+      return info !== null;
+    },
+    [connection]
+  );
+
   return {
     vaults,
     positions,
@@ -422,6 +494,9 @@ export function useYieldPilot(vaultAddresses: string[]) {
     deposit,
     withdraw,
     updateSettings,
+    addToWhitelist,
+    removeFromWhitelist,
+    isWhitelisted,
     refresh: () => { fetchVaults(); fetchPositions(); },
   };
 }
