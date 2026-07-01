@@ -7,63 +7,6 @@
   },
   "instructions": [
     {
-      "name": "emergencyClose",
-      "discriminator": [
-        72,
-        5,
-        66,
-        138,
-        108,
-        194,
-        37,
-        175
-      ],
-      "accounts": [
-        {
-          "name": "admin",
-          "isMut": true,
-          "isSigner": true
-        },
-        {
-          "name": "vault",
-          "isMut": true,
-          "isSigner": false
-        },
-        {
-          "name": "systemProgram",
-          "isMut": false,
-          "isSigner": false
-        }
-      ],
-      "args": []
-    },
-    {
-      "name": "closeVault",
-      "discriminator": [
-        141,
-        103,
-        17,
-        126,
-        72,
-        75,
-        29,
-        29
-      ],
-      "accounts": [
-        {
-          "name": "admin",
-          "isMut": true,
-          "isSigner": true
-        },
-        {
-          "name": "vault",
-          "isMut": true,
-          "isSigner": false
-        }
-      ],
-      "args": []
-    },
-    {
       "name": "accept_admin",
       "discriminator": [
         112,
@@ -78,6 +21,87 @@
       "accounts": [
         {
           "name": "new_admin",
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "add_to_whitelist",
+      "discriminator": [
+        157,
+        211,
+        52,
+        54,
+        144,
+        81,
+        5,
+        55
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault"
+        },
+        {
+          "name": "whitelist_entry",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  119,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault"
+              },
+              {
+                "kind": "arg",
+                "path": "wallet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "_wallet",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "close_vault",
+      "discriminator": [
+        141,
+        103,
+        17,
+        126,
+        72,
+        75,
+        29,
+        29
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
           "signer": true
         },
         {
@@ -173,6 +197,9 @@
           "name": "kamino_market_authority"
         },
         {
+          "name": "kamino_liquidity_mint"
+        },
+        {
           "name": "kamino_liquidity_supply",
           "writable": true
         },
@@ -181,7 +208,95 @@
           "writable": true
         },
         {
-          "name": "kamino_collateral_supply",
+          "name": "token_program",
+          "docs": [
+            "Token program (used for both liquidity and collateral - both are standard SPL)"
+          ],
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "instruction_sysvar"
+        },
+        {
+          "name": "kamino_program",
+          "address": "KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD"
+        }
+      ],
+      "args": [
+        {
+          "name": "protocol_index",
+          "type": "u8"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "deploy_to_marginfi",
+      "docs": [
+        "Deposit tokens into MarginFi. Balance tracked in marginfi_account, no receipt token."
+      ],
+      "discriminator": [
+        89,
+        236,
+        219,
+        110,
+        113,
+        182,
+        152,
+        207
+      ],
+      "accounts": [
+        {
+          "name": "keeper",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "vault_authority",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_token_account",
+          "writable": true
+        },
+        {
+          "name": "marginfi_group"
+        },
+        {
+          "name": "marginfi_account",
+          "writable": true
+        },
+        {
+          "name": "bank",
+          "writable": true
+        },
+        {
+          "name": "bank_liquidity_vault",
           "writable": true
         },
         {
@@ -189,8 +304,8 @@
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
         {
-          "name": "kamino_program",
-          "address": "KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD"
+          "name": "marginfi_program",
+          "address": "MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA"
         }
       ],
       "args": [
@@ -228,6 +343,7 @@
         },
         {
           "name": "vault_authority",
+          "writable": true,
           "pda": {
             "seeds": [
               {
@@ -297,6 +413,216 @@
         },
         {
           "name": "lamports",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "deploy_to_sol_lst",
+      "docs": [
+        "Deposit SOL into an SPL Stake Pool (Jito) and receive LST tokens."
+      ],
+      "discriminator": [
+        25,
+        155,
+        78,
+        91,
+        225,
+        185,
+        21,
+        193
+      ],
+      "accounts": [
+        {
+          "name": "keeper",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "vault_authority",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_lst_account",
+          "docs": [
+            "Vault's LST ATA (jitoSOL)"
+          ],
+          "writable": true
+        },
+        {
+          "name": "stake_pool",
+          "writable": true
+        },
+        {
+          "name": "withdraw_authority"
+        },
+        {
+          "name": "reserve_stake",
+          "writable": true
+        },
+        {
+          "name": "manager_fee_account",
+          "docs": [
+            "Manager fee account (from pool state)"
+          ],
+          "writable": true
+        },
+        {
+          "name": "pool_mint",
+          "docs": [
+            "LST pool mint (jitoSOL)"
+          ],
+          "writable": true
+        },
+        {
+          "name": "clock_sysvar",
+          "address": "SysvarC1ock11111111111111111111111111111111"
+        },
+        {
+          "name": "stake_history_sysvar",
+          "address": "SysvarStakeHistory1111111111111111111111111"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "stake_pool_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "protocol_index",
+          "type": "u8"
+        },
+        {
+          "name": "lamports",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "deploy_to_solend",
+      "docs": [
+        "Deposit tokens into Solend, receive cTokens."
+      ],
+      "discriminator": [
+        79,
+        189,
+        188,
+        156,
+        68,
+        246,
+        109,
+        250
+      ],
+      "accounts": [
+        {
+          "name": "keeper",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "vault_authority",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_token_account",
+          "writable": true
+        },
+        {
+          "name": "vault_collateral_account",
+          "writable": true
+        },
+        {
+          "name": "reserve",
+          "writable": true
+        },
+        {
+          "name": "reserve_liquidity_supply",
+          "writable": true
+        },
+        {
+          "name": "reserve_collateral_mint",
+          "writable": true
+        },
+        {
+          "name": "lending_market"
+        },
+        {
+          "name": "lending_market_authority"
+        },
+        {
+          "name": "pyth_oracle"
+        },
+        {
+          "name": "clock_sysvar",
+          "address": "SysvarC1ock11111111111111111111111111111111"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "solend_program",
+          "address": "So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo"
+        }
+      ],
+      "args": [
+        {
+          "name": "protocol_index",
+          "type": "u8"
+        },
+        {
+          "name": "amount",
           "type": "u64"
         }
       ]
@@ -501,6 +827,38 @@
           "type": "u64"
         }
       ]
+    },
+    {
+      "name": "emergency_close",
+      "discriminator": [
+        72,
+        5,
+        66,
+        138,
+        108,
+        194,
+        37,
+        175
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "vault"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
     },
     {
       "name": "initialize_vault",
@@ -850,6 +1208,9 @@
           "name": "kamino_market_authority"
         },
         {
+          "name": "kamino_liquidity_mint"
+        },
+        {
           "name": "kamino_liquidity_supply",
           "writable": true
         },
@@ -858,12 +1219,14 @@
           "writable": true
         },
         {
-          "name": "kamino_collateral_supply",
-          "writable": true
+          "name": "token_program",
+          "docs": [
+            "Token program (used for both liquidity and collateral)"
+          ],
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
         {
-          "name": "token_program",
-          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+          "name": "instruction_sysvar"
         },
         {
           "name": "kamino_program",
@@ -877,6 +1240,95 @@
         },
         {
           "name": "collateral_amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "recall_from_marginfi",
+      "docs": [
+        "Withdraw tokens from MarginFi."
+      ],
+      "discriminator": [
+        217,
+        70,
+        18,
+        162,
+        11,
+        35,
+        48,
+        136
+      ],
+      "accounts": [
+        {
+          "name": "keeper",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "vault_authority",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_token_account",
+          "writable": true
+        },
+        {
+          "name": "marginfi_group"
+        },
+        {
+          "name": "marginfi_account",
+          "writable": true
+        },
+        {
+          "name": "bank",
+          "writable": true
+        },
+        {
+          "name": "bank_liquidity_vault",
+          "writable": true
+        },
+        {
+          "name": "bank_liquidity_vault_authority"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "marginfi_program",
+          "address": "MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA"
+        }
+      ],
+      "args": [
+        {
+          "name": "protocol_index",
+          "type": "u8"
+        },
+        {
+          "name": "amount",
           "type": "u64"
         }
       ]
@@ -905,6 +1357,7 @@
         },
         {
           "name": "vault_authority",
+          "writable": true,
           "pda": {
             "seeds": [
               {
@@ -973,6 +1426,216 @@
       ]
     },
     {
+      "name": "recall_from_sol_lst",
+      "docs": [
+        "Burn LST tokens to withdraw SOL from an SPL Stake Pool (Jito)."
+      ],
+      "discriminator": [
+        197,
+        194,
+        161,
+        164,
+        199,
+        54,
+        204,
+        133
+      ],
+      "accounts": [
+        {
+          "name": "keeper",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "vault_authority",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_lst_account",
+          "docs": [
+            "Vault's LST ATA — LST burned from here"
+          ],
+          "writable": true
+        },
+        {
+          "name": "stake_pool",
+          "writable": true
+        },
+        {
+          "name": "withdraw_authority"
+        },
+        {
+          "name": "reserve_stake",
+          "writable": true
+        },
+        {
+          "name": "manager_fee_account",
+          "docs": [
+            "Manager fee account"
+          ],
+          "writable": true
+        },
+        {
+          "name": "pool_mint",
+          "docs": [
+            "LST pool mint"
+          ],
+          "writable": true
+        },
+        {
+          "name": "clock_sysvar",
+          "address": "SysvarC1ock11111111111111111111111111111111"
+        },
+        {
+          "name": "stake_history_sysvar",
+          "address": "SysvarStakeHistory1111111111111111111111111"
+        },
+        {
+          "name": "stake_program",
+          "address": "Stake11111111111111111111111111111111111111"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "stake_pool_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "protocol_index",
+          "type": "u8"
+        },
+        {
+          "name": "lst_amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "recall_from_solend",
+      "docs": [
+        "Redeem cTokens from Solend, receive liquidity."
+      ],
+      "discriminator": [
+        101,
+        117,
+        61,
+        19,
+        86,
+        49,
+        5,
+        29
+      ],
+      "accounts": [
+        {
+          "name": "keeper",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "vault_authority",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_collateral_account",
+          "writable": true
+        },
+        {
+          "name": "vault_token_account",
+          "writable": true
+        },
+        {
+          "name": "reserve",
+          "writable": true
+        },
+        {
+          "name": "reserve_collateral_mint",
+          "writable": true
+        },
+        {
+          "name": "reserve_liquidity_supply",
+          "writable": true
+        },
+        {
+          "name": "lending_market"
+        },
+        {
+          "name": "lending_market_authority"
+        },
+        {
+          "name": "pyth_oracle"
+        },
+        {
+          "name": "clock_sysvar",
+          "address": "SysvarC1ock11111111111111111111111111111111"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "solend_program",
+          "address": "So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo"
+        }
+      ],
+      "args": [
+        {
+          "name": "protocol_index",
+          "type": "u8"
+        },
+        {
+          "name": "collateral_amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "register_protocol",
       "discriminator": [
         63,
@@ -1017,6 +1680,90 @@
         {
           "name": "label",
           "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "remove_from_whitelist",
+      "discriminator": [
+        7,
+        144,
+        216,
+        239,
+        243,
+        236,
+        193,
+        235
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault"
+        },
+        {
+          "name": "whitelist_entry",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  119,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault"
+              },
+              {
+                "kind": "arg",
+                "path": "wallet"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "_wallet",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "set_gate_mint",
+      "discriminator": [
+        127,
+        39,
+        248,
+        229,
+        20,
+        204,
+        166,
+        10
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "vault"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "gate_mint",
+          "type": "pubkey"
         }
       ]
     },
@@ -1117,6 +1864,44 @@
         {
           "name": "auto_rebalance",
           "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "update_tier_thresholds",
+      "discriminator": [
+        253,
+        196,
+        79,
+        35,
+        61,
+        76,
+        169,
+        85
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "gold",
+          "type": "u64"
+        },
+        {
+          "name": "silver",
+          "type": "u64"
+        },
+        {
+          "name": "bronze",
+          "type": "u64"
         }
       ]
     },
@@ -1226,9 +2011,28 @@
         {
           "name": "whitelist_entry",
           "docs": [
-            "Optional: whitelist entry PDA. If present, performance fee is waived."
+            "Optional: whitelist entry PDA. If present, performance fee is waived entirely."
           ],
-          "optional": true
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  119,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault"
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              }
+            ]
+          }
         },
         {
           "name": "token_program",
@@ -1243,211 +2047,6 @@
         {
           "name": "min_amount_out",
           "type": "u64"
-        }
-      ]
-    },
-    {
-      "name": "setGateMint",
-      "accounts": [
-        {
-          "name": "admin",
-          "isMut": true,
-          "isSigner": true
-        },
-        {
-          "name": "vault",
-          "isMut": true,
-          "isSigner": false
-        }
-      ],
-      "args": [
-        {
-          "name": "gateMint",
-          "type": "pubkey"
-        }
-      ],
-      "discriminator": [
-        127,
-        39,
-        248,
-        229,
-        20,
-        204,
-        166,
-        10
-      ]
-    },
-    {
-      "name": "updateTierThresholds",
-      "accounts": [
-        {
-          "name": "admin",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "vault",
-          "writable": true
-        }
-      ],
-      "args": [
-        {
-          "name": "gold",
-          "type": "u64"
-        },
-        {
-          "name": "silver",
-          "type": "u64"
-        },
-        {
-          "name": "bronze",
-          "type": "u64"
-        }
-      ],
-      "discriminator": [
-        253,
-        196,
-        79,
-        35,
-        61,
-        76,
-        169,
-        85
-      ]
-    },
-    {
-      "name": "updateSettings",
-      "discriminator": [
-        81,
-        166,
-        51,
-        213,
-        158,
-        84,
-        157,
-        108
-      ],
-      "accounts": [
-        {
-          "name": "admin",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "vault",
-          "writable": true
-        }
-      ],
-      "args": [
-        {
-          "name": "autoCompound",
-          "type": "bool"
-        },
-        {
-          "name": "autoRebalance",
-          "type": "bool"
-        }
-      ]
-    },
-    {
-      "name": "addToWhitelist",
-      "discriminator": [
-        157,
-        211,
-        52,
-        54,
-        144,
-        81,
-        5,
-        55
-      ],
-      "accounts": [
-        {
-          "name": "admin",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "vault"
-        },
-        {
-          "name": "whitelistEntry",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [119, 108]
-              },
-              {
-                "kind": "account",
-                "path": "vault"
-              },
-              {
-                "kind": "arg",
-                "path": "wallet"
-              }
-            ]
-          }
-        },
-        {
-          "name": "systemProgram",
-          "address": "11111111111111111111111111111111"
-        }
-      ],
-      "args": [
-        {
-          "name": "wallet",
-          "type": "pubkey"
-        }
-      ]
-    },
-    {
-      "name": "removeFromWhitelist",
-      "discriminator": [
-        7,
-        144,
-        216,
-        239,
-        243,
-        236,
-        193,
-        235
-      ],
-      "accounts": [
-        {
-          "name": "admin",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "vault"
-        },
-        {
-          "name": "whitelistEntry",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [119, 108]
-              },
-              {
-                "kind": "account",
-                "path": "vault"
-              },
-              {
-                "kind": "arg",
-                "path": "wallet"
-              }
-            ]
-          }
-        }
-      ],
-      "args": [
-        {
-          "name": "wallet",
-          "type": "pubkey"
         }
       ]
     }
@@ -1617,16 +2216,6 @@
       "code": 6000,
       "name": "ReserveDataTooShort",
       "msg": "Reserve account data too short to parse"
-    },
-    {
-      "code": 6001,
-      "name": "GateMintAlreadySet",
-      "msg": "Gate mint already set and cannot be changed"
-    },
-    {
-      "code": 6002,
-      "name": "VaultNotEmpty",
-      "msg": "Vault still has deposits \u2014 withdraw all before closing"
     }
   ],
   "types": [
@@ -1744,18 +2333,6 @@
             "type": "pubkey"
           },
           {
-            "name": "gold_threshold",
-            "type": "u64"
-          },
-          {
-            "name": "silver_threshold",
-            "type": "u64"
-          },
-          {
-            "name": "bronze_threshold",
-            "type": "u64"
-          },
-          {
             "name": "keeper",
             "type": "pubkey"
           }
@@ -1797,7 +2374,7 @@
           {
             "name": "external_state",
             "docs": [
-              "Kamino \u2192 reserve pubkey.  Marinade \u2192 state pubkey."
+              "Kamino → reserve pubkey.  Marinade → state pubkey."
             ],
             "type": "pubkey"
           },
@@ -2046,18 +2623,6 @@
       }
     },
     {
-      "name": "WhitelistEntry",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "bump",
-            "type": "u8"
-          }
-        ]
-      }
-    },
-    {
       "name": "VaultInitialized",
       "type": {
         "kind": "struct",
@@ -2073,6 +2638,22 @@
           {
             "name": "mint",
             "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "WhitelistEntry",
+      "docs": [
+        "Whitelist entry PDA — existence means the wallet pays zero performance fee on this vault.",
+        "Seeds: [\"wl\", vault, wallet]"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bump",
+            "type": "u8"
           }
         ]
       }
