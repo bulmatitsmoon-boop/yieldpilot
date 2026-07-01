@@ -37,6 +37,9 @@ export default function AdminPage() {
   const [pauseVaultIdx, setPauseVaultIdx] = useState(0);
   const [newTvlCap, setNewTvlCap] = useState("");
   const [rebalanceAllocs, setRebalanceAllocs] = useState("8000,2000");
+  const [whitelistAddr, setWhitelistAddr] = useState("");
+  const [whitelistCheckAddr, setWhitelistCheckAddr] = useState("");
+  const [whitelistCheckResult, setWhitelistCheckResult] = useState<string | null>(null);
 
   const isAdmin = connected && publicKey?.toBase58() === ADMIN_WALLET;
 
@@ -102,6 +105,47 @@ export default function AdminPage() {
     return program.methods.rebalance(allocs)
       .accounts({ admin: publicKey!, vault }).rpc();
   });
+
+  const whitelistPda = (wallet: string) => {
+    const vault = new PublicKey(VAULT_ADDRESSES[0]);
+    const walletPubkey = new PublicKey(wallet);
+    const [pda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("wl"), vault.toBuffer(), walletPubkey.toBuffer()],
+      PROGRAM_ID
+    );
+    return pda;
+  };
+
+  const handleAddWhitelist = () => wrapTx(async () => {
+    const program = getProgram();
+    const vault = new PublicKey(VAULT_ADDRESSES[0]);
+    const walletPubkey = new PublicKey(whitelistAddr);
+    const pda = whitelistPda(whitelistAddr);
+    return program.methods.addToWhitelist(walletPubkey)
+      .accounts({ admin: publicKey!, vault, whitelistEntry: pda, systemProgram: anchor.web3.SystemProgram.programId })
+      .rpc();
+  });
+
+  const handleRemoveWhitelist = () => wrapTx(async () => {
+    const program = getProgram();
+    const vault = new PublicKey(VAULT_ADDRESSES[0]);
+    const walletPubkey = new PublicKey(whitelistAddr);
+    const pda = whitelistPda(whitelistAddr);
+    return program.methods.removeFromWhitelist(walletPubkey)
+      .accounts({ admin: publicKey!, vault, whitelistEntry: pda })
+      .rpc();
+  });
+
+  const handleCheckWhitelist = async () => {
+    if (!whitelistCheckAddr.trim()) return;
+    try {
+      const pda = whitelistPda(whitelistCheckAddr.trim());
+      const info = await connection.getAccountInfo(pda);
+      setWhitelistCheckResult(info ? "✓ Whitelisted (0% fee)" : "✗ Not whitelisted");
+    } catch {
+      setWhitelistCheckResult("Invalid address");
+    }
+  };
 
   if (!connected) {
     return (
@@ -229,6 +273,43 @@ export default function AdminPage() {
               </div>
             </div>
             <Button onClick={handleRebalance}>Trigger Rebalance</Button>
+          </div>
+        </Card>
+
+        {/* Whitelist */}
+        <Card>
+          <CardHeader title="Whitelist Management" />
+          <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 12 }}>
+            <div>
+              <label style={labelStyle}>Wallet Address</label>
+              <input style={inputStyle} value={whitelistAddr} onChange={e => setWhitelistAddr(e.target.value)}
+                placeholder="Wallet to add or remove" />
+            </div>
+            <div style={{ background: "var(--bg)", borderRadius: 8, padding: "10px 12px", fontSize: 12, color: "var(--text-muted)" }}>
+              Whitelisted wallets pay zero performance fee on withdrawal.
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <Button onClick={handleAddWhitelist} disabled={!whitelistAddr}>Add to Whitelist</Button>
+              <Button onClick={handleRemoveWhitelist} disabled={!whitelistAddr} variant="secondary">Remove</Button>
+            </div>
+          </div>
+        </Card>
+
+        {/* Check whitelist status */}
+        <Card>
+          <CardHeader title="Check Whitelist Status" />
+          <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 12 }}>
+            <div>
+              <label style={labelStyle}>Wallet Address</label>
+              <input style={inputStyle} value={whitelistCheckAddr} onChange={e => setWhitelistCheckAddr(e.target.value)}
+                placeholder="Wallet address to check" />
+            </div>
+            <Button onClick={handleCheckWhitelist} disabled={!whitelistCheckAddr} variant="secondary">Check Status</Button>
+            {whitelistCheckResult && (
+              <div style={{ fontSize: 13, fontWeight: 600, color: whitelistCheckResult.startsWith("✓") ? "var(--green)" : "var(--text-muted)" }}>
+                {whitelistCheckResult}
+              </div>
+            )}
           </div>
         </Card>
       </div>
