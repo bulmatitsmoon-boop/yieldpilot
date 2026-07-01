@@ -79,12 +79,13 @@ async function fetchKaminoApy(): Promise<ProtocolApy[]> {
 
 async function fetchMarinadeApy(): Promise<ProtocolApy[]> {
   try {
+    // 30d window: 1d is too noisy and can land on a near-zero price-change snapshot
     const { data } = await axios.get(
-      `${process.env.MARINADE_API_URL || "https://api.marinade.finance"}/msol/apy/1d`,
+      `${process.env.MARINADE_API_URL || "https://api.marinade.finance"}/msol/apy/30d`,
       { timeout: 8000 }
     );
     const apyPercent = sanitizeApy(parseFloat(data?.value || data?.apy || "0") * 100, "marinade-sol");
-    if (!apyPercent) return getFallbackApys(["marinade-sol"]);
+    if (!apyPercent || apyPercent < 0.5) return getFallbackApys(["marinade-sol"]);
     return [{ protocolId: "marinade-sol", name: "Marinade", asset: "SOL", apyBps: Math.round(apyPercent * 100), apyPercent, tvlUsd: data?.tvl_usd || 1_230_000_000, riskScore: 1, fetchedAt: new Date() }];
   } catch (err: any) {
     logger.warn("Failed to fetch Marinade APY", { error: err.message });
