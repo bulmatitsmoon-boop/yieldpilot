@@ -6,6 +6,7 @@ import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { StatCard, Card, CardHeader, Toggle, TxBanner, fmt, fmtAddr } from "@/components/ui";
 import { ProtocolTable } from "@/components/dashboard/ProtocolTable";
 import { DepositWithdrawPanel } from "@/components/dashboard/DepositWithdrawPanel";
+import { RecentTransactions } from "@/components/dashboard/RecentTransactions";
 import { useYieldPilot } from "@/hooks/useYieldPilot";
 import { useApys } from "@/hooks/useApys";
 
@@ -362,6 +363,9 @@ export default function Dashboard() {
               })
             )}
           </Card>
+
+          {/* Recent transactions */}
+          <RecentTransactions />
 
           {/* Protocol snapshot */}
           <ProtocolTable apys={apys} loading={apyLoading} />
