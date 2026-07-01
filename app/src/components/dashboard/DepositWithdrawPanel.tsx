@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useWallet, useConnection } from "@solana/wallet-adapter-react";
 import * as anchor from "@coral-xyz/anchor";
 import { getAssociatedTokenAddress } from "@solana/spl-token";
@@ -63,6 +63,8 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
     const shares = Math.floor((rawAmount / vault.totalDeposits) * vault.totalShares);
     return new anchor.BN(shares);
   };
+
+  useEffect(() => { if (publicKey) fetchBalance(); }, [publicKey, vault.address]);
 
   const fetchBalance = async () => {
     if (!publicKey) return;
