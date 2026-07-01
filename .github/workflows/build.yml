@@ -41,3 +41,29 @@ jobs:
           name: yieldpilot-so
           path: target/deploy/yieldpilot.so
           retention-days: 7
+
+      - name: Write deploy authority keypair from base58 secret
+        env:
+          SOLANA_DEPLOY_KEY: ${{ secrets.SOLANA_DEPLOY_KEY }}
+        run: |
+          python3 -c "
+import base58, json, os
+secret = base58.b58decode(os.environ['SOLANA_DEPLOY_KEY'])
+with open('/tmp/deploy-authority.json', 'w') as f:
+    json.dump(list(secret), f)
+" 2>/dev/null || pip3 install --quiet base58 && python3 -c "
+import base58, json, os
+secret = base58.b58decode(os.environ['SOLANA_DEPLOY_KEY'])
+with open('/tmp/deploy-authority.json', 'w') as f:
+    json.dump(list(secret), f)
+"
+
+      - name: Deploy to devnet
+        env:
+          DEVNET_RPC_URL: ${{ secrets.DEVNET_RPC_URL }}
+        run: |
+          solana program deploy             --program-id 8c7Boyk91MWkn5jabf5CnYD8DrG6p4hYm9eDdAAWXEKH             --keypair /tmp/deploy-authority.json             --url "${DEVNET_RPC_URL}"             target/deploy/yieldpilot.so
+
+      - name: Clean up keypair
+        if: always()
+        run: rm -f /tmp/deploy-authority.json
