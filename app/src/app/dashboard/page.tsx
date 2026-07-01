@@ -40,6 +40,11 @@ export default function Dashboard() {
     solDeposited  !== null ? `${solDeposited.toLocaleString("en-US",  { minimumFractionDigits: 4, maximumFractionDigits: 4 })} SOL`  : null,
   ].filter(Boolean).join(" · ") || "—";
 
+  const lendingApys = apys.filter(a => a.riskScore <= 1);
+  const avgApy = lendingApys.length ? lendingApys.reduce((s, a) => s + a.apyPercent, 0) / lendingApys.length : 0;
+  const bestApy = lendingApys.length ? Math.max(...lendingApys.map((a) => a.apyPercent)) : 0;
+  const bestProtocol = lendingApys.find((a) => a.apyPercent === bestApy);
+
   const totalEarned = positions.reduce((s, p) => {
     const v = vaults.find(v => v.address === p.vault);
     const decimals = v?.name.toUpperCase().includes("SOL") ? 1e9 : 1e6;
@@ -54,10 +59,6 @@ export default function Dashboard() {
     return s;
   }, 0);
   const isProjected = positions.length > 0 && positions.every(p => p.earnedValue === 0);
-  const lendingApys = apys.filter(a => a.riskScore <= 1);
-  const avgApy = lendingApys.length ? lendingApys.reduce((s, a) => s + a.apyPercent, 0) / lendingApys.length : 0;
-  const bestApy = lendingApys.length ? Math.max(...lendingApys.map((a) => a.apyPercent)) : 0;
-  const bestProtocol = lendingApys.find((a) => a.apyPercent === bestApy);
 
   const primaryVault = vaults[0];
   const primaryPosition = positions[0];
