@@ -1282,13 +1282,12 @@
       "accounts": [
         {
           "name": "admin",
-          "isMut": true,
-          "isSigner": true
+          "writable": true,
+          "signer": true
         },
         {
           "name": "vault",
-          "isMut": true,
-          "isSigner": false
+          "writable": true
         }
       ],
       "args": [
