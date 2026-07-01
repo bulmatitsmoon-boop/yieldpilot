@@ -52,14 +52,15 @@ export function CardHeader({ title, right }: { title: string; right?: React.Reac
 }
 
 // ── Toggle switch ─────────────────────────────────────────────────────────────
-export function Toggle({ value, onChange, label, sub }: { value: boolean; onChange: (v: boolean) => void; label: string; sub?: string }) {
+export function Toggle({ value, onChange, label, sub, disabled }: { value: boolean; onChange: (v: boolean) => void; label: string; sub?: string; disabled?: boolean }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 12, opacity: disabled ? 0.5 : 1 }}>
       <div
         role="switch"
         aria-checked={value}
-        onClick={() => onChange(!value)}
-        style={{ width: 40, height: 22, borderRadius: 11, cursor: "pointer", background: value ? "var(--purple)" : "var(--border-2)", position: "relative", transition: "background 0.2s", flexShrink: 0 }}
+        aria-disabled={disabled}
+        onClick={() => !disabled && onChange(!value)}
+        style={{ width: 40, height: 22, borderRadius: 11, cursor: disabled ? "not-allowed" : "pointer", background: value ? "var(--purple)" : "var(--border-2)", position: "relative", transition: "background 0.2s", flexShrink: 0 }}
       >
         <div style={{ position: "absolute", top: 3, left: value ? 21 : 3, width: 16, height: 16, borderRadius: "50%", background: "#fff", transition: "left 0.2s" }} />
       </div>
