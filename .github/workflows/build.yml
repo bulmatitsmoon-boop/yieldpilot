@@ -55,7 +55,9 @@ jobs:
           cargo-build-sbf --manifest-path Cargo.toml
 
       - name: Generate IDL only (does NOT touch program id / keys)
-        run: anchor idl build -o target/idl/yieldpilot.json
+        run: |
+          mkdir -p target/idl
+          anchor idl build -o target/idl/yieldpilot.json
 
       - name: Sync IDL to app and keeper
         run: |
