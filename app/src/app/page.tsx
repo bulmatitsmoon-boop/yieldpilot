@@ -77,7 +77,7 @@ export default function Home() {
         <div style={{ display: "flex", gap: 32, marginTop: 48, flexWrap: "wrap" }}>
           {[
             { value: "15 min", label: "rebalance cycle" },
-            { value: "0–6%", label: "perf fee · tiered by $YPILOT held" },
+            { value: "0–9%", label: "perf fee · tiered by $YPILOT held" },
             { value: "Non-custodial", label: "on-chain smart contract" },
             ...(best ? [{ value: `${fmt(best.apyPercent)}%`, label: `best rate now · ${best.name}` }] : []),
           ].map(({ value, label }) => (
@@ -216,40 +216,36 @@ export default function Home() {
             Unlock higher deposit limits.
           </h2>
           <p style={{ color: "var(--text-muted)", fontSize: 14, maxWidth: 480, lineHeight: 1.65 }}>
-            Performance fees are tiered by how much $YPILOT you hold — Gold pays nothing, Silver pays 3%,
-            Bronze pays 6%. No deposit fees, no management fees. The more you hold, the less you pay.
+            Performance fees are tiered by what % of the total $YPILOT supply you hold — Gold pays nothing, Silver pays 3%,
+            Bronze pays 6%, below Bronze pays 9%. No deposit fees, no management fees. The more you hold, the less you pay.
           </p>
         </div>
 
         <div style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
           <div style={{
-            display: "grid", gridTemplateColumns: "1fr 1fr 1fr 100px",
+            display: "grid", gridTemplateColumns: "1fr 1fr 100px",
             padding: "10px 24px", background: "var(--surface-2)",
             fontSize: 11, fontWeight: 700, color: "var(--text-dim)",
             textTransform: "uppercase", letterSpacing: "0.06em",
           }}>
             <span>Tier</span>
-            <span>$YPILOT required</span>
-            <span>Deposit cap</span>
+            <span>% of Total Supply Held</span>
             <span>Perf. fee</span>
           </div>
           {[
-            { tier: "Gold",   color: "#F59E0B", req: "1,000,000+", cap: "Unlimited",  fee: "0%", muted: false },
-            { tier: "Silver", color: "#94A3B8", req: "100,000+",   cap: "$10,000",    fee: "3%", muted: false },
-            { tier: "Bronze", color: "#CD7F32", req: "10,000+",    cap: "$1,000",     fee: "6%", muted: false },
-            { tier: "None",   color: "#6B7280", req: "< 10,000",   cap: "No access",  fee: "—",  muted: true  },
-          ].map(({ tier, color, req, cap, fee, muted }) => (
+            { tier: "Gold",   color: "#F59E0B", req: "≥ 1%",         fee: "0%", muted: false },
+            { tier: "Silver", color: "#94A3B8", req: "0.5% – 0.99%", fee: "3%", muted: false },
+            { tier: "Bronze", color: "#CD7F32", req: "0.1% – 0.49%", fee: "6%", muted: false },
+            { tier: "None",   color: "#6B7280", req: "< 0.1%",       fee: "9%", muted: true  },
+          ].map(({ tier, color, req, fee, muted }) => (
             <div key={tier} style={{
-              display: "grid", gridTemplateColumns: "1fr 1fr 1fr 100px",
+              display: "grid", gridTemplateColumns: "1fr 1fr 100px",
               padding: "18px 24px", borderTop: "1px solid var(--border)",
               alignItems: "center", background: "var(--surface)",
               opacity: muted ? 0.45 : 1,
             }}>
               <span style={{ fontWeight: 700, fontSize: 14, color }}>{tier}</span>
               <span style={{ fontFamily: "var(--mono)", fontSize: 13, color: "var(--text-muted)", paddingLeft: 8 }}>{req}</span>
-              <span style={{ fontSize: 13, color: cap === "Unlimited" ? "var(--green)" : cap === "No access" ? "var(--text-dim)" : "var(--text)", paddingLeft: 8 }}>
-                {cap}
-              </span>
               <span style={{ fontFamily: "var(--mono)", fontSize: 13, color: "var(--text-muted)", paddingLeft: 8 }}>{fee}</span>
             </div>
           ))}
@@ -321,9 +317,9 @@ export default function Home() {
         <div style={{ display: "flex", flexDirection: "column" }}>
           {[
             ["Is this non-custodial?", "Yes. Funds are held in on-chain smart contracts governed by the program. No one — including us — can access your funds outside the defined instructions."],
-            ["What are the fees?", "Performance fees are tiered by $YPILOT held: Bronze (10k+) pays 6%, Silver (100k+) pays 3%, Gold (1M+) pays 0%. Fees apply on profits only, collected at withdrawal. Nothing on deposits or idle balances."],
+            ["What are the fees?", "Performance fees are tiered by % of total $YPILOT supply held: below 0.1% pays 9%, Bronze (0.1%–0.49%) pays 6%, Silver (0.5%–0.99%) pays 3%, Gold (≥1%) pays 0%. Fees apply on profits only, collected at withdrawal. Nothing on deposits or idle balances."],
             ["How does routing work?", "A keeper bot fetches live APY data every 15 minutes. When a better rate exists beyond a 0.5% threshold, it rebalances — 80% to the top protocol, 20% to the runner-up."],
-            ["Can I withdraw anytime?", "Yes. Withdrawals are always available, even if the vault is paused for deposits. You receive your principal plus all earned yield, minus the tiered performance fee on profits (6% Bronze, 3% Silver, 0% Gold)."],
+            ["Can I withdraw anytime?", "Yes. Withdrawals are always available, even if the vault is paused for deposits. You receive your principal plus all earned yield, minus the tiered performance fee on profits (9% base, down to 0% for Gold)."],
             ["Has the code been audited?", "Not yet. A third-party audit is planned as the protocol scales — the TVL cap will be raised incrementally until then. The on-chain program ID is publicly verifiable on Solscan at any time."],
           ].map(([q, a], i) => (
             <details key={i} style={{ borderTop: "1px solid var(--border)" }}>
