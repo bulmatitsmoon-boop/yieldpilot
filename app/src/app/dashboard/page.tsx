@@ -25,7 +25,7 @@ export default function Dashboard() {
   const [faucetMsg, setFaucetMsg] = useState<string | null>(null);
   const [selectedVaultAddr, setSelectedVaultAddr] = useState<string | null>(null);
 
-  const { vaults, positions, loading, txStatus, txError, vaultError, lastTxSig, userGateBalance, deposit, withdraw, refresh } =
+  const { vaults, positions, loading, txStatus, txError, vaultError, lastTxSig, userGateBalance, deposit, withdraw, updateSettings, refresh } =
     useYieldPilot(VAULT_ADDRESSES);
   const { apys, loading: apyLoading } = useApys();
 
@@ -43,11 +43,21 @@ export default function Dashboard() {
   const totalEarned = positions.reduce((s, p) => {
     const v = vaults.find(v => v.address === p.vault);
     const decimals = v?.name.toUpperCase().includes("SOL") ? 1e9 : 1e6;
-    return s + p.earnedValue / decimals;
+    if (p.earnedValue > 0) return s + p.earnedValue / decimals;
+    // No compound yet — estimate projected earnings based on best APY and time deposited
+    if (p.lastDepositTs > 0 && bestApy > 0) {
+      const secsElapsed = Math.max(0, Date.now() / 1000 - p.lastDepositTs);
+      const yearFraction = secsElapsed / 31_536_000;
+      const depositUsd = (p.depositedAmount / decimals) * (v?.name.toUpperCase().includes("SOL") ? 150 : 1);
+      return s + depositUsd * (bestApy / 100) * yearFraction;
+    }
+    return s;
   }, 0);
-  const avgApy = apys.length ? apys.reduce((s, a) => s + a.apyPercent, 0) / apys.length : 0;
-  const bestApy = apys.length ? Math.max(...apys.map((a) => a.apyPercent)) : 0;
-  const bestProtocol = apys.find((a) => a.apyPercent === bestApy);
+  const isProjected = positions.length > 0 && positions.every(p => p.earnedValue === 0);
+  const lendingApys = apys.filter(a => a.riskScore <= 1);
+  const avgApy = lendingApys.length ? lendingApys.reduce((s, a) => s + a.apyPercent, 0) / lendingApys.length : 0;
+  const bestApy = lendingApys.length ? Math.max(...lendingApys.map((a) => a.apyPercent)) : 0;
+  const bestProtocol = lendingApys.find((a) => a.apyPercent === bestApy);
 
   const primaryVault = vaults[0];
   const primaryPosition = positions[0];
@@ -204,7 +214,7 @@ export default function Dashboard() {
       {/* Stats row */}
       <div style={{ display: "flex", gap: 12, marginBottom: 24, flexWrap: "wrap" }}>
         <StatCard label="Your Deposits" value={depositLabel} sub={positions.length ? `${positions.length} active position${positions.length > 1 ? "s" : ""}` : "No positions yet"} />
-        <StatCard label="Total Earned" value={`$${fmt(totalEarned)}`} sub="all time" accent="var(--green)" />
+        <StatCard label="Total Earned" value={`$${fmt(totalEarned)}`} sub={isProjected && totalEarned > 0 ? "projected" : "all time"} accent="var(--green)" />
         <StatCard label="Avg Protocol APY" value={`${fmt(avgApy)}%`} sub="across protocols" accent="var(--purple-light)" />
         <StatCard label="Best Available" value={`${fmt(bestApy)}%`} sub={bestProtocol ? `${bestProtocol.name} · ${bestProtocol.asset}` : ""} accent="var(--yellow)" />
       </div>
@@ -214,13 +224,13 @@ export default function Dashboard() {
         <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 24px", marginBottom: 20, display: "flex", gap: 32, flexWrap: "wrap" }}>
           <Toggle
             value={primaryVault.autoCompound}
-            onChange={() => {}} // admin-only on-chain; UI reflects state
+            onChange={() => updateSettings(primaryVault.address, !primaryVault.autoCompound, primaryVault.autoRebalance)}
             label="Auto-Compound"
             sub="Reinvests rewards hourly"
           />
           <Toggle
             value={primaryVault.autoRebalance}
-            onChange={() => {}}
+            onChange={() => updateSettings(primaryVault.address, primaryVault.autoCompound, !primaryVault.autoRebalance)}
             label="Auto-Rebalance"
             sub="Keeper moves funds to best APY"
           />

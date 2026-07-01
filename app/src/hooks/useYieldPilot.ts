@@ -394,6 +394,21 @@ export function useYieldPilot(vaultAddresses: string[]) {
     [publicKey, getProgram, wrapTx]
   );
 
+
+  const updateSettings = useCallback(
+    async (vaultAddress: string, autoCompound: boolean, autoRebalance: boolean) => {
+      if (!publicKey) return;
+      return wrapTx(async () => {
+        const program = getProgram();
+        return program.methods
+          .updateSettings(autoCompound, autoRebalance)
+          .accounts({ admin: publicKey, vault: new PublicKey(vaultAddress) })
+          .rpc({ commitment: "confirmed" });
+      });
+    },
+    [publicKey, getProgram, wrapTx]
+  );
+
   return {
     vaults,
     positions,
@@ -406,6 +421,7 @@ export function useYieldPilot(vaultAddresses: string[]) {
     userGateBalance,
     deposit,
     withdraw,
+    updateSettings,
     refresh: () => { fetchVaults(); fetchPositions(); },
   };
 }
