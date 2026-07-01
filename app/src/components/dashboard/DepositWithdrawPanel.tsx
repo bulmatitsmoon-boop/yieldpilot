@@ -2,7 +2,12 @@
 import { useState, useEffect } from "react";
 import { useWallet, useConnection } from "@solana/wallet-adapter-react";
 import * as anchor from "@coral-xyz/anchor";
+import { PublicKey } from "@solana/web3.js";
 import { getAssociatedTokenAddress } from "@solana/spl-token";
+
+const PROGRAM_ID = new PublicKey(
+  process.env.NEXT_PUBLIC_PROGRAM_ID || "8c7Boyk91MWkn5jabf5CnYD8DrG6p4hYm9eDdAAWXEKH"
+);
 import { Button, fmt } from "@/components/ui";
 import type { VaultInfo } from "@/hooks/useYieldPilot";
 import type { ProtocolApy } from "@/hooks/useApys";
@@ -29,6 +34,7 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
   const [amount, setAmount] = useState("");
   const [busy, setBusy] = useState(false);
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
+  const [isWhitelisted, setIsWhitelisted] = useState(false);
 
   const asset = vault.name.toUpperCase().includes("SOL") ? "SOL" : "USDC";
   const decimals = DECIMALS[asset] || 6;
@@ -37,6 +43,7 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
   const gatingActive = vault.gateMint && vault.gateMint !== SYSTEM_PROGRAM && vault.gateMint !== '';
   // Tier-based fee: compare raw gate token balance against vault thresholds
   const effectiveFeeBps = (() => {
+    if (isWhitelisted) return 0;
     if (!gatingActive) return vault.perfFeeBps;
     if (userGateBalance >= (vault.goldThreshold ?? 1_000_000)) return 0;
     if (userGateBalance >= (vault.silverThreshold ?? 100_000)) return 300;
@@ -44,6 +51,7 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
     return vault.perfFeeBps;
   })();
   const tierLabel = (() => {
+    if (isWhitelisted) return "Whitelisted";
     if (!gatingActive) return null;
     if (userGateBalance >= (vault.goldThreshold ?? 1_000_000)) return "Gold";
     if (userGateBalance >= (vault.silverThreshold ?? 100_000)) return "Silver";
@@ -65,6 +73,18 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
   };
 
   useEffect(() => { if (publicKey) fetchBalance(); }, [publicKey, vault.address]);
+
+  useEffect(() => {
+    if (!publicKey) { setIsWhitelisted(false); return; }
+    const vaultPubkey = new PublicKey(vault.address);
+    const [whitelistPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("wl"), vaultPubkey.toBuffer(), publicKey.toBuffer()],
+      PROGRAM_ID
+    );
+    connection.getAccountInfo(whitelistPda)
+      .then(info => setIsWhitelisted(!!info))
+      .catch(() => setIsWhitelisted(false));
+  }, [publicKey, vault.address, connection]);
 
   const fetchBalance = async () => {
     if (!publicKey) return;
@@ -136,7 +156,7 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
             </span>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <span style={{ color: "var(--text-muted)" }}>Performance fee{tierLabel ? <span style={{ marginLeft: 6, fontSize: 10, background: tierLabel === "Gold" ? "#c9a227" : tierLabel === "Silver" ? "#aaa" : "#cd7f32", color: "#fff", borderRadius: 4, padding: "1px 5px" }}>{tierLabel}</span> : null}</span>
+            <span style={{ color: "var(--text-muted)" }}>Performance fee{tierLabel ? <span style={{ marginLeft: 6, fontSize: 10, background: tierLabel === "Whitelisted" ? "var(--green)" : tierLabel === "Gold" ? "#c9a227" : tierLabel === "Silver" ? "#aaa" : "#cd7f32", color: "#fff", borderRadius: 4, padding: "1px 5px" }}>{tierLabel}</span> : null}</span>
             <span>{(effectiveFeeBps / 100).toFixed(1)}% on profit only</span>
           </div>
         </div>
