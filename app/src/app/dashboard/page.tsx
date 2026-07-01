@@ -15,17 +15,25 @@ const VAULT_ADDRESSES = (process.env.NEXT_PUBLIC_VAULT_ADDRESSES || "F1r513ZZdof
   .map((s) => s.trim())
   .filter(Boolean);
 
-type Tab = "overview" | "protocols" | "deposit" | "withdraw";
+type Tab = "overview" | "protocols" | "deposit" | "withdraw" | "admin";
+
+const ADMIN_PUBKEY = "8i7kydJHwi3Cdp46Xugyux2vWJmTScYDvnJrBiBihBnP";
 
 export default function Dashboard() {
   const { publicKey, connected } = useWallet();
   const { setVisible } = useWalletModal();
+  const isAdmin = publicKey?.toBase58() === ADMIN_PUBKEY;
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [faucetBusy, setFaucetBusy] = useState(false);
   const [faucetMsg, setFaucetMsg] = useState<string | null>(null);
   const [selectedVaultAddr, setSelectedVaultAddr] = useState<string | null>(null);
+  const [whitelistInput, setWhitelistInput] = useState("");
+  const [whitelistBusy, setWhitelistBusy] = useState(false);
+  const [whitelistMsg, setWhitelistMsg] = useState<string | null>(null);
+  const [whitelistCheckAddr, setWhitelistCheckAddr] = useState("");
+  const [whitelistCheckResult, setWhitelistCheckResult] = useState<string | null>(null);
 
-  const { vaults, positions, loading, txStatus, txError, vaultError, lastTxSig, userGateBalance, deposit, withdraw, updateSettings, refresh } =
+  const { vaults, positions, loading, txStatus, txError, vaultError, lastTxSig, userGateBalance, deposit, withdraw, updateSettings, addToWhitelist, removeFromWhitelist, isWhitelisted, refresh } =
     useYieldPilot(VAULT_ADDRESSES);
   const { apys, loading: apyLoading } = useApys();
 
@@ -187,6 +195,46 @@ export default function Dashboard() {
   }
 
 
+  const handleAddWhitelist = async () => {
+    if (!primaryVault || !whitelistInput.trim() || whitelistBusy) return;
+    setWhitelistBusy(true);
+    setWhitelistMsg(null);
+    try {
+      await addToWhitelist(primaryVault.address, whitelistInput.trim());
+      setWhitelistMsg(`Added ${whitelistInput.trim().slice(0, 6)}... to whitelist`);
+      setWhitelistInput("");
+    } catch (e) {
+      setWhitelistMsg("Error: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setWhitelistBusy(false);
+    }
+  };
+
+  const handleRemoveWhitelist = async () => {
+    if (!primaryVault || !whitelistInput.trim() || whitelistBusy) return;
+    setWhitelistBusy(true);
+    setWhitelistMsg(null);
+    try {
+      await removeFromWhitelist(primaryVault.address, whitelistInput.trim());
+      setWhitelistMsg(`Removed ${whitelistInput.trim().slice(0, 6)}... from whitelist`);
+      setWhitelistInput("");
+    } catch (e) {
+      setWhitelistMsg("Error: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setWhitelistBusy(false);
+    }
+  };
+
+  const handleCheckWhitelist = async () => {
+    if (!primaryVault || !whitelistCheckAddr.trim()) return;
+    try {
+      const result = await isWhitelisted(primaryVault.address, whitelistCheckAddr.trim());
+      setWhitelistCheckResult(result ? "✓ Whitelisted (0% fee)" : "✗ Not whitelisted");
+    } catch (e) {
+      setWhitelistCheckResult("Error checking status");
+    }
+  };
+
   const claimTestTokens = async () => {
     if (!publicKey || faucetBusy) return;
     setFaucetBusy(true);
@@ -225,15 +273,17 @@ export default function Dashboard() {
         <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 24px", marginBottom: 20, display: "flex", gap: 32, flexWrap: "wrap" }}>
           <Toggle
             value={primaryVault.autoCompound}
-            onChange={() => updateSettings(primaryVault.address, !primaryVault.autoCompound, primaryVault.autoRebalance)}
+            onChange={() => isAdmin && updateSettings(primaryVault.address, !primaryVault.autoCompound, primaryVault.autoRebalance)}
             label="Auto-Compound"
-            sub="Reinvests rewards hourly"
+            sub={isAdmin ? "Reinvests rewards hourly" : "Admin only"}
+            disabled={!isAdmin}
           />
           <Toggle
             value={primaryVault.autoRebalance}
-            onChange={() => updateSettings(primaryVault.address, primaryVault.autoCompound, !primaryVault.autoRebalance)}
+            onChange={() => isAdmin && updateSettings(primaryVault.address, primaryVault.autoCompound, !primaryVault.autoRebalance)}
             label="Auto-Rebalance"
-            sub="Keeper moves funds to best APY"
+            sub={isAdmin ? "Keeper moves funds to best APY" : "Admin only"}
+            disabled={!isAdmin}
           />
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto" }}>
             <button
@@ -256,7 +306,7 @@ export default function Dashboard() {
 
       {/* Tabs */}
       <div style={{ display: "flex", gap: 4, marginBottom: 20, background: "var(--surface)", padding: 4, borderRadius: 10, border: "1px solid var(--border)", width: "fit-content" }}>
-        {(["overview", "protocols", "deposit", "withdraw"] as Tab[]).map((t) => (
+        {(["overview", "protocols", "deposit", "withdraw", ...(isAdmin ? ["admin"] as Tab[] : [])] as Tab[]).map((t) => (
           <button key={t} onClick={() => setActiveTab(t)} style={tabStyle(t)}>
             {t.charAt(0).toUpperCase() + t.slice(1)}
           </button>
@@ -468,6 +518,77 @@ export default function Dashboard() {
               {loading ? "Loading vaults..." : "No vaults found."}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── Admin ────────────────────────────────────────────────────────── */}
+      {activeTab === "admin" && isAdmin && primaryVault && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 520 }}>
+          <Card>
+            <CardHeader title="Whitelist Management" />
+            <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
+                Whitelisted wallets pay zero performance fee on withdrawal from <b>{primaryVault.name}</b>.
+              </div>
+              <input
+                type="text"
+                placeholder="Wallet address"
+                value={whitelistInput}
+                onChange={(e) => setWhitelistInput(e.target.value)}
+                style={{
+                  background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8,
+                  padding: "10px 12px", color: "var(--text)", fontFamily: "var(--mono)", fontSize: 13,
+                }}
+              />
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  onClick={handleAddWhitelist}
+                  disabled={whitelistBusy || !whitelistInput.trim()}
+                  style={{ flex: 1, background: "var(--purple)", border: "none", color: "#fff", borderRadius: 8, padding: "10px 16px", fontWeight: 600, fontSize: 13, cursor: whitelistBusy ? "wait" : "pointer", fontFamily: "Inter" }}
+                >
+                  {whitelistBusy ? "Working..." : "Add to Whitelist"}
+                </button>
+                <button
+                  onClick={handleRemoveWhitelist}
+                  disabled={whitelistBusy || !whitelistInput.trim()}
+                  style={{ flex: 1, background: "var(--surface-2)", border: "1px solid var(--border)", color: "var(--text)", borderRadius: 8, padding: "10px 16px", fontWeight: 600, fontSize: 13, cursor: whitelistBusy ? "wait" : "pointer", fontFamily: "Inter" }}
+                >
+                  Remove
+                </button>
+              </div>
+              {whitelistMsg && (
+                <div style={{ fontSize: 12, color: whitelistMsg.startsWith("Error") ? "var(--red)" : "var(--green)" }}>{whitelistMsg}</div>
+              )}
+            </div>
+          </Card>
+
+          <Card>
+            <CardHeader title="Check Whitelist Status" />
+            <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
+              <input
+                type="text"
+                placeholder="Wallet address to check"
+                value={whitelistCheckAddr}
+                onChange={(e) => setWhitelistCheckAddr(e.target.value)}
+                style={{
+                  background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8,
+                  padding: "10px 12px", color: "var(--text)", fontFamily: "var(--mono)", fontSize: 13,
+                }}
+              />
+              <button
+                onClick={handleCheckWhitelist}
+                disabled={!whitelistCheckAddr.trim()}
+                style={{ background: "var(--surface-2)", border: "1px solid var(--border)", color: "var(--text)", borderRadius: 8, padding: "10px 16px", fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: "Inter" }}
+              >
+                Check Status
+              </button>
+              {whitelistCheckResult && (
+                <div style={{ fontSize: 13, fontWeight: 600, color: whitelistCheckResult.startsWith("✓") ? "var(--green)" : "var(--text-muted)" }}>
+                  {whitelistCheckResult}
+                </div>
+              )}
+            </div>
+          </Card>
         </div>
       )}
     </div>
