@@ -65,9 +65,10 @@ async function getKaminoApy() {
 
 async function getMarinadeApy() {
   try {
-    const data = await tryFetch("https://api.marinade.finance/msol/apy/1d");
+    // 30d window: 1d is too noisy and can land on a near-zero snapshot
+    const data = await tryFetch("https://api.marinade.finance/msol/apy/30d");
     const apy = parseFloat(data?.value || data?.apy || "0") * 100;
-    if (!apy) return null;
+    if (!apy || apy < 0.5) return null;
     return [{ protocolId: "marinade-sol", name: "Marinade", asset: "SOL", apyPercent: apy, apyBps: Math.round(apy * 100), tvlUsd: data?.tvl_usd || 1_230_000_000, riskScore: 1 }];
   } catch { return null; }
 }
