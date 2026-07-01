@@ -27,9 +27,9 @@ jobs:
           rustc --version
           cargo --version
 
-      - name: Install Solana CLI
+      - name: Install Solana CLI (pinned recent version)
         run: |
-          sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
+          sh -c "$(curl -sSfL https://release.anza.xyz/v2.1.21/install)"
           echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
 
       - name: Cache cargo
@@ -40,7 +40,7 @@ jobs:
             ~/.cargo/git
             ~/.cargo/bin
             target
-          key: ${{ runner.os }}-cargo-anchor-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-anchor-v2-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install Anchor CLI 0.31.0
         run: |
@@ -49,8 +49,11 @@ jobs:
             cargo +1.86.0 install anchor-cli --version 0.31.0 --locked
           fi
 
-      - name: Anchor build (produces .so + IDL)
-        run: anchor build
+      - name: Pre-install platform-tools (newer, edition2024-capable) and build
+        run: |
+          export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+          cargo-build-sbf --version
+          anchor build -- --tools-version v1.48
 
       - name: Sync IDL to app and keeper
         run: |
