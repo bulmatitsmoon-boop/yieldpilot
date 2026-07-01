@@ -21,6 +21,12 @@ jobs:
         with:
           toolchain: "1.86.0"
 
+      - name: Force rustup default to 1.86.0
+        run: |
+          rustup default 1.86.0
+          rustc --version
+          cargo --version
+
       - name: Install Solana CLI
         run: |
           sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
@@ -38,8 +44,9 @@ jobs:
 
       - name: Install Anchor CLI 0.31.0
         run: |
+          cargo --version
           if ! command -v anchor &> /dev/null; then
-            cargo install anchor-cli --version 0.31.0 --locked
+            cargo +1.86.0 install anchor-cli --version 0.31.0 --locked
           fi
 
       - name: Anchor build (produces .so + IDL)
