@@ -7,6 +7,9 @@ on:
       - 'programs/**'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-22.04
@@ -27,13 +30,29 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
+            ~/.cargo/bin
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-anchor-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Build program
+      - name: Install Anchor CLI 0.31.0
         run: |
-          cd programs/yieldpilot
-          cargo-build-sbf --manifest-path Cargo.toml
+          if ! command -v anchor &> /dev/null; then
+            cargo install anchor-cli --version 0.31.0 --locked
+          fi
+
+      - name: Anchor build (produces .so + IDL)
+        run: anchor build
+
+      - name: Sync IDL to app and keeper
+        run: |
+          cp target/idl/yieldpilot.json app/src/idl/yieldpilot.json
+          cp target/idl/yieldpilot.json keeper/src/idl/yieldpilot.json
+
+      - name: Commit updated IDL
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: 'chore: sync IDL from anchor build [skip ci]'
+          file_pattern: 'app/src/idl/yieldpilot.json keeper/src/idl/yieldpilot.json'
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
