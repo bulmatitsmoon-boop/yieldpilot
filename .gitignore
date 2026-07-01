@@ -7,3 +7,4 @@ keeper/node_modules/
 .env
 .env.local
 app/.env*.local
+keeper/logs/
