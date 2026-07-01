@@ -238,6 +238,12 @@ pub mod yieldpilot {
             pos.vault = v.key();
             pos.bump  = ctx.bumps.user_position;
         }
+        // If vault was reset (total_shares was 0 before this deposit), clear any
+        // phantom shares left over from a previous vault lifecycle.
+        if v.total_shares == shares_to_mint {
+            pos.shares           = 0;
+            pos.deposited_amount = 0;
+        }
         pos.shares           = pos.shares.checked_add(shares_to_mint).ok_or(VaultError::MathOverflow)?;
         pos.deposited_amount = pos.deposited_amount.checked_add(amount).ok_or(VaultError::MathOverflow)?;
         pos.last_deposit_ts  = Clock::get()?.unix_timestamp;
