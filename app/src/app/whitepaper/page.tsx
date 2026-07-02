@@ -122,7 +122,8 @@ export default function Whitepaper() {
       <div style={{ maxWidth: 1100, margin: "0 auto", padding: "48px 16px 100px", display: "grid", gridTemplateColumns: "220px 1fr", gap: 48 }}>
 
         {/* TOC rail */}
-        <aside style={{ position: "sticky", top: 90, alignSelf: "start", display: "none" }} className="whitepaper-toc">
+        <div style={{ display: "none" }} className="whitepaper-toc">
+        <aside style={{ position: "sticky", top: 90, maxHeight: "calc(100vh - 110px)", overflowY: "auto" }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-low)", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 12, fontFamily: "var(--font-mono)" }}>
             Contents
           </div>
@@ -144,6 +145,7 @@ export default function Whitepaper() {
             ))}
           </div>
         </aside>
+        </div>
 
         {/* Content */}
         <div ref={contentRef} style={{ maxWidth: "68ch" }}>
