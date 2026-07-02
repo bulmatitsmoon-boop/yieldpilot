@@ -14,8 +14,6 @@ const BPS_DENOM = 10_000;
 const EXIT_COST_BPS: Record<string, number> = {
   "kamino-usdc":      0,
   "kamino-sol":       0,
-  "marginfi-usdc":    0,
-  "marginfi-sol":     0,
   "drift-sol":        0,
   "solend-usdc":      0,
   "marinade-sol":     30, // ~0.3% liquid unstake fee
@@ -144,8 +142,6 @@ function computeExitCost(
 const SAFE_PROTOCOLS = new Set([
   "kamino-usdc",
   "kamino-sol",
-  "marginfi-usdc",
-  "marginfi-sol",
   "drift-sol",
   "solend-usdc",
   "marinade-sol",
