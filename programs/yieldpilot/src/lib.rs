@@ -1441,18 +1441,18 @@ pub struct RecallFromMarinade<'info> {
     #[account(mut)]
     pub keeper: Signer<'info>,
     #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
-    pub vault: Account<'info, Vault>,
+    pub vault: Box<Account<'info, Vault>>,
     /// CHECK: PDA
     #[account(mut, seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
     pub vault_authority: UncheckedAccount<'info>,
     /// CHECK: Marinade validates
     #[account(mut)] pub marinade_state: UncheckedAccount<'info>,
-    #[account(mut)] pub msol_mint: Account<'info, Mint>,
+    #[account(mut)] pub msol_mint: Box<Account<'info, Mint>>,
     /// CHECK: Marinade validates
     #[account(mut)] pub liq_pool_sol_leg: UncheckedAccount<'info>,
-    #[account(mut)] pub liq_pool_msol_leg: Account<'info, TokenAccount>,
-    #[account(mut)] pub treasury_msol_account: Account<'info, TokenAccount>,
-    #[account(mut)] pub vault_msol_account: Account<'info, TokenAccount>,
+    #[account(mut)] pub liq_pool_msol_leg: Box<Account<'info, TokenAccount>>,
+    #[account(mut)] pub treasury_msol_account: Box<Account<'info, TokenAccount>>,
+    #[account(mut)] pub vault_msol_account: Box<Account<'info, TokenAccount>>,
     pub system_program: Program<'info, System>,
     pub token_program:  Program<'info, Token>,
     /// CHECK: address constraint
@@ -1465,13 +1465,13 @@ pub struct DeployToSolLst<'info> {
     #[account(mut)]
     pub keeper: Signer<'info>,
     #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
-    pub vault: Account<'info, Vault>,
+    pub vault: Box<Account<'info, Vault>>,
     /// CHECK: PDA
     #[account(mut, seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
     pub vault_authority: UncheckedAccount<'info>,
     /// Vault's LST ATA (jitoSOL)
     #[account(mut)]
-    pub vault_lst_account: Account<'info, TokenAccount>,
+    pub vault_lst_account: Box<Account<'info, TokenAccount>>,
     /// CHECK: Stake pool state account
     #[account(mut)] pub stake_pool: UncheckedAccount<'info>,
     /// CHECK: Withdraw authority PDA [pool, "withdraw"]
@@ -1479,9 +1479,9 @@ pub struct DeployToSolLst<'info> {
     /// CHECK: Reserve stake account (from pool state)
     #[account(mut)] pub reserve_stake: UncheckedAccount<'info>,
     /// Manager fee account (from pool state)
-    #[account(mut)] pub manager_fee_account: Account<'info, TokenAccount>,
+    #[account(mut)] pub manager_fee_account: Box<Account<'info, TokenAccount>>,
     /// LST pool mint (jitoSOL)
-    #[account(mut)] pub pool_mint: Account<'info, Mint>,
+    #[account(mut)] pub pool_mint: Box<Account<'info, Mint>>,
     /// CHECK: clock
     #[account(address = anchor_lang::solana_program::sysvar::clock::ID)]
     pub clock_sysvar: UncheckedAccount<'info>,
@@ -1500,13 +1500,13 @@ pub struct RecallFromSolLst<'info> {
     #[account(mut)]
     pub keeper: Signer<'info>,
     #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
-    pub vault: Account<'info, Vault>,
+    pub vault: Box<Account<'info, Vault>>,
     /// CHECK: PDA
     #[account(mut, seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
     pub vault_authority: UncheckedAccount<'info>,
     /// Vault's LST ATA — LST burned from here
     #[account(mut)]
-    pub vault_lst_account: Account<'info, TokenAccount>,
+    pub vault_lst_account: Box<Account<'info, TokenAccount>>,
     /// CHECK: Stake pool state account
     #[account(mut)] pub stake_pool: UncheckedAccount<'info>,
     /// CHECK: Withdraw authority PDA
@@ -1514,9 +1514,9 @@ pub struct RecallFromSolLst<'info> {
     /// CHECK: Reserve stake account
     #[account(mut)] pub reserve_stake: UncheckedAccount<'info>,
     /// Manager fee account
-    #[account(mut)] pub manager_fee_account: Account<'info, TokenAccount>,
+    #[account(mut)] pub manager_fee_account: Box<Account<'info, TokenAccount>>,
     /// LST pool mint
-    #[account(mut)] pub pool_mint: Account<'info, Mint>,
+    #[account(mut)] pub pool_mint: Box<Account<'info, Mint>>,
     /// CHECK: clock
     #[account(address = anchor_lang::solana_program::sysvar::clock::ID)]
     pub clock_sysvar: UncheckedAccount<'info>,
