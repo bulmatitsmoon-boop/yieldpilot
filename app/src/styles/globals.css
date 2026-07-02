@@ -1,88 +1,158 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
 
 :root {
-  --bg:         #080b12;
-  --surface:    #0f1117;
-  --surface-2:  #141720;
-  --border:     #1e2535;
-  --border-2:   #252d3d;
-  --text:       #e2e8f0;
-  --text-muted: #6b7280;
-  --text-dim:   #374151;
-  --purple:     #7c3aed;
-  --purple-light: #a78bfa;
-  --cyan:       #06b6d4;
-  --green:      #34d399;
-  --yellow:     #fbbf24;
-  --red:        #f87171;
-  --orange:     #fb923c;
-  --mono:       'JetBrains Mono', monospace;
+  /* Cockpit palette */
+  --ink-900:  #0A0E14;
+  --ink-800:  #10161F;
+  --ink-700:  #18202B;
+  --line:     #26313F;
+  --text-hi:  #E8EDF2;
+  --text-mid: #9BA8B8;
+  --text-low: #5D6B7C;
+  --signal:      #3FE0A0;
+  --signal-dim:  #22B37E;
+  --warn:     #F5B84B;
+  --loss:     #FF6B6B;
+  --token:    #7C5CFF;
+
+  /* Back-compat aliases so existing components (Header/Footer/etc still
+     mid-migration) keep working while we reskin screen by screen. */
+  --bg:           var(--ink-900);
+  --surface:      var(--ink-800);
+  --surface-2:    var(--ink-700);
+  --border:       var(--line);
+  --border-2:     var(--line);
+  --text:         var(--text-hi);
+  --text-muted:   var(--text-mid);
+  --text-dim:     var(--text-low);
+  --purple:       var(--token);
+  --purple-light: #9B85FF;
+  --cyan:         var(--signal);
+  --green:        var(--signal);
+  --yellow:       var(--warn);
+  --red:          var(--loss);
+  --orange:       var(--warn);
+
+  --font-display: 'Space Grotesk', system-ui, sans-serif;
+  --font-body:    'IBM Plex Sans', system-ui, sans-serif;
+  --font-mono:    'IBM Plex Mono', monospace;
+  --mono:         var(--font-mono);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 html, body {
-  background: var(--bg);
-  color: var(--text);
-  font-family: 'Inter', system-ui, sans-serif;
+  background: var(--ink-900);
+  color: var(--text-hi);
+  font-family: var(--font-body);
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
 
+.mono-num {
+  font-family: var(--font-mono);
+  font-feature-settings: "tnum" 1;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Ambient aurora background — used behind hero/dashboard sections */
+.aurora-bg {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+.aurora-bg::before,
+.aurora-bg::after {
+  content: "";
+  position: absolute;
+  width: 60%;
+  height: 60%;
+  border-radius: 50%;
+  filter: blur(90px);
+  opacity: 0.12;
+  animation: aurora-drift 28s ease-in-out infinite alternate;
+}
+.aurora-bg::before {
+  background: var(--signal);
+  top: -10%;
+  left: -5%;
+}
+.aurora-bg::after {
+  background: var(--token);
+  bottom: -15%;
+  right: -5%;
+  animation-duration: 34s;
+  animation-delay: -6s;
+}
+@keyframes aurora-drift {
+  0%   { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(6%, 4%) scale(1.08); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aurora-bg::before,
+  .aurora-bg::after { animation: none; }
+  * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+}
+
+/* Live-dot heartbeat */
+.live-dot {
+  animation: live-pulse 2.2s ease-in-out infinite;
+}
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.45; }
+}
+
 /* Wallet adapter modal overrides */
 .wallet-adapter-modal-wrapper {
-  background: var(--surface) !important;
-  border: 1px solid var(--border) !important;
+  background: var(--ink-800) !important;
+  border: 1px solid var(--line) !important;
   border-radius: 16px !important;
 }
 .wallet-adapter-modal-title {
-  color: var(--text) !important;
-  font-family: 'Inter', sans-serif !important;
+  color: var(--text-hi) !important;
+  font-family: var(--font-body) !important;
 }
 .wallet-adapter-button {
-  font-family: 'Inter', sans-serif !important;
+  font-family: var(--font-body) !important;
   border-radius: 10px !important;
 }
 .wallet-adapter-modal-list li {
-  background: var(--surface-2) !important;
-  border: 1px solid var(--border) !important;
+  background: var(--ink-700) !important;
+  border: 1px solid var(--line) !important;
   border-radius: 8px !important;
   margin-bottom: 6px !important;
 }
 .wallet-adapter-modal-list li:hover {
-  border-color: var(--purple) !important;
+  border-color: var(--token) !important;
 }
 
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: var(--surface); }
-::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 3px; }
+::-webkit-scrollbar-track { background: var(--ink-800); }
+::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
 
 /* ── Responsive ──────────────────────────────────────────────────────────── */
 @media (max-width: 640px) {
-  /* Header: hide nav links, shrink padding */
   .header-nav { display: none !important; }
   .header-root { padding: 0 16px !important; }
   .header-logo-sub { display: none !important; }
 
-  /* Main content padding */
   main { padding: 0 !important; }
 
-  /* Admin grid: single column */
   .admin-grid { grid-template-columns: 1fr !important; }
 
-  /* Stat cards: 2 per row */
   .stat-row { flex-wrap: wrap !important; }
   .stat-row > * { min-width: calc(50% - 8px) !important; flex: 1 1 calc(50% - 8px) !important; }
 
-  /* Tables: horizontal scroll */
   .table-scroll { overflow-x: auto !important; -webkit-overflow-scrolling: touch; }
 
-  /* Hero text */
   .hero-h1 { font-size: 32px !important; }
 
-  /* Footer */
   .footer-inner { flex-direction: column !important; gap: 24px !important; }
   .footer-links { flex-direction: row !important; gap: 32px !important; }
 }
