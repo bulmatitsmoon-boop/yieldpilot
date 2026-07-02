@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
+// Force this route to run per-request. Without this, Next.js statically
+// pre-renders it at build time (since the MarginFi SDK call doesn't use the
+// fetch() cache hints the other protocol fetchers do), permanently freezing
+// whatever value happened to resolve during that one build.
+export const dynamic = "force-dynamic";
+
 // All protocols here are lending or liquid staking — no LP impermanent loss risk.
 // Liquid staking exits (Jito, Marinade) go via DEX swap at <0.3% slippage,
 // which the keeper accounts for before deciding to rebalance out of them.
