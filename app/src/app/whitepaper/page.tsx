@@ -240,13 +240,13 @@ export default function Whitepaper() {
           <Section id="tiers" title="6. Token-Gated Access Tiers">
             <P>Access to YieldPilot&apos;s fee tiers is gated by holding $YPILOT tokens, measured as an absolute token balance — not a percentage of supply. The more $YPILOT you hold, the lower your performance fee.</P>
             <Table rows={[
-              ["Tier", "$YPILOT Required", "Deposit Cap", "Performance Fee"],
-              ["Gold",     "1,000,000+", "Unlimited", "0%"],
-              ["Silver",   "100,000+",   "$10,000",   "3%"],
-              ["Bronze",   "10,000+",    "$1,000",    "6%"],
-              ["Standard", "None required", "Unlimited", "9%"],
+              ["Tier", "$YPILOT Required", "Performance Fee"],
+              ["Gold",     "1,000,000+", "0%"],
+              ["Silver",   "100,000+",   "3%"],
+              ["Bronze",   "10,000+",    "6%"],
+              ["Standard", "None required", "9%"],
             ]} />
-            <P>This tiered model rewards $YPILOT holders with progressively better terms. Gold holders pay zero performance fees — all yield is theirs. Everyone can deposit and withdraw regardless of holdings; the tier only affects the performance fee rate and, for Silver/Bronze, a per-position deposit cap. The $YPILOT token is available on pump.fun.</P>
+            <P>This tiered model rewards $YPILOT holders with progressively better terms. Gold holders pay zero performance fees — all yield is theirs. Everyone can deposit and withdraw any amount regardless of holdings — there is no deposit cap at any tier. The tier only affects the performance fee rate charged on profit. The $YPILOT token is available on pump.fun.</P>
           </Section>
 
           <Section id="security" title="7. Security Model">
