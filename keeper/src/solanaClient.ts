@@ -65,12 +65,8 @@ const SOLEND_USDC_LIQUIDITY_SUPPLY = new PublicKey("8SheGtsopRUDzdiD6v6BR9a6bqZ9
 const SOLEND_USDC_COLLATERAL_MINT = new PublicKey("993dVFL2uXWYeoXuEBFXR4BijeXdTv4s6BzsCjJZuwqk");
 const SOLEND_USDC_ORACLE = new PublicKey("ExzpbWgczTgd8J58BrnESndmzBkRVfc6PhyfpdGgLjkf");
 
-// ─────────────────────────────────────────────────────────────────────────────
-// MarginFi mainnet constants
-// ─────────────────────────────────────────────────────────────────────────────
-const MARGINFI_PROGRAM = new PublicKey("MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA");
-const MARGINFI_MAIN_GROUP = new PublicKey("4qp6Fx6tnZkY5Wropq9wUYgtFxXKwE6viZxFHg3rdAG8");
-const MARGINFI_USDC_BANK = new PublicKey("2s37akK2eyBbp8DZgCm7RtsaEz8eJP3Nxd4urLHQv7yB"); // verified: $625k TVL
+// MarginFi is intentionally not integrated — see apyFetcher.ts for why
+// (their SDK cannot decode their own current mainnet state).
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types mirroring the on-chain Vault account
@@ -736,89 +732,6 @@ export class SolanaClient {
     );
   }
 
-  // ── MarginFi ──────────────────────────────────────────────────────────────
-
-  async deployToMarginFi(vaultAddress: string, protocolIndex: number, amount: anchor.BN): Promise<string | null> {
-    const vaultPubkey = new PublicKey(vaultAddress);
-    const vault = await this.fetchVault(vaultAddress);
-    const vaultAuthority = this.getVaultAuthority(vaultPubkey, vault.authorityBump);
-
-    // marginfi_account PDA: ["marginfi_account", group, authority] with MarginFi program
-    // The vault stores its marginfi_account address in vault_receipt_account field
-    const [marginfiAccount] = PublicKey.findProgramAddressSync(
-      [Buffer.from("marginfi_account"), MARGINFI_MAIN_GROUP.toBuffer(), vaultAuthority.toBuffer()],
-      MARGINFI_PROGRAM
-    );
-
-    // Bank liquidity vault: PDA ["liquidity_vault", bank] with MarginFi program
-    const [bankLiquidityVault] = PublicKey.findProgramAddressSync(
-      [Buffer.from("liquidity_vault"), MARGINFI_USDC_BANK.toBuffer()],
-      MARGINFI_PROGRAM
-    );
-
-    return this.sendWithRetry(
-      () =>
-        this.program.methods
-          .deployToMarginfi(protocolIndex, amount)
-          .accounts({
-            keeper: this.keeper.publicKey,
-            vault: vaultPubkey,
-            vaultAuthority,
-            vaultTokenAccount: vault.vaultTokenAccount,
-            marginfiGroup: MARGINFI_MAIN_GROUP,
-            marginfiAccount,
-            bank: MARGINFI_USDC_BANK,
-            bankLiquidityVault,
-            tokenProgram: TOKEN_PROGRAM_ID,
-            marginfiProgram: MARGINFI_PROGRAM,
-          })
-          .rpc(),
-      `deployToMarginFi(${vaultAddress.slice(0, 8)}... ${amount.toString()} USDC)`
-    );
-  }
-
-  async recallFromMarginFi(vaultAddress: string, protocolIndex: number, amount: anchor.BN, withdrawAll = false): Promise<string | null> {
-    const vaultPubkey = new PublicKey(vaultAddress);
-    const vault = await this.fetchVault(vaultAddress);
-    const vaultAuthority = this.getVaultAuthority(vaultPubkey, vault.authorityBump);
-
-    const [marginfiAccount] = PublicKey.findProgramAddressSync(
-      [Buffer.from("marginfi_account"), MARGINFI_MAIN_GROUP.toBuffer(), vaultAuthority.toBuffer()],
-      MARGINFI_PROGRAM
-    );
-
-    const [bankLiquidityVault] = PublicKey.findProgramAddressSync(
-      [Buffer.from("liquidity_vault"), MARGINFI_USDC_BANK.toBuffer()],
-      MARGINFI_PROGRAM
-    );
-
-    const [bankLiquidityVaultAuth] = PublicKey.findProgramAddressSync(
-      [Buffer.from("liquidity_vault_auth"), MARGINFI_USDC_BANK.toBuffer()],
-      MARGINFI_PROGRAM
-    );
-
-    return this.sendWithRetry(
-      () =>
-        this.program.methods
-          .recallFromMarginfi(protocolIndex, amount, withdrawAll)
-          .accounts({
-            keeper: this.keeper.publicKey,
-            vault: vaultPubkey,
-            vaultAuthority,
-            vaultTokenAccount: vault.vaultTokenAccount,
-            marginfiGroup: MARGINFI_MAIN_GROUP,
-            marginfiAccount,
-            bank: MARGINFI_USDC_BANK,
-            bankLiquidityVault,
-            bankLiquidityVaultAuthority: bankLiquidityVaultAuth,
-            tokenProgram: TOKEN_PROGRAM_ID,
-            marginfiProgram: MARGINFI_PROGRAM,
-          })
-          .rpc(),
-      `recallFromMarginFi(${vaultAddress.slice(0, 8)}... ${amount.toString()} USDC)`
-    );
-  }
-
   // ── Utility ───────────────────────────────────────────────────────────────
 
   async getKeeperBalance(): Promise<number> {
@@ -890,7 +803,7 @@ export class SolanaClient {
     const protocols = vault.protocols.slice(0, vault.protocolCount);
     const deltas = protocols.map((p, i) => ({
       index: i,
-      label: Buffer.from(p.label).toString("utf8").replace(/ /g, ""),
+      label: Buffer.from(p.label).toString("utf8").replace(/\0/g, ""),
       deployed: p.deployedBalance.toNumber(),
       target: Math.floor(totalDeposits * p.targetBps.toNumber() / 10_000),
       receiptAccount: p.vaultReceiptAccount,
@@ -905,27 +818,22 @@ export class SolanaClient {
     for (const d of toRecall) {
       logger.info("Recall from protocol", { label: d.label, excess: d.excess, deployed: d.deployed, target: d.target });
       try {
-        if (d.label === "marginfi-usdc" || d.label === "marginfi-sol") {
-          const withdrawAll = d.target === 0;
-          await this.recallFromMarginFi(vaultAddress, d.index, new anchor.BN(d.excess), withdrawAll);
+        const receiptBalance = await this.getTokenBalance(d.receiptAccount);
+        if (receiptBalance === 0) { logger.warn("No receipt balance, skipping", { label: d.label }); continue; }
+        const receiptToWithdraw = new anchor.BN(Math.max(1, Math.floor(receiptBalance * d.excess / d.deployed)));
+        if (d.label === "kamino-usdc") {
+          await this.recallFromKamino(vaultAddress, d.index, receiptToWithdraw);
+        } else if (d.label === "kamino-sol") {
+          await this.recallFromKaminoSol(vaultAddress, d.index, receiptToWithdraw);
+        } else if (d.label === "marinade-sol") {
+          await this.recallFromMarinade(vaultAddress, d.index, receiptToWithdraw);
+        } else if (d.label === "jito-sol") {
+          const cfg = await this.getJitoPoolConfig();
+          await this.recallFromSolLst(vaultAddress, d.index, receiptToWithdraw, cfg);
+        } else if (d.label === "solend-usdc") {
+          await this.recallFromSolend(vaultAddress, d.index, receiptToWithdraw);
         } else {
-          const receiptBalance = await this.getTokenBalance(d.receiptAccount);
-          if (receiptBalance === 0) { logger.warn("No receipt balance, skipping", { label: d.label }); continue; }
-          const receiptToWithdraw = new anchor.BN(Math.max(1, Math.floor(receiptBalance * d.excess / d.deployed)));
-          if (d.label === "kamino-usdc") {
-            await this.recallFromKamino(vaultAddress, d.index, receiptToWithdraw);
-          } else if (d.label === "kamino-sol") {
-            await this.recallFromKaminoSol(vaultAddress, d.index, receiptToWithdraw);
-          } else if (d.label === "marinade-sol") {
-            await this.recallFromMarinade(vaultAddress, d.index, receiptToWithdraw);
-          } else if (d.label === "jito-sol") {
-            const cfg = await this.getJitoPoolConfig();
-            await this.recallFromSolLst(vaultAddress, d.index, receiptToWithdraw, cfg);
-          } else if (d.label === "solend-usdc") {
-            await this.recallFromSolend(vaultAddress, d.index, receiptToWithdraw);
-          } else {
-            logger.warn("No recall handler for protocol", { label: d.label });
-          }
+          logger.warn("No recall handler for protocol", { label: d.label });
         }
       } catch (err: any) {
         logger.error("Recall failed", { label: d.label, error: err.message });
@@ -957,8 +865,6 @@ export class SolanaClient {
         } else if (d.label === "jito-sol") {
           const cfg = await this.getJitoPoolConfig();
           await this.deployToSolLst(vaultAddress, d.index, amount, cfg);
-        } else if (d.label === "marginfi-usdc" || d.label === "marginfi-sol") {
-          await this.deployToMarginFi(vaultAddress, d.index, amount);
         } else if (d.label === "solend-usdc") {
           await this.deployToSolend(vaultAddress, d.index, amount);
         } else {
