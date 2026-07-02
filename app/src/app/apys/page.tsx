@@ -129,10 +129,22 @@ function ILRiskModal({ onAccept, onDecline }: { onAccept: () => void; onDecline:
 
 const LP_PROTOCOL_IDS = new Set(["raydium-usdc-sol", "orca-usdc-eth"]);
 
+// Purely a display grouping for the type-filter tabs — not a routability signal.
+const PROTOCOL_TYPE: Record<string, "Lending" | "Liquid stake" | "LP"> = {
+  "kamino-usdc": "Lending", "kamino-sol": "Lending", "solend-usdc": "Lending", "drift-sol": "Lending",
+  "marinade-sol": "Liquid stake", "jito-sol": "Liquid stake",
+  "raydium-usdc-sol": "LP", "orca-usdc-eth": "LP",
+};
+
+type TypeFilter = "All" | "Lending" | "Liquid stake";
+
 export default function ApysPage() {
   const { apys, loading } = useApys();
   const [lpEnabled, setLpEnabled] = useState(false);
   const [showModal, setShowModal] = useState(false);
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>("All");
+  const [activeIdx, setActiveIdx] = useState(0);
+  const [autoActive, setAutoActive] = useState(true);
 
   useEffect(() => {
     setLpEnabled(localStorage.getItem("yp_lp_enabled") === "true");
@@ -159,11 +171,20 @@ export default function ApysPage() {
 
   const sorted = [...apys]
     .filter(p => lpEnabled || !LP_PROTOCOL_IDS.has(p.protocolId))
+    .filter(p => typeFilter === "All" || PROTOCOL_TYPE[p.protocolId] === typeFilter)
     .sort((a, b) => b.apyBps - a.apyBps);
 
   // Only real routable protocols are eligible for ROUTING HERE / 20% HERE —
   // riskScore alone isn't a safe proxy (Drift is riskScore 1 but not routable).
   const routableSorted = sorted.filter(p => ROUTABLE_PROTOCOL_IDS.has(p.protocolId));
+
+  useEffect(() => {
+    if (!autoActive || routableSorted.length === 0) return;
+    const id = setInterval(() => setActiveIdx(i => (i + 1) % routableSorted.length), 3500);
+    return () => clearInterval(id);
+  }, [autoActive, routableSorted.length]);
+
+  const activeNode = routableSorted[activeIdx % Math.max(routableSorted.length, 1)];
 
   return (
     <>
@@ -205,6 +226,62 @@ export default function ApysPage() {
               </div>
               <div style={{ fontSize: 12, color: "var(--text-mid)" }}>{label}</div>
             </div>
+          ))}
+        </div>
+
+        {/* Live routing — clickable protocol nodes + auto-cycling detail panel */}
+        {routableSorted.length > 0 && (
+          <div style={{ background: "var(--ink-800)", border: "1px solid var(--line)", borderRadius: 12, padding: "20px 24px", marginBottom: 24, position: "relative", zIndex: 1 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-low)", textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: "var(--font-mono)" }}>
+                Live routing
+              </div>
+              {autoActive && (
+                <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--signal)", fontFamily: "var(--font-mono)" }}>
+                  <span className="live-dot" style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--signal)" }} />
+                  AUTO
+                </div>
+              )}
+            </div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+              {routableSorted.map((p, i) => (
+                <button
+                  key={p.protocolId}
+                  onClick={() => { setActiveIdx(i); setAutoActive(false); }}
+                  style={{
+                    padding: "8px 14px", borderRadius: 8, cursor: "pointer",
+                    border: i === activeIdx ? "1px solid rgba(63,224,160,0.4)" : "1px solid var(--line)",
+                    background: i === activeIdx ? "rgba(63,224,160,0.08)" : "var(--ink-700)",
+                    color: i === activeIdx ? "var(--signal)" : "var(--text-mid)",
+                    fontSize: 12, fontWeight: 600, fontFamily: "var(--font-body)",
+                  }}
+                >
+                  {p.name} <span className="mono-num" style={{ marginLeft: 6 }}>{fmt(p.apyPercent)}%</span>
+                </button>
+              ))}
+            </div>
+            {activeNode && (
+              <div style={{ borderTop: "1px solid var(--line)", paddingTop: 14, fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6 }}>
+                {activeIdx === 0
+                  ? <>Highest live rate right now — receives <span className="mono-num" style={{ color: "var(--signal)" }}>80%</span> of the vault on the next rebalance.</>
+                  : activeIdx === 1
+                  ? <>Runner-up rate — holds <span className="mono-num" style={{ color: "var(--signal-dim)" }}>20%</span> of the vault for diversification.</>
+                  : <>Monitored continuously; routes here only if it overtakes the current leader by more than the 0.5% threshold.</>}
+                {" "}TVL <span className="mono-num">{fmtTvl(activeNode.tvlUsd)}</span>.
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Type filter tabs */}
+        <div style={{ display: "flex", gap: 4, marginBottom: 16, background: "var(--ink-800)", padding: 4, borderRadius: 10, border: "1px solid var(--line)", width: "fit-content", position: "relative", zIndex: 1 }}>
+          {(["All", "Lending", "Liquid stake"] as TypeFilter[]).map((t) => (
+            <button key={t} onClick={() => setTypeFilter(t)} style={{
+              padding: "7px 14px", borderRadius: 7, border: "none", cursor: "pointer",
+              background: typeFilter === t ? "var(--signal)" : "transparent",
+              color: typeFilter === t ? "var(--ink-900)" : "var(--text-mid)",
+              fontWeight: 600, fontSize: 12, fontFamily: "var(--font-body)",
+            }}>{t}</button>
           ))}
         </div>
 
