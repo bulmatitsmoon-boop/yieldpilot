@@ -115,55 +115,16 @@ async function fetchJitoApy(): Promise<ProtocolApy[]> {
   }
 }
 
-async function fetchMarginFiApy(): Promise<ProtocolApy[]> {
-  // MarginFi has no public REST endpoint for APYs — compute from on-chain bank state.
-  // Interest rate = utilization * slope + base. We decode the bank account directly.
-  // Bank: 2s37akK2eyBbp8DZgCm7RtsaEz8eJP3Nxd4urLHQv7yB (USDC, main group)
-  // Layout offsets (from MarginFi v2 source):
-  //   totalAssetShares at 328 (u128 as 16 bytes, but we use as f64)
-  //   totalLiabilityShares at 344
-  //   depositShareValue at 360 (f64 little-endian)
-  //   borrowShareValue at 368 (f64 little-endian)
-  //   optimalUtilizationRate at 448 (f64)
-  //   plateauInterestRate at 456 (f64)
-  //   maxInterestRate at 464 (f64)
-  //
-  // APY ≈ plateau_rate * utilization (simplified; accurate within ~5% of true rate)
-  try {
-    const { data } = await axios.post(
-      "https://api.mainnet-beta.solana.com",
-      { jsonrpc: "2.0", id: 1, method: "getAccountInfo",
-        params: ["2s37akK2eyBbp8DZgCm7RtsaEz8eJP3Nxd4urLHQv7yB", { encoding: "base64" }] },
-      { headers: { "Content-Type": "application/json" }, timeout: 8000 }
-    );
-    const raw = Buffer.from(data?.result?.value?.data?.[0] ?? "", "base64");
-    if (raw.length < 480) throw new Error("bank account too small");
-
-    // Read utilization: totalLiabilityShares / totalAssetShares (both as u128 LE)
-    const assetLow  = raw.readBigUInt64LE(328);
-    const assetHigh = raw.readBigUInt64LE(336);
-    const liabLow   = raw.readBigUInt64LE(344);
-    const liabHigh  = raw.readBigUInt64LE(352);
-    const assets = Number(assetLow) + Number(assetHigh) * 2**64;
-    const liabs  = Number(liabLow)  + Number(liabHigh)  * 2**64;
-    const utilization = assets > 0 ? Math.min(liabs / assets, 1) : 0;
-
-    const plateauRate = raw.readDoubleLE(456); // optimal interest rate
-    const optimalUtil = raw.readDoubleLE(448);
-    // If utilization < optimal: rate = plateauRate * (utilization / optimalUtil)
-    // If utilization >= optimal: rate is above plateau (less common for USDC)
-    const depositRate = utilization <= optimalUtil
-      ? plateauRate * (utilization / Math.max(optimalUtil, 0.001))
-      : plateauRate;
-
-    const apyPercent = sanitizeApy(depositRate * 100, "marginfi-usdc");
-    if (!apyPercent) return getFallbackApys(["marginfi-usdc"]);
-    return [{ protocolId: "marginfi-usdc", name: "MarginFi", asset: "USDC", apyBps: Math.round(apyPercent * 100), apyPercent, tvlUsd: 380_000_000, riskScore: 1, fetchedAt: new Date() }];
-  } catch (err: any) {
-    logger.warn("Failed to fetch MarginFi APY", { error: err.message });
-    return getFallbackApys(["marginfi-usdc"]);
-  }
-}
+// MarginFi is intentionally NOT integrated. Their protocol evolved into
+// "Project 0" (a multi-venue prime broker) in late 2025, and their official
+// marginfi-client-v2 SDK (even the latest published version) throws a decode
+// error reading their own current mainnet bank accounts — confirmed via a
+// local reproduction. This file previously had a hand-rolled byte-offset
+// decoder for the raw bank account, but that approach doesn't fail loudly on
+// a layout mismatch — it would silently read garbage at the wrong offsets and
+// produce a plausible-looking but wrong number, which is worse than an honest
+// failure for something feeding real rebalancing decisions. Removed until
+// verified against whatever Project 0 actually exposes for integration.
 
 async function fetchDriftApy(): Promise<ProtocolApy[]> {
   try {
@@ -187,11 +148,9 @@ async function fetchDriftApy(): Promise<ProtocolApy[]> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const FALLBACK_APYS: Record<string, Omit<ProtocolApy, "fetchedAt">> = {
-  "marginfi-usdc":  { protocolId: "marginfi-usdc",  name: "MarginFi",   asset: "USDC", apyBps: 1140, apyPercent: 11.40, tvlUsd: 380_000_000,   riskScore: 1 },
   "jito-sol":       { protocolId: "jito-sol",       name: "Jito",       asset: "SOL",  apyBps:  890, apyPercent: 8.90,  tvlUsd: 2_100_000_000, riskScore: 1 },
   "kamino-usdc":    { protocolId: "kamino-usdc",    name: "Kamino",     asset: "USDC", apyBps:  842, apyPercent: 8.42,  tvlUsd: 412_000_000,   riskScore: 1 },
   "marinade-sol":   { protocolId: "marinade-sol",   name: "Marinade",   asset: "SOL",  apyBps:  721, apyPercent: 7.21,  tvlUsd: 1_230_000_000, riskScore: 1 },
-  "marginfi-sol":   { protocolId: "marginfi-sol",   name: "MarginFi",   asset: "SOL",  apyBps:  710, apyPercent: 7.10,  tvlUsd: 380_000_000,   riskScore: 1 },
   "kamino-sol":     { protocolId: "kamino-sol",     name: "Kamino",     asset: "SOL",  apyBps:  620, apyPercent: 6.20,  tvlUsd: 280_000_000,   riskScore: 1 },
   "drift-sol":      { protocolId: "drift-sol",      name: "Drift",      asset: "SOL",  apyBps:  588, apyPercent: 5.88,  tvlUsd: 220_000_000,   riskScore: 1 },
   "solend-usdc":    { protocolId: "solend-usdc",    name: "Solend",     asset: "USDC", apyBps:  510, apyPercent: 5.10,  tvlUsd: 95_000_000,    riskScore: 1 },
@@ -212,7 +171,6 @@ export async function fetchAllApys(): Promise<ProtocolApy[]> {
     fetchKaminoApy(),
     fetchMarinadeApy(),
     fetchJitoApy(),
-    fetchMarginFiApy(),
     fetchDriftApy(),
   ]);
 
