@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { StatCard, Card, CardHeader, Toggle, TxBanner, fmt, fmtAddr } from "@/components/ui";
@@ -19,14 +19,32 @@ const VAULT_ADDRESSES = (process.env.NEXT_PUBLIC_VAULT_ADDRESSES || "F1r513ZZdof
 type Tab = "overview" | "protocols" | "deposit" | "withdraw";
 
 const ADMIN_PUBKEY = "8i7kydJHwi3Cdp46Xugyux2vWJmTScYDvnJrBiBihBnP";
+const REBALANCE_INTERVAL_SEC = 15 * 60;
+
+function Countdown({ lastCompoundTs }: { lastCompoundTs: number | null }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  // Approximate: countdown to the next 15-min boundary since we don't expose the
+  // keeper's exact next-poll timestamp. Good enough for the "alive" feel.
+  const elapsed = Math.floor(now / 1000) % REBALANCE_INTERVAL_SEC;
+  const remaining = REBALANCE_INTERVAL_SEC - elapsed;
+  const mm = String(Math.floor(remaining / 60)).padStart(2, "0");
+  const ss = String(remaining % 60).padStart(2, "0");
+  return (
+    <span className="mono-num" style={{ color: remaining <= 10 ? "var(--warn)" : "var(--text-hi)" }}>
+      {mm}:{ss}
+    </span>
+  );
+}
 
 export default function Dashboard() {
   const { publicKey, connected } = useWallet();
   const { setVisible } = useWalletModal();
   const isAdmin = publicKey?.toBase58() === ADMIN_PUBKEY;
   const [activeTab, setActiveTab] = useState<Tab>("overview");
-  const [faucetBusy, setFaucetBusy] = useState(false);
-  const [faucetMsg, setFaucetMsg] = useState<string | null>(null);
   const [selectedVaultAddr, setSelectedVaultAddr] = useState<string | null>(null);
 
   const { vaults, positions, loading, txStatus, txError, vaultError, lastTxSig, userGateBalance, deposit, withdraw, updateSettings, refresh } =
@@ -34,7 +52,6 @@ export default function Dashboard() {
   const { apys, loading: apyLoading } = useApys();
 
   // ── Derived stats ─────────────────────────────────────────────────────────
-  // Per-asset deposit amounts derived from positions + vault metadata
   const usdcPosition = positions.find(p => vaults.find(v => v.address === p.vault)?.name.toUpperCase().includes("USDC"));
   const solPosition  = positions.find(p => vaults.find(v => v.address === p.vault)?.name.toUpperCase().includes("SOL"));
   const usdcDeposited = usdcPosition ? usdcPosition.currentValue / 1e6 : null;
@@ -53,7 +70,6 @@ export default function Dashboard() {
     const v = vaults.find(v => v.address === p.vault);
     const decimals = v?.name.toUpperCase().includes("SOL") ? 1e9 : 1e6;
     if (p.earnedValue > 0) return s + p.earnedValue / decimals;
-    // No compound yet — estimate projected earnings based on best APY and time deposited
     if (p.lastDepositTs > 0 && bestApy > 0) {
       const secsElapsed = Math.max(0, Date.now() / 1000 - p.lastDepositTs);
       const yearFraction = secsElapsed / 31_536_000;
@@ -65,21 +81,16 @@ export default function Dashboard() {
   const isProjected = positions.length > 0 && positions.every(p => p.earnedValue === 0);
 
   const primaryVault = vaults[0];
-  const primaryPosition = positions[0];
 
-  // ── Global vault stats ────────────────────────────────────────────────────
-  // Split TVL by asset type so we display exact token amounts instead of a
-  // USD conversion that requires a price oracle and can show wrong numbers.
   const usdcVault = vaults.find(v => v.name.toUpperCase().includes("USDC"));
   const solVault  = vaults.find(v => v.name.toUpperCase().includes("SOL"));
-  const usdcTvl = usdcVault ? usdcVault.totalDeposits / 1e6 : null;  // 6 decimals
-  const solTvl  = solVault  ? solVault.totalDeposits  / 1e9 : null;  // 9 decimals
+  const usdcTvl = usdcVault ? usdcVault.totalDeposits / 1e6 : null;
+  const solTvl  = solVault  ? solVault.totalDeposits  / 1e9 : null;
   const hasTvl  = usdcTvl !== null || solTvl !== null;
   const lastCompound = primaryVault && primaryVault.lastCompoundTs > 0 ? new Date(primaryVault.lastCompoundTs * 1000) : null;
   const minutesSinceCompound = lastCompound ? Math.floor((Date.now() - lastCompound.getTime()) / 60000) : null;
   const onChainAllocation = primaryVault?.protocols.filter(p => p.targetBps > 0) || [];
-  // Fall back to APY-derived 80/20 allocation if on-chain hasn't rebalanced yet
-  const topApys = [...apys].sort((a, b) => b.apyPercent - a.apyPercent).slice(0, 2);
+  const topApys = [...apys].filter(a => a.riskScore <= 1).sort((a, b) => b.apyPercent - a.apyPercent).slice(0, 2);
   const currentAllocation = onChainAllocation.length > 0
     ? onChainAllocation
     : topApys.length >= 2
@@ -88,93 +99,94 @@ export default function Dashboard() {
         ? [{ name: topApys[0].name, targetBps: 10000 }]
         : [];
 
-  // ── Tabs ──────────────────────────────────────────────────────────────────
+  const tierLabel = userGateBalance >= (primaryVault?.goldThreshold ?? 1_000_000) ? "Gold"
+    : userGateBalance >= (primaryVault?.silverThreshold ?? 100_000) ? "Silver"
+    : userGateBalance >= (primaryVault?.bronzeThreshold ?? 10_000) ? "Bronze"
+    : "Standard";
+  const tierColor = tierLabel === "Gold" ? "var(--token)" : tierLabel === "Silver" ? "var(--text-mid)" : tierLabel === "Bronze" ? "#CD7F32" : "var(--text-low)";
+
   const tabStyle = (t: Tab): React.CSSProperties => ({
     padding: "8px 16px", borderRadius: 7, border: "none", cursor: "pointer",
-    background: activeTab === t ? "var(--purple)" : "transparent",
-    color: activeTab === t ? "#fff" : "var(--text-muted)",
-    fontWeight: 600, fontSize: 13, fontFamily: "Inter, sans-serif", transition: "all 0.15s",
+    background: activeTab === t ? "var(--signal)" : "transparent",
+    color: activeTab === t ? "var(--ink-900)" : "var(--text-mid)",
+    fontWeight: 600, fontSize: 13, fontFamily: "var(--font-body)", transition: "all 0.15s",
   });
 
-  // ── Landing (not connected) ───────────────────────────────────────────────
+  // ── Disconnected: preview state ───────────────────────────────────────────
   if (!connected) {
     return (
-      <div style={{ maxWidth: 760, margin: "0 auto", padding: "60px 16px 80px", display: "flex", flexDirection: "column", alignItems: "center", gap: 0, textAlign: "center" }}>
+      <div style={{ maxWidth: 760, margin: "0 auto", padding: "60px 16px 80px", display: "flex", flexDirection: "column", alignItems: "center", gap: 0, textAlign: "center", position: "relative" }}>
+        <div className="aurora-bg" />
 
-        {/* Hero */}
-        <div style={{ marginBottom: 48 }}>
-          <div style={{ width: 56, height: 56, borderRadius: 14, background: "linear-gradient(135deg, #7c3aed, #06b6d4)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}>
-            <svg width="28" height="28" viewBox="0 0 14 14" fill="none"><path d="M7 1L12 4V10L7 13L2 10V4L7 1Z" stroke="#fff" strokeWidth="1.5" strokeLinejoin="round"/><circle cx="7" cy="7" r="2" fill="#fff"/></svg>
+        <div style={{ marginBottom: 48, position: "relative", zIndex: 1 }}>
+          <div style={{ width: 56, height: 56, borderRadius: 14, background: "var(--ink-800)", border: "1px solid var(--line)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}>
+            <svg width="28" height="28" viewBox="0 0 14 14" fill="none"><path d="M7 1L12 4V10L7 13L2 10V4L7 1Z" stroke="var(--signal)" strokeWidth="1.5" strokeLinejoin="round"/><circle cx="7" cy="7" r="2" fill="var(--signal)"/></svg>
           </div>
-          <h1 style={{ fontSize: 36, fontWeight: 900, letterSpacing: "-0.03em", lineHeight: 1.1, marginBottom: 16 }}>
-            Earn the best yield<br />on Solana, automatically.
+          <h1 style={{ fontFamily: "var(--font-display)", fontSize: 34, fontWeight: 700, letterSpacing: "-0.02em", lineHeight: 1.15, marginBottom: 16, color: "var(--text-hi)" }}>
+            Your capital, on autopilot.
           </h1>
-          <p style={{ color: "var(--text-muted)", fontSize: 16, maxWidth: 420, margin: "0 auto 28px", lineHeight: 1.6 }}>
-            YieldPilot routes your USDC and SOL across top Solana protocols — rebalancing every 15 minutes to maximize your APY.
+          <p style={{ color: "var(--text-mid)", fontSize: 16, maxWidth: 420, margin: "0 auto 28px", lineHeight: 1.6 }}>
+            Connect to see your position, earnings, and tier — routed across Solana&apos;s top protocols automatically.
           </p>
           <button
             onClick={() => setVisible(true)}
             style={{
-              background: "linear-gradient(135deg, #7c3aed, #06b6d4)",
-              color: "#fff", border: "none", padding: "14px 36px", borderRadius: 12,
-              fontWeight: 700, fontSize: 16, cursor: "pointer", fontFamily: "Inter, sans-serif",
+              background: "var(--signal)",
+              color: "var(--ink-900)", border: "none", padding: "14px 36px", borderRadius: 12,
+              fontWeight: 700, fontSize: 16, cursor: "pointer", fontFamily: "var(--font-body)",
             }}
           >
-            Connect Wallet to Start
+            Connect Wallet
           </button>
-          <p style={{ color: "var(--text-dim)", fontSize: 12, marginTop: 10 }}>Works with Phantom & Solflare</p>
+          <p style={{ color: "var(--text-low)", fontSize: 12, marginTop: 10 }}>Works with Phantom & Solflare</p>
         </div>
 
-        {/* Live vault stats */}
-        <div style={{ width: "100%", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, padding: "24px 28px", marginBottom: 32 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 20 }}>Live Vault Stats</div>
+        <div style={{ width: "100%", background: "var(--ink-800)", border: "1px solid var(--line)", borderRadius: 16, padding: "24px 28px", marginBottom: 32, position: "relative", zIndex: 1 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-low)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 20, fontFamily: "var(--font-mono)" }}>Live vault stats</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 24 }}>
             <div style={{ textAlign: "left" }}>
-              <div style={{ fontSize: 22, fontWeight: 800, fontFamily: "var(--mono)", color: "var(--text)" }}>
+              <div className="mono-num" style={{ fontSize: 22, fontWeight: 500, color: "var(--text-hi)" }}>
                 {hasTvl ? (
                   <>
                     {usdcTvl !== null && <span>{usdcTvl.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC</span>}
-                    {usdcTvl !== null && solTvl !== null && <span style={{ color: "var(--text-dim)", margin: "0 6px" }}>·</span>}
+                    {usdcTvl !== null && solTvl !== null && <span style={{ color: "var(--text-low)", margin: "0 6px" }}>·</span>}
                     {solTvl !== null && <span>{solTvl.toLocaleString("en-US", { minimumFractionDigits: 4, maximumFractionDigits: 4 })} SOL</span>}
                   </>
                 ) : "—"}
               </div>
-              <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 4 }}>Total Value Locked</div>
+              <div style={{ fontSize: 12, color: "var(--text-low)", marginTop: 4 }}>Total Value Locked</div>
             </div>
             <div style={{ textAlign: "left" }}>
-              <div style={{ fontSize: 22, fontWeight: 800, fontFamily: "var(--mono)", color: "var(--green)" }}>
+              <div className="mono-num" style={{ fontSize: 22, fontWeight: 500, color: "var(--signal)" }}>
                 {bestApy > 0 ? `${bestApy.toFixed(2)}%` : "—"}
               </div>
-              <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 4 }}>
+              <div style={{ fontSize: 12, color: "var(--text-low)", marginTop: 4 }}>
                 Best APY {bestProtocol ? `· ${bestProtocol.name}` : ""}
               </div>
             </div>
             <div style={{ textAlign: "left" }}>
-              <div style={{ fontSize: 22, fontWeight: 800, fontFamily: "var(--mono)", color: "var(--purple-light)" }}>
+              <div className="mono-num" style={{ fontSize: 22, fontWeight: 500, color: "var(--token)" }}>
                 {minutesSinceCompound !== null ? minutesSinceCompound < 60 ? `${minutesSinceCompound}m ago` : minutesSinceCompound < 1440 ? `${Math.floor(minutesSinceCompound/60)}h ago` : `${Math.floor(minutesSinceCompound/1440)}d ago` : "—"}
               </div>
-              <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 4 }}>Last Compounded</div>
+              <div style={{ fontSize: 12, color: "var(--text-low)", marginTop: 4 }}>Last Compounded</div>
             </div>
             <div style={{ textAlign: "left" }}>
-              <div style={{ fontSize: 22, fontWeight: 800, fontFamily: "var(--mono)", color: "var(--yellow)" }}>
-                15 min
-              </div>
-              <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 4 }}>Rebalance Interval</div>
+              <div className="mono-num" style={{ fontSize: 22, fontWeight: 500, color: "var(--warn)" }}>15 min</div>
+              <div style={{ fontSize: 12, color: "var(--text-low)", marginTop: 4 }}>Rebalance Interval</div>
             </div>
           </div>
 
-          {/* Current allocation breakdown */}
           {currentAllocation.length > 0 && (
-            <div style={{ marginTop: 24, paddingTop: 20, borderTop: "1px solid var(--border)" }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 14 }}>Current Allocation</div>
+            <div style={{ marginTop: 24, paddingTop: 20, borderTop: "1px solid var(--line)" }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-low)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 14, fontFamily: "var(--font-mono)" }}>Current Allocation</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {currentAllocation.map((p, i) => (
                   <div key={i} style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                    <div style={{ fontSize: 13, color: "var(--text-muted)", minWidth: 120, textAlign: "left" }}>{p.name}</div>
-                    <div style={{ flex: 1, height: 6, background: "var(--bg)", borderRadius: 99, overflow: "hidden" }}>
-                      <div style={{ width: `${p.targetBps / 100}%`, height: "100%", background: i === 0 ? "var(--purple)" : "var(--purple-light)", borderRadius: 99 }} />
+                    <div style={{ fontSize: 13, color: "var(--text-mid)", minWidth: 120, textAlign: "left" }}>{p.name}</div>
+                    <div style={{ flex: 1, height: 6, background: "var(--ink-900)", borderRadius: 99, overflow: "hidden" }}>
+                      <div style={{ width: `${p.targetBps / 100}%`, height: "100%", background: i === 0 ? "var(--signal)" : "var(--signal-dim)", opacity: i === 0 ? 1 : 0.6, borderRadius: 99 }} />
                     </div>
-                    <div style={{ fontSize: 13, fontWeight: 700, fontFamily: "var(--mono)", color: "var(--text)", minWidth: 40, textAlign: "right" }}>{(p.targetBps / 100).toFixed(0)}%</div>
+                    <div className="mono-num" style={{ fontSize: 13, fontWeight: 500, color: "var(--text-hi)", minWidth: 40, textAlign: "right" }}>{(p.targetBps / 100).toFixed(0)}%</div>
                   </div>
                 ))}
               </div>
@@ -182,86 +194,117 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* Protocol preview */}
-        <div style={{ width: "100%" }}>
+        <div style={{ width: "100%", position: "relative", zIndex: 1 }}>
           <ProtocolTable apys={apys} loading={apyLoading} />
         </div>
       </div>
     );
   }
 
-
-  const claimTestTokens = async () => {
-    if (!publicKey || faucetBusy) return;
-    setFaucetBusy(true);
-    setFaucetMsg(null);
-    try {
-      const res = await fetch("/api/faucet", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ wallet: publicKey.toBase58() }),
-      });
-      const json = await res.json();
-      if (json.success) setFaucetMsg("50,000 YPLT added to your wallet!");
-      else setFaucetMsg("Error: " + json.error);
-    } catch (e) {
-      setFaucetMsg("Error: " + (e instanceof Error ? e.message : String(e)));
-    } finally {
-      setFaucetBusy(false);
-    }
-  };
-
+  // ── Connected: instrument cluster centerpiece ─────────────────────────────
   return (
-    <div style={{ maxWidth: 1020, margin: "0 auto", padding: "32px 16px 80px" }}>
-      {/* Tx status */}
+    <div style={{ maxWidth: 1060, margin: "0 auto", padding: "32px 16px 80px" }}>
       <TxBanner status={txStatus} error={txError} sig={lastTxSig} />
 
-      {/* Stats row */}
-      <div style={{ display: "flex", gap: 12, marginBottom: 24, flexWrap: "wrap" }}>
-        <StatCard label="Your Deposits" value={depositLabel} sub={positions.length ? `${positions.length} active position${positions.length > 1 ? "s" : ""}` : "No positions yet"} />
-        <StatCard label="Total Earned" value={`$${fmt(totalEarned)}`} sub={isProjected && totalEarned > 0 ? "projected" : "all time"} accent="var(--green)" />
-        <StatCard label="Avg Protocol APY" value={`${fmt(avgApy)}%`} sub="across protocols" accent="var(--purple-light)" />
-        <StatCard label="Best Available" value={`${fmt(bestApy)}%`} sub={bestProtocol ? `${bestProtocol.name} · ${bestProtocol.asset}` : ""} accent="var(--yellow)" />
+      {/* Wallet strip */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span className="mono-num" style={{ fontSize: 13, color: "var(--text-mid)" }}>{publicKey && fmtAddr(publicKey.toBase58())}</span>
+          <span style={{
+            fontSize: 11, fontWeight: 700, padding: "3px 9px", borderRadius: 4,
+            background: "rgba(124,92,255,0.1)", color: tierColor,
+            border: "1px solid rgba(124,92,255,0.25)", fontFamily: "var(--font-mono)",
+          }}>{tierLabel.toUpperCase()} TIER</span>
+        </div>
+        <button
+          onClick={refresh}
+          style={{ background: "var(--ink-700)", border: "1px solid var(--line)", color: "var(--text-mid)", padding: "6px 12px", borderRadius: 7, fontSize: 12, cursor: "pointer", fontFamily: "var(--font-body)" }}
+        >
+          ↻ Refresh
+        </button>
       </div>
 
-      {/* Automation toggles */}
-      {primaryVault && (
-        <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 24px", marginBottom: 20, display: "flex", gap: 32, flexWrap: "wrap" }}>
+      {/* Instrument cluster + actions */}
+      <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 16, marginBottom: 16 }}>
+        {/* Instrument cluster */}
+        <div style={{
+          background: "var(--ink-800)", border: "1px solid var(--line)", borderRadius: 12,
+          padding: 24, position: "relative", overflow: "hidden",
+        }}>
+          <div style={{ fontSize: 10, fontWeight: 600, color: "var(--text-low)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6, fontFamily: "var(--font-mono)" }}>
+            Position value
+          </div>
+          <div className="mono-num" style={{ fontSize: 40, fontWeight: 500, color: "var(--text-hi)", lineHeight: 1, marginBottom: 20 }}>
+            {depositLabel}
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 20, fontSize: 12 }}>
+            <div className="live-dot" style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--signal)" }} />
+            <span style={{ color: "var(--signal)", fontFamily: "var(--font-mono)", fontWeight: 500 }}>AUTOPILOT ENGAGED</span>
+            {currentAllocation[0] && <span style={{ color: "var(--text-low)" }}>· Routing to {currentAllocation[0].name}</span>}
+            <span style={{ color: "var(--text-low)" }}>· Next rebalance</span>
+            <Countdown lastCompoundTs={primaryVault?.lastCompoundTs ?? null} />
+          </div>
+
+          {currentAllocation.length > 0 && (
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text-mid)", marginBottom: 6, fontFamily: "var(--font-mono)" }}>
+                {currentAllocation.map((p, i) => (
+                  <span key={i}>{p.name} {(p.targetBps / 100).toFixed(0)}%</span>
+                ))}
+              </div>
+              <div style={{ display: "flex", height: 6, borderRadius: 3, overflow: "hidden", background: "var(--ink-700)" }}>
+                {currentAllocation.map((p, i) => (
+                  <div key={i} style={{
+                    width: `${p.targetBps / 100}%`, background: i === 0 ? "var(--signal)" : "var(--signal-dim)",
+                    opacity: i === 0 ? 1 : 0.55,
+                  }} />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Actions panel */}
+        <div style={{ background: "var(--ink-800)", border: "1px solid var(--line)", borderRadius: 12, padding: 20, display: "flex", flexDirection: "column", gap: 10 }}>
+          <button onClick={() => setActiveTab("deposit")} style={{
+            background: "var(--signal)", color: "var(--ink-900)", border: "none", padding: "12px", borderRadius: 8,
+            fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: "var(--font-body)",
+          }}>Deposit</button>
+          <button onClick={() => setActiveTab("withdraw")} style={{
+            background: "var(--ink-700)", color: "var(--text-hi)", border: "1px solid var(--line)", padding: "12px", borderRadius: 8,
+            fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: "var(--font-body)",
+          }}>Withdraw</button>
+
+          <div style={{ marginTop: 8, paddingTop: 16, borderTop: "1px solid var(--line)", fontSize: 12, color: "var(--text-mid)", lineHeight: 1.7 }}>
+            <div>Perf fee: <span className="mono-num" style={{ color: "var(--text-hi)" }}>{tierLabel === "Gold" ? "0%" : tierLabel === "Silver" ? "3%" : tierLabel === "Bronze" ? "6%" : "9%"}</span> on profit</div>
+            {tierLabel !== "Gold" && (
+              <div style={{ marginTop: 4 }}>Hold 1,000,000 $YPILOT → Gold (0% fee)</div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Automation toggles (admin) */}
+      {primaryVault && isAdmin && (
+        <div style={{ background: "var(--ink-800)", border: "1px solid var(--line)", borderRadius: 12, padding: "14px 24px", marginBottom: 16, display: "flex", gap: 32, flexWrap: "wrap" }}>
           <Toggle
             value={primaryVault.autoCompound}
-            onChange={() => isAdmin && updateSettings(primaryVault.address, !primaryVault.autoCompound, primaryVault.autoRebalance)}
+            onChange={() => updateSettings(primaryVault.address, !primaryVault.autoCompound, primaryVault.autoRebalance)}
             label="Auto-Compound"
-            sub={isAdmin ? "Reinvests rewards hourly" : "Admin only"}
-            disabled={!isAdmin}
+            sub="Reinvests rewards hourly"
           />
           <Toggle
             value={primaryVault.autoRebalance}
-            onChange={() => isAdmin && updateSettings(primaryVault.address, primaryVault.autoCompound, !primaryVault.autoRebalance)}
+            onChange={() => updateSettings(primaryVault.address, primaryVault.autoCompound, !primaryVault.autoRebalance)}
             label="Auto-Rebalance"
-            sub={isAdmin ? "Keeper moves funds to best APY" : "Admin only"}
-            disabled={!isAdmin}
+            sub="Keeper moves funds to best APY"
           />
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto" }}>
-            <button
-              onClick={refresh}
-              style={{ background: "var(--surface-2)", border: "1px solid var(--border)", color: "var(--text-muted)", padding: "6px 12px", borderRadius: 7, fontSize: 12, cursor: "pointer", fontFamily: "Inter" }}
-            >
-              ↻ Refresh
-            </button>
-            {publicKey && (
-              <button onClick={claimTestTokens} disabled={faucetBusy} style={{ marginLeft: 8, background: "var(--purple)", border: "none", color: "#fff", borderRadius: 7, fontSize: 12, cursor: faucetBusy ? "wait" : "pointer", fontFamily: "Inter", padding: "6px 12px" }}>
-                {faucetBusy ? "Sending..." : "Get Test Tokens"}
-              </button>
-            )}
-            {faucetMsg && (
-              <span style={{ marginLeft: 8, fontSize: 11, color: faucetMsg.startsWith("Error") ? "var(--red)" : "var(--green)" }}>{faucetMsg}</span>
-            )}
-          </div>
         </div>
       )}
 
       {/* Tabs */}
-      <div style={{ display: "flex", gap: 4, marginBottom: 20, background: "var(--surface)", padding: 4, borderRadius: 10, border: "1px solid var(--border)", width: "fit-content" }}>
+      <div style={{ display: "flex", gap: 4, marginBottom: 20, background: "var(--ink-800)", padding: 4, borderRadius: 10, border: "1px solid var(--line)", width: "fit-content" }}>
         {(["overview", "protocols", "deposit", "withdraw"] as Tab[]).map((t) => (
           <button key={t} onClick={() => setActiveTab(t)} style={tabStyle(t)}>
             {t.charAt(0).toUpperCase() + t.slice(1)}
@@ -273,68 +316,19 @@ export default function Dashboard() {
       {activeTab === "overview" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
-          {/* Live vault stats */}
-          <Card>
-            <CardHeader title="Live Vault Stats" />
-            <div style={{ padding: "16px 20px" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 20, marginBottom: currentAllocation.length > 0 ? 20 : 0 }}>
-                <div>
-                  <div style={{ fontSize: 20, fontWeight: 800, fontFamily: "var(--mono)" }}>
-                    {hasTvl ? (
-                      <>
-                        {usdcTvl !== null && <span>{usdcTvl.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC</span>}
-                        {usdcTvl !== null && solTvl !== null && <span style={{ color: "var(--text-dim)", margin: "0 6px" }}>·</span>}
-                        {solTvl !== null && <span>{solTvl.toLocaleString("en-US", { minimumFractionDigits: 4, maximumFractionDigits: 4 })} SOL</span>}
-                      </>
-                    ) : "—"}
-                  </div>
-                  <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 3 }}>Total Value Locked</div>
-                </div>
-                <div>
-                  <div style={{ fontSize: 20, fontWeight: 800, fontFamily: "var(--mono)", color: "var(--green)" }}>
-                    {bestApy > 0 ? `${bestApy.toFixed(2)}%` : "—"}
-                  </div>
-                  <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 3 }}>Best APY {bestProtocol ? `· ${bestProtocol.name}` : ""}</div>
-                </div>
-                <div>
-                  <div style={{ fontSize: 20, fontWeight: 800, fontFamily: "var(--mono)", color: "var(--purple-light)" }}>
-                    {minutesSinceCompound !== null ? minutesSinceCompound < 60 ? `${minutesSinceCompound}m ago` : minutesSinceCompound < 1440 ? `${Math.floor(minutesSinceCompound/60)}h ago` : `${Math.floor(minutesSinceCompound/1440)}d ago` : "—"}
-                  </div>
-                  <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 3 }}>Last Compounded</div>
-                </div>
-                <div>
-                  <div style={{ fontSize: 20, fontWeight: 800, fontFamily: "var(--mono)", color: "var(--yellow)" }}>15 min</div>
-                  <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 3 }}>Rebalance Interval</div>
-                </div>
-              </div>
-              {currentAllocation.length > 0 && (
-                <div style={{ paddingTop: 16, borderTop: "1px solid var(--border)" }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 12 }}>Current Allocation</div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    {currentAllocation.map((p, i) => (
-                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                        <div style={{ fontSize: 13, color: "var(--text-muted)", minWidth: 120 }}>{p.name}</div>
-                        <div style={{ flex: 1, height: 6, background: "var(--bg)", borderRadius: 99, overflow: "hidden" }}>
-                          <div style={{ width: `${p.targetBps / 100}%`, height: "100%", background: i === 0 ? "var(--purple)" : "var(--purple-light)", borderRadius: 99 }} />
-                        </div>
-                        <div style={{ fontSize: 13, fontWeight: 700, fontFamily: "var(--mono)", minWidth: 40, textAlign: "right" }}>{(p.targetBps / 100).toFixed(0)}%</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </Card>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <StatCard label="Total Earned" value={`$${fmt(totalEarned)}`} sub={isProjected && totalEarned > 0 ? "projected" : "all time"} accent="var(--signal)" />
+            <StatCard label="Avg Protocol APY" value={`${fmt(avgApy)}%`} sub="across protocols" accent="var(--token)" />
+            <StatCard label="Best Available" value={`${fmt(bestApy)}%`} sub={bestProtocol ? `${bestProtocol.name} · ${bestProtocol.asset}` : ""} accent="var(--warn)" />
+          </div>
 
-          {/* Positions */}
           <Card>
             <CardHeader title="Your Positions" />
             {positions.length === 0 ? (
-              <div style={{ padding: "40px 20px", textAlign: "center", color: "var(--text-muted)" }}>
-                <div style={{ fontSize: 32, marginBottom: 12 }}>📭</div>
-                <div style={{ fontWeight: 600, marginBottom: 6 }}>No positions yet</div>
-                <div style={{ fontSize: 13 }}>Deposit to start earning yield automatically.</div>
-                <button onClick={() => setActiveTab("deposit")} style={{ marginTop: 14, background: "var(--purple)", color: "#fff", border: "none", padding: "8px 18px", borderRadius: 8, fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: "Inter" }}>
+              <div style={{ padding: "40px 20px", textAlign: "center", color: "var(--text-mid)" }}>
+                <div style={{ fontWeight: 600, marginBottom: 6, color: "var(--text-hi)" }}>No position yet</div>
+                <div style={{ fontSize: 13 }}>Deposit to start earning.</div>
+                <button onClick={() => setActiveTab("deposit")} style={{ marginTop: 14, background: "var(--signal)", color: "var(--ink-900)", border: "none", padding: "8px 18px", borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "var(--font-body)" }}>
                   Make your first deposit →
                 </button>
               </div>
@@ -342,19 +336,18 @@ export default function Dashboard() {
               positions.map((pos, i) => {
                 const vault = vaults.find((v) => v.address === pos.vault);
                 return (
-                  <div key={i} style={{ padding: "16px 20px", borderTop: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
-                    <div style={{ width: 38, height: 38, borderRadius: 8, background: "var(--surface-2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>💵</div>
+                  <div key={i} style={{ padding: "16px 20px", borderTop: "1px solid var(--line)", display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 600 }}>{vault?.name || "Vault"}</div>
-                      <div style={{ color: "var(--text-muted)", fontSize: 12 }}>
+                      <div style={{ fontWeight: 600, color: "var(--text-hi)" }}>{vault?.name || "Vault"}</div>
+                      <div style={{ color: "var(--text-mid)", fontSize: 12 }}>
                         {(() => { const d = vault?.name.toUpperCase().includes("SOL") ? 1e9 : 1e6; const sym = vault?.name.toUpperCase().includes("SOL") ? "SOL" : "USDC"; return `${fmt(pos.depositedAmount / d)} ${sym} deposited`; })()} · {fmtAddr(pos.vault)}
                       </div>
                     </div>
                     <div style={{ textAlign: "right" }}>
-                      <div style={{ color: "var(--green)", fontWeight: 700, fontFamily: "var(--mono)" }}>
+                      <div className="mono-num" style={{ color: "var(--signal)", fontWeight: 500 }}>
                         {(() => { const d = vault?.name.toUpperCase().includes("SOL") ? 1e9 : 1e6; const sym = vault?.name.toUpperCase().includes("SOL") ? "SOL" : "USDC"; return `+${fmt(pos.earnedValue / d, 4)} ${sym} earned`; })()}
                       </div>
-                      <div style={{ color: "var(--text-muted)", fontSize: 12 }}>
+                      <div style={{ color: "var(--text-mid)", fontSize: 12 }}>
                         {(() => { const d = vault?.name.toUpperCase().includes("SOL") ? 1e9 : 1e6; const sym = vault?.name.toUpperCase().includes("SOL") ? "SOL" : "USDC"; return `${fmt(pos.currentValue / d)} ${sym} current value`; })()}
                       </div>
                     </div>
@@ -364,10 +357,8 @@ export default function Dashboard() {
             )}
           </Card>
 
-          {/* Recent transactions */}
           <RecentTransactions />
 
-          {/* Protocol snapshot */}
           <ProtocolTable apys={apys} loading={apyLoading} />
         </div>
       )}
@@ -386,15 +377,16 @@ export default function Dashboard() {
             return (
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                 {vaults.length > 1 && (
-                  <div style={{ display: "flex", background: "var(--surface)", border: "1px solid var(--border)", padding: 4, borderRadius: 10, gap: 4, width: "fit-content" }}>
+                  <div style={{ display: "flex", background: "var(--ink-800)", border: "1px solid var(--line)", padding: 4, borderRadius: 10, gap: 4, width: "fit-content" }}>
                     {vaults.map(v => {
                       const sym = v.name.toUpperCase().includes("SOL") ? "SOL" : "USDC";
+                      const isSel = selectedVaultAddr === v.address || (!selectedVaultAddr && v === vaults[0]);
                       return (
                         <button key={v.address} onClick={() => setSelectedVaultAddr(v.address)} style={{
                           padding: "7px 18px", borderRadius: 7, border: "none", cursor: "pointer",
-                          background: (selectedVaultAddr === v.address || (!selectedVaultAddr && v === vaults[0])) ? "var(--purple)" : "transparent",
-                          color: (selectedVaultAddr === v.address || (!selectedVaultAddr && v === vaults[0])) ? "#fff" : "var(--text-muted)",
-                          fontWeight: 600, fontSize: 13, fontFamily: "Inter, sans-serif",
+                          background: isSel ? "var(--signal)" : "transparent",
+                          color: isSel ? "var(--ink-900)" : "var(--text-mid)",
+                          fontWeight: 600, fontSize: 13, fontFamily: "var(--font-body)",
                         }}>{sym}</button>
                       );
                     })}
@@ -412,7 +404,7 @@ export default function Dashboard() {
               </div>
             );
           })() : (
-            <div style={{ color: "var(--text-muted)", padding: 20 }}>
+            <div style={{ color: "var(--text-mid)", padding: 20 }}>
               {loading ? "Loading vault..." : vaultError ? `Error: ${vaultError}` : "No vault configured. Set NEXT_PUBLIC_VAULT_ADDRESSES in .env.local"}
             </div>
           )}
@@ -427,8 +419,8 @@ export default function Dashboard() {
                   ["4. Withdraw anytime", "Burn your shares to receive your tokens plus earned yield, minus a small performance fee."],
                 ].map(([title, desc]) => (
                   <div key={title}>
-                    <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>{title}</div>
-                    <div style={{ color: "var(--text-muted)", fontSize: 13, lineHeight: 1.5 }}>{desc}</div>
+                    <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4, color: "var(--text-hi)" }}>{title}</div>
+                    <div style={{ color: "var(--text-mid)", fontSize: 13, lineHeight: 1.5 }}>{desc}</div>
                   </div>
                 ))}
               </div>
@@ -446,15 +438,16 @@ export default function Dashboard() {
             return (
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                 {vaults.length > 1 && (
-                  <div style={{ display: "flex", background: "var(--surface)", border: "1px solid var(--border)", padding: 4, borderRadius: 10, gap: 4, width: "fit-content" }}>
+                  <div style={{ display: "flex", background: "var(--ink-800)", border: "1px solid var(--line)", padding: 4, borderRadius: 10, gap: 4, width: "fit-content" }}>
                     {vaults.map(v => {
                       const sym = v.name.toUpperCase().includes("SOL") ? "SOL" : "USDC";
+                      const isSel = selectedVaultAddr === v.address || (!selectedVaultAddr && v === vaults[0]);
                       return (
                         <button key={v.address} onClick={() => setSelectedVaultAddr(v.address)} style={{
                           padding: "7px 18px", borderRadius: 7, border: "none", cursor: "pointer",
-                          background: (selectedVaultAddr === v.address || (!selectedVaultAddr && v === vaults[0])) ? "var(--purple)" : "transparent",
-                          color: (selectedVaultAddr === v.address || (!selectedVaultAddr && v === vaults[0])) ? "#fff" : "var(--text-muted)",
-                          fontWeight: 600, fontSize: 13, fontFamily: "Inter, sans-serif",
+                          background: isSel ? "var(--signal)" : "transparent",
+                          color: isSel ? "var(--ink-900)" : "var(--text-mid)",
+                          fontWeight: 600, fontSize: 13, fontFamily: "var(--font-body)",
                         }}>{sym}</button>
                       );
                     })}
@@ -473,7 +466,7 @@ export default function Dashboard() {
               </div>
             );
           })() : (
-            <div style={{ color: "var(--text-muted)", padding: 20 }}>
+            <div style={{ color: "var(--text-mid)", padding: 20 }}>
               {loading ? "Loading vaults..." : "No vaults found."}
             </div>
           )}
