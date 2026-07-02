@@ -11,10 +11,12 @@ export function Header() {
   const pathname = usePathname();
   const isAdmin = publicKey?.toBase58() === process.env.NEXT_PUBLIC_ADMIN_WALLET;
 
+  const isMainnet = process.env.NEXT_PUBLIC_SOLANA_NETWORK === "mainnet-beta";
+
   const navLinks: [string, string][] = [
     ["Home", "/"],
     ["Dashboard", "/dashboard"],
-    ["APYs", "/apys"],
+    ["Live Rates", "/apys"],
     ["Whitepaper", "/whitepaper"],
     ...(isAdmin ? [["Admin", "/admin"] as [string, string]] : []),
   ];
@@ -65,11 +67,20 @@ export function Header() {
 
       {/* Right side */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-        {/* Network indicator */}
-        <div style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--green)", fontSize: 12 }}>
-          <div style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--green)", boxShadow: "0 0 6px #34d399", flexShrink: 0 }} />
+        {/* Network indicator — amber on devnet (caution), signal green on mainnet (live) */}
+        <div style={{
+          display: "flex", alignItems: "center", gap: 6, fontSize: 12,
+          color: isMainnet ? "var(--signal)" : "var(--warn)",
+          fontFamily: "var(--font-mono)",
+        }}>
+          <div className="live-dot" style={{
+            width: 6, height: 6, borderRadius: "50%",
+            background: isMainnet ? "var(--signal)" : "var(--warn)",
+            boxShadow: isMainnet ? "0 0 6px var(--signal)" : "0 0 6px var(--warn)",
+            flexShrink: 0,
+          }} />
           <span className="header-logo-sub">
-            {process.env.NEXT_PUBLIC_SOLANA_NETWORK === "mainnet-beta" ? "Mainnet" : "Devnet"}
+            {isMainnet ? "Mainnet" : "Devnet"}
           </span>
         </div>
 
