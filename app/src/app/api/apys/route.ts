@@ -123,6 +123,8 @@ async function getOrcaApy() {
 // MarginFi has no simple public REST API for bank rates — real data requires
 // their SDK reading on-chain bank state. MarginFi only exists on mainnet, so
 // this queries mainnet-beta regardless of which network our own vaults run on.
+let lastMarginFiError: string | null = null;
+
 async function getMarginFiApy() {
   try {
     const { MarginfiClient, getConfig } = await import("@mrgnlabs/marginfi-client-v2");
@@ -147,7 +149,10 @@ async function getMarginFiApy() {
       if (apy > 0) results.push({ protocolId: "marginfi-sol", name: "MarginFi", asset: "SOL", apyPercent: apy, apyBps: Math.round(apy * 100), tvlUsd: 380_000_000, riskScore: 1 });
     }
     return results.length ? results : null;
-  } catch { return null; }
+  } catch (e: any) {
+    lastMarginFiError = e?.message || String(e);
+    return null;
+  }
 }
 
 export async function GET(_req: NextRequest) {
@@ -179,6 +184,9 @@ export async function GET(_req: NextRequest) {
   result.sort((a, b) => b.apyBps - a.apyBps);
 
   return NextResponse.json(result, {
-    headers: { "Cache-Control": "s-maxage=60, stale-while-revalidate=120" },
+    headers: {
+      "Cache-Control": "s-maxage=60, stale-while-revalidate=120",
+      "X-MarginFi-Debug": lastMarginFiError || "no-error",
+    },
   });
 }
