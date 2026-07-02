@@ -6,7 +6,10 @@ import { motion } from "framer-motion";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useApys } from "@/hooks/useApys";
+import { useYieldPilot } from "@/hooks/useYieldPilot";
 import { fmt } from "@/components/ui";
+import { RoutingVisual } from "@/components/dashboard/RoutingVisual";
+import { FleetRadar } from "@/components/dashboard/FleetRadar";
 
 // Only these protocol IDs are actually routable on-chain (have a deploy_to_* instruction).
 // Everything else (e.g. Drift) is informational-only and must never show "ROUTING HERE"
@@ -14,6 +17,11 @@ import { fmt } from "@/components/ui";
 const ROUTABLE_PROTOCOL_IDS = new Set([
   "kamino-usdc", "kamino-sol", "marinade-sol", "jito-sol", "solend-usdc",
 ]);
+
+const VAULT_ADDRESSES = (process.env.NEXT_PUBLIC_VAULT_ADDRESSES || "F1r513ZZdofz4tjhRfhNAYDK5hsmc8uCZbMmg2tkPJ6e,8KcoRt5DcCbXBaqDVDorEbW2J6GofTrRyy9Afzb8wwaE")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
 
 const IS_MAINNET = process.env.NEXT_PUBLIC_SOLANA_NETWORK === "mainnet-beta";
 
@@ -49,11 +57,25 @@ export default function Home() {
   const { setVisible } = useWalletModal();
   const { connected } = useWallet();
   const { apys } = useApys();
+  const { vaults } = useYieldPilot(VAULT_ADDRESSES);
 
   const routable = apys.filter(a => ROUTABLE_PROTOCOL_IDS.has(a.protocolId)).sort((a, b) => b.apyBps - a.apyBps);
   const informational = apys.filter(a => !ROUTABLE_PROTOCOL_IDS.has(a.protocolId));
   const best = routable[0];
   const runnerUp = routable[1];
+
+  // Real TVL across both vaults, normalized to a USD-equivalent for the
+  // headline number (SOL vault priced at a rough $150/SOL estimate — good
+  // enough for a directional "total value" figure, not a precise oracle read).
+  const usdcVault = vaults.find(v => v.name.toUpperCase().includes("USDC"));
+  const solVault = vaults.find(v => v.name.toUpperCase().includes("SOL"));
+  const totalDepositedUsd =
+    (usdcVault ? usdcVault.totalDeposits / 1e6 : 0) +
+    (solVault ? (solVault.totalDeposits / 1e9) * 150 : 0);
+  const routableApys = apys.filter(a => ROUTABLE_PROTOCOL_IDS.has(a.protocolId));
+  const blendedApy = routableApys.length
+    ? routableApys.reduce((s, a) => s + a.apyPercent, 0) / routableApys.length
+    : 0;
 
   return (
     <div style={{ position: "relative" }}>
@@ -194,6 +216,9 @@ export default function Home() {
               <Countdown seconds={15 * 60} />
             </div>
 
+            {/* Flight-path routing visual */}
+            <RoutingVisual bestName={best?.name ?? null} bestApy={best?.apyPercent ?? null} runnerUpName={runnerUp?.name ?? null} />
+
             {/* 80/20 allocation gauge */}
             {best && (
               <div>
@@ -219,6 +244,9 @@ export default function Home() {
             )}
           </motion.div>
         </div>
+
+        {/* ── Fleet Radar (real, live data — no fabricated numbers) ──────────── */}
+        <FleetRadar totalDeposited={totalDepositedUsd} blendedApy={blendedApy} />
 
         {/* ── How it works ──────────────────────────────────────────────────── */}
         <div style={{ marginBottom: 96, position: "relative", zIndex: 1 }}>
