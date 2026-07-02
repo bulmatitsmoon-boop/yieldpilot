@@ -141,6 +141,34 @@ export default function Dashboard() {
           <p style={{ color: "var(--text-low)", fontSize: 12, marginTop: 10 }}>Works with Phantom & Solflare</p>
         </div>
 
+        {/* Sample portfolio preview — clearly labeled illustrative, not real data */}
+        <div style={{ width: "100%", background: "var(--ink-800)", border: "1px dashed var(--line)", borderRadius: 16, padding: "24px 28px", marginBottom: 20, position: "relative", zIndex: 1, textAlign: "left" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-low)", textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: "var(--font-mono)" }}>
+              Sample portfolio — illustrative
+            </div>
+            <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 4, background: "var(--ink-700)", color: "var(--text-low)", border: "1px solid var(--line)", fontFamily: "var(--font-mono)" }}>NOT REAL DATA</span>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 20, opacity: 0.75 }}>
+            <div>
+              <div className="mono-num" style={{ fontSize: 26, fontWeight: 500, color: "var(--text-hi)" }}>$5,214.63</div>
+              <div style={{ fontSize: 11, color: "var(--text-low)", marginTop: 3 }}>Position value</div>
+            </div>
+            <div>
+              <div className="mono-num" style={{ fontSize: 26, fontWeight: 500, color: "var(--signal)" }}>+4.29%</div>
+              <div style={{ fontSize: 11, color: "var(--text-low)", marginTop: 3 }}>Return since deposit</div>
+            </div>
+            <div>
+              <div className="mono-num" style={{ fontSize: 26, fontWeight: 500, color: "var(--signal)" }}>+$1.16</div>
+              <div style={{ fontSize: 11, color: "var(--text-low)", marginTop: 3 }}>Yield / day</div>
+            </div>
+            <div>
+              <div className="mono-num" style={{ fontSize: 26, fontWeight: 500, color: "var(--text-hi)" }}>80 / 20</div>
+              <div style={{ fontSize: 11, color: "var(--text-low)", marginTop: 3 }}>Allocation split</div>
+            </div>
+          </div>
+        </div>
+
         <div style={{ width: "100%", background: "var(--ink-800)", border: "1px solid var(--line)", borderRadius: 16, padding: "24px 28px", marginBottom: 32, position: "relative", zIndex: 1 }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-low)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 20, fontFamily: "var(--font-mono)" }}>Live vault stats</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 24 }}>
