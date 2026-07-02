@@ -1496,7 +1496,8 @@ pub struct DeployToSolLst<'info> {
     pub stake_history_sysvar: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
     pub token_program: Program<'info, Token>,
-    /// CHECK: SPL Stake Pool program or Jito fork
+    /// CHECK: Jito's SPL Stake Pool fork — pinned, only address the keeper ever uses
+    #[account(address = adapters::spl_stake_pool::jito::PROGRAM)]
     pub stake_pool_program: UncheckedAccount<'info>,
 }
 
@@ -1532,7 +1533,8 @@ pub struct RecallFromSolLst<'info> {
     #[account(address = anchor_lang::solana_program::stake::program::ID)]
     pub stake_program: UncheckedAccount<'info>,
     pub token_program: Program<'info, Token>,
-    /// CHECK: SPL Stake Pool program or Jito fork
+    /// CHECK: Jito's SPL Stake Pool fork — pinned, only address the keeper ever uses
+    #[account(address = adapters::spl_stake_pool::jito::PROGRAM)]
     pub stake_pool_program: UncheckedAccount<'info>,
 }
 
