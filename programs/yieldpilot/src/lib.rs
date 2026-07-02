@@ -10,7 +10,6 @@ use adapters::{
     marinade::{MarinadeDeposit, MarinadeUnstake, marinade_deposit, marinade_liquid_unstake},
     spl_stake_pool::{SplStakePoolDeposit, SplStakePoolWithdraw, spl_stake_pool_deposit, spl_stake_pool_withdraw},
     solend::{SolendDeposit, SolendWithdraw, solend_deposit, solend_withdraw},
-    marginfi::{MarginFiDeposit, MarginFiWithdraw, marginfi_deposit, marginfi_withdraw},
     {AdapterError, ProtocolAdapter, ProtocolKind, assert_state_matches},
 };
 
@@ -934,94 +933,6 @@ pub mod yieldpilot {
         Ok(())
     }
 
-    /// Deposit tokens into MarginFi. Balance tracked in marginfi_account, no receipt token.
-    pub fn deploy_to_marginfi(
-        ctx: Context<DeployToMarginFi>,
-        protocol_index: u8,
-        amount: u64,
-    ) -> Result<()> {
-        require!(amount > 0, VaultError::ZeroAmount);
-        let v = &mut ctx.accounts.vault;
-        require!(!v.paused, AdapterError::VaultPaused);
-        let idx = protocol_index as usize;
-        require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
-
-        // SECURITY: enforce the same minimum idle liquidity buffer as deploy_to_kamino,
-        // so this protocol can't be used to deploy 100% of funds and block withdrawals.
-        let idle = v.total_deposits.saturating_sub(v.total_deployed());
-        let min_idle = v.total_deposits
-            .checked_mul(MIN_IDLE_BPS)
-            .and_then(|x| x.checked_div(BPS_DENOM))
-            .unwrap_or(0);
-        require!(idle.saturating_sub(amount) >= min_idle, VaultError::InsufficientIdle);
-
-        let vault_key = v.key();
-        let seeds: &[&[u8]] = &[b"vault", vault_key.as_ref(), &[v.authority_bump]];
-
-        marginfi_deposit(
-            CpiContext::new_with_signer(
-                ctx.accounts.marginfi_program.to_account_info(),
-                MarginFiDeposit {
-                    vault_authority:      ctx.accounts.vault_authority.to_account_info(),
-                    vault_token_account:  ctx.accounts.vault_token_account.clone(),
-                    marginfi_group:       ctx.accounts.marginfi_group.to_account_info(),
-                    marginfi_account:     ctx.accounts.marginfi_account.to_account_info(),
-                    bank:                 ctx.accounts.bank.to_account_info(),
-                    bank_liquidity_vault: ctx.accounts.bank_liquidity_vault.to_account_info(),
-                    token_program:        ctx.accounts.token_program.clone(),
-                    marginfi_program:     ctx.accounts.marginfi_program.to_account_info(),
-                },
-                &[seeds],
-            ),
-            amount,
-            seeds,
-        )?;
-
-        v.protocols[idx].deployed_balance = v.protocols[idx].deployed_balance
-            .checked_add(amount).ok_or(VaultError::MathOverflow)?;
-        emit!(FundsDeployed { vault: v.key(), protocol_index, amount });
-        Ok(())
-    }
-
-    /// Withdraw tokens from MarginFi.
-    pub fn recall_from_marginfi(
-        ctx: Context<RecallFromMarginFi>,
-        protocol_index: u8,
-        amount: u64,
-    ) -> Result<()> {
-        require!(amount > 0, VaultError::ZeroAmount);
-        let v = &mut ctx.accounts.vault;
-        let idx = protocol_index as usize;
-        require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
-
-        let vault_key = v.key();
-        let seeds: &[&[u8]] = &[b"vault", vault_key.as_ref(), &[v.authority_bump]];
-
-        marginfi_withdraw(
-            CpiContext::new_with_signer(
-                ctx.accounts.marginfi_program.to_account_info(),
-                MarginFiWithdraw {
-                    vault_authority:                ctx.accounts.vault_authority.to_account_info(),
-                    vault_token_account:            ctx.accounts.vault_token_account.clone(),
-                    marginfi_group:                 ctx.accounts.marginfi_group.to_account_info(),
-                    marginfi_account:               ctx.accounts.marginfi_account.to_account_info(),
-                    bank:                           ctx.accounts.bank.to_account_info(),
-                    bank_liquidity_vault:           ctx.accounts.bank_liquidity_vault.to_account_info(),
-                    bank_liquidity_vault_authority: ctx.accounts.bank_liquidity_vault_authority.to_account_info(),
-                    token_program:                  ctx.accounts.token_program.clone(),
-                    marginfi_program:               ctx.accounts.marginfi_program.to_account_info(),
-                },
-                &[seeds],
-            ),
-            amount,
-            seeds,
-        )?;
-
-        v.protocols[idx].deployed_balance = v.protocols[idx].deployed_balance
-            .saturating_sub(amount);
-        emit!(FundsRecalled { vault: v.key(), protocol_index, collateral_amount: amount });
-        Ok(())
-    }
 }
 
 // ── Vault state ───────────────────────────────────────────────────────────────
@@ -1592,56 +1503,6 @@ pub struct RecallFromSolend<'info> {
     /// CHECK: Solend program
     #[account(address = adapters::solend::SOLEND_PROGRAM)]
     pub solend_program: UncheckedAccount<'info>,
-}
-
-#[derive(Accounts)]
-pub struct DeployToMarginFi<'info> {
-    #[account(mut)] pub keeper: Signer<'info>,
-    #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
-    pub vault: Account<'info, Vault>,
-    /// CHECK: PDA
-    #[account(mut, seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
-    pub vault_authority: UncheckedAccount<'info>,
-    #[account(mut, constraint = vault_token_account.key() == vault.vault_token_account)]
-    pub vault_token_account: Account<'info, TokenAccount>,
-    /// CHECK: MarginFi validates
-    pub marginfi_group: UncheckedAccount<'info>,
-    /// CHECK: MarginFi validates — vault's marginfi_account PDA
-    #[account(mut)] pub marginfi_account: UncheckedAccount<'info>,
-    /// CHECK: MarginFi validates
-    #[account(mut)] pub bank: UncheckedAccount<'info>,
-    /// CHECK: MarginFi validates
-    #[account(mut)] pub bank_liquidity_vault: UncheckedAccount<'info>,
-    pub token_program: Program<'info, Token>,
-    /// CHECK: MarginFi program
-    #[account(address = adapters::marginfi::MARGINFI_PROGRAM)]
-    pub marginfi_program: UncheckedAccount<'info>,
-}
-
-#[derive(Accounts)]
-pub struct RecallFromMarginFi<'info> {
-    #[account(mut)] pub keeper: Signer<'info>,
-    #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
-    pub vault: Account<'info, Vault>,
-    /// CHECK: PDA
-    #[account(mut, seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
-    pub vault_authority: UncheckedAccount<'info>,
-    #[account(mut, constraint = vault_token_account.key() == vault.vault_token_account)]
-    pub vault_token_account: Account<'info, TokenAccount>,
-    /// CHECK: MarginFi validates
-    pub marginfi_group: UncheckedAccount<'info>,
-    /// CHECK: MarginFi validates
-    #[account(mut)] pub marginfi_account: UncheckedAccount<'info>,
-    /// CHECK: MarginFi validates
-    #[account(mut)] pub bank: UncheckedAccount<'info>,
-    /// CHECK: MarginFi validates
-    #[account(mut)] pub bank_liquidity_vault: UncheckedAccount<'info>,
-    /// CHECK: MarginFi validates
-    pub bank_liquidity_vault_authority: UncheckedAccount<'info>,
-    pub token_program: Program<'info, Token>,
-    /// CHECK: MarginFi program
-    #[account(address = adapters::marginfi::MARGINFI_PROGRAM)]
-    pub marginfi_program: UncheckedAccount<'info>,
 }
 
 // ── Events ────────────────────────────────────────────────────────────────────
