@@ -366,8 +366,8 @@ export class SolanaClient {
             kaminoLiquidityMint: kamino.liquidityMint,
             kaminoLiquiditySupply: kamino.liquiditySupply,
             kaminoCollateralMint: kamino.collateralMint,
-            kaminoCollateralSupply: kamino.collateralSupply,
             tokenProgram: TOKEN_PROGRAM_ID,
+            instructionSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
             kaminoProgram: KAMINO_PROGRAM_ID,
           })
           .remainingAccounts(
@@ -408,8 +408,8 @@ export class SolanaClient {
             kaminoLiquidityMint: kamino.liquidityMint,
             kaminoLiquiditySupply: kamino.liquiditySupply,
             kaminoCollateralMint: kamino.collateralMint,
-            kaminoCollateralSupply: kamino.collateralSupply,
             tokenProgram: TOKEN_PROGRAM_ID,
+            instructionSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
             kaminoProgram: KAMINO_PROGRAM_ID,
           })
           .remainingAccounts(
@@ -457,8 +457,8 @@ export class SolanaClient {
             kaminoLiquidityMint: WSOL_MINT,
             kaminoLiquiditySupply: KAMINO_SOL_LIQUIDITY_SUPPLY,
             kaminoCollateralMint: KAMINO_SOL_COLLATERAL_MINT,
-            kaminoCollateralSupply: KAMINO_SOL_COLLATERAL_SUPPLY,
             tokenProgram: TOKEN_PROGRAM_ID,
+            instructionSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
             kaminoProgram: KAMINO_PROGRAM_ID,
           })
           .remainingAccounts(
@@ -500,8 +500,8 @@ export class SolanaClient {
             kaminoLiquidityMint: WSOL_MINT,
             kaminoLiquiditySupply: KAMINO_SOL_LIQUIDITY_SUPPLY,
             kaminoCollateralMint: KAMINO_SOL_COLLATERAL_MINT,
-            kaminoCollateralSupply: KAMINO_SOL_COLLATERAL_SUPPLY,
             tokenProgram: TOKEN_PROGRAM_ID,
+            instructionSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
             kaminoProgram: KAMINO_PROGRAM_ID,
           })
           .remainingAccounts(
