@@ -31,8 +31,6 @@ const MIN_IDLE_BPS: u64       = 1_000;        // 10%
 const GOLD_THRESHOLD:   u64 = 1_000_000;     // 1M tokens  → unlimited deposits, 0% fee
 const SILVER_THRESHOLD: u64 =   100_000;     // 100k tokens → $10k cap, 3% fee
 const BRONZE_THRESHOLD: u64 =    10_000;     // 10k tokens  → $1k cap, 6% fee
-const SILVER_CAP:       u64 = 10_000_000_000; // $10k in base-6
-const BRONZE_CAP:       u64 =  1_000_000_000; // $1k in base-6
 
 // Tiered performance fees (in bps). Applied on profit at withdrawal.
 const GOLD_FEE_BPS:   u64 =   0; // 0%
@@ -160,12 +158,8 @@ pub mod yieldpilot {
             } else {
                 HolderTier::None
             };
-            let pos_deposits = ctx.accounts.user_position.deposited_amount;
-            if tier == HolderTier::Silver {
-                require!(pos_deposits.saturating_add(amount) <= SILVER_CAP, VaultError::TierCapExceeded);
-            } else if tier == HolderTier::Bronze {
-                require!(pos_deposits.saturating_add(amount) <= BRONZE_CAP, VaultError::TierCapExceeded);
-            }
+            // No per-tier deposit cap: every tier can deposit any amount. The tier
+            // only ever affects the performance fee rate charged on profit at exit.
             // Snapshot tier for withdrawal fee calculation (anti-flash-loan)
             let tier_u8: u8 = match tier {
                 HolderTier::Gold   => 0,
