@@ -9,6 +9,7 @@ import { DepositWithdrawPanel } from "@/components/dashboard/DepositWithdrawPane
 import { RecentTransactions } from "@/components/dashboard/RecentTransactions";
 import { useYieldPilot } from "@/hooks/useYieldPilot";
 import { useApys } from "@/hooks/useApys";
+import { useSolPrice } from "@/hooks/useSolPrice";
 
 // Load vault addresses from env
 const VAULT_ADDRESSES = (process.env.NEXT_PUBLIC_VAULT_ADDRESSES || "F1r513ZZdofz4tjhRfhNAYDK5hsmc8uCZbMmg2tkPJ6e,8KcoRt5DcCbXBaqDVDorEbW2J6GofTrRyy9Afzb8wwaE")
@@ -50,6 +51,7 @@ export default function Dashboard() {
   const { vaults, positions, loading, txStatus, txError, vaultError, lastTxSig, userGateBalance, deposit, withdraw, updateSettings, refresh } =
     useYieldPilot(VAULT_ADDRESSES);
   const { apys, loading: apyLoading } = useApys();
+  const solPrice = useSolPrice();
 
   // ── Derived stats ─────────────────────────────────────────────────────────
   const usdcPosition = positions.find(p => vaults.find(v => v.address === p.vault)?.name.toUpperCase().includes("USDC"));
@@ -73,7 +75,7 @@ export default function Dashboard() {
     if (p.lastDepositTs > 0 && bestApy > 0) {
       const secsElapsed = Math.max(0, Date.now() / 1000 - p.lastDepositTs);
       const yearFraction = secsElapsed / 31_536_000;
-      const depositUsd = (p.depositedAmount / decimals) * (v?.name.toUpperCase().includes("SOL") ? 150 : 1);
+      const depositUsd = (p.depositedAmount / decimals) * (v?.name.toUpperCase().includes("SOL") ? solPrice : 1);
       return s + depositUsd * (bestApy / 100) * yearFraction;
     }
     return s;
