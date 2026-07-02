@@ -38,16 +38,16 @@ export function Header() {
       <Link href="/" style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none", flexShrink: 0 }}>
         <div style={{
           width: 28, height: 28, borderRadius: 7,
-          background: "var(--purple)", display: "flex", alignItems: "center",
+          background: "var(--ink-700)", border: "1px solid var(--line)", display: "flex", alignItems: "center",
           justifyContent: "center", flexShrink: 0,
         }}>
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <path d="M7 1L12 4V10L7 13L2 10V4L7 1Z" stroke="#fff" strokeWidth="1.5" strokeLinejoin="round"/>
-            <circle cx="7" cy="7" r="2" fill="#fff"/>
+            <path d="M7 1L12 4V10L7 13L2 10V4L7 1Z" stroke="var(--signal)" strokeWidth="1.5" strokeLinejoin="round"/>
+            <circle cx="7" cy="7" r="2" fill="var(--signal)"/>
           </svg>
         </div>
-        <span style={{ fontWeight: 800, fontSize: 16, letterSpacing: "-0.025em", color: "var(--text)" }}>YieldPilot</span>
-        <span className="header-logo-sub" style={{ color: "var(--text-dim)", fontSize: 11, marginLeft: 1 }}>/ Solana</span>
+        <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16, letterSpacing: "-0.02em", color: "var(--text-hi)" }}>YieldPilot</span>
+        <span className="header-logo-sub" style={{ color: "var(--text-low)", fontSize: 11, marginLeft: 1, fontFamily: "var(--font-mono)" }}>/ Solana</span>
       </Link>
 
       {/* Nav links — hidden on mobile via CSS */}
@@ -88,19 +88,19 @@ export function Header() {
         {connected && publicKey ? (
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <div style={{
-              background: "rgba(124,58,237,0.1)",
-              border: "1px solid rgba(124,58,237,0.3)",
+              background: "rgba(63,224,160,0.08)",
+              border: "1px solid rgba(63,224,160,0.25)",
               padding: "6px 14px", borderRadius: 8,
-              fontSize: 13, color: "var(--purple-light)", fontFamily: "var(--mono)",
+              fontSize: 13, color: "var(--signal)", fontFamily: "var(--font-mono)",
             }}>
               {fmtAddr(publicKey.toBase58())}
             </div>
             <button
               onClick={disconnect}
               style={{
-                background: "var(--surface-2)", border: "1px solid var(--border)",
-                color: "var(--text-muted)", padding: "6px 12px", borderRadius: 8,
-                fontSize: 12, cursor: "pointer", fontFamily: "Inter, sans-serif",
+                background: "var(--ink-700)", border: "1px solid var(--line)",
+                color: "var(--text-mid)", padding: "6px 12px", borderRadius: 8,
+                fontSize: 12, cursor: "pointer", fontFamily: "var(--font-body)",
               }}
             >
               Disconnect
@@ -110,10 +110,10 @@ export function Header() {
           <button
             onClick={() => setVisible(true)}
             style={{
-              background: "var(--purple)",
-              color: "#fff", border: "none", padding: "9px 20px",
+              background: "var(--signal)",
+              color: "var(--ink-900)", border: "none", padding: "9px 20px",
               borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: "pointer",
-              fontFamily: "Inter, sans-serif", whiteSpace: "nowrap",
+              fontFamily: "var(--font-body)", whiteSpace: "nowrap",
             }}
           >
             Connect
