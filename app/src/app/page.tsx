@@ -7,6 +7,7 @@ import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useApys } from "@/hooks/useApys";
 import { useYieldPilot } from "@/hooks/useYieldPilot";
+import { useSolPrice } from "@/hooks/useSolPrice";
 import { fmt } from "@/components/ui";
 import { RoutingVisual } from "@/components/dashboard/RoutingVisual";
 import { FleetRadar } from "@/components/dashboard/FleetRadar";
@@ -74,14 +75,14 @@ export default function Home() {
   const best = routable[0];
   const runnerUp = routable[1];
 
-  // Real TVL across both vaults, normalized to a USD-equivalent for the
-  // headline number (SOL vault priced at a rough $150/SOL estimate — good
-  // enough for a directional "total value" figure, not a precise oracle read).
+  // Real TVL across both vaults, normalized to a USD-equivalent using a live
+  // SOL/USD price (via useSolPrice), not a hardcoded guess.
+  const solPrice = useSolPrice();
   const usdcVault = vaults.find(v => v.name.toUpperCase().includes("USDC"));
   const solVault = vaults.find(v => v.name.toUpperCase().includes("SOL"));
   const totalDepositedUsd =
     (usdcVault ? usdcVault.totalDeposits / 1e6 : 0) +
-    (solVault ? (solVault.totalDeposits / 1e9) * 150 : 0);
+    (solVault ? (solVault.totalDeposits / 1e9) * solPrice : 0);
   const routableApys = apys.filter(a => ROUTABLE_PROTOCOL_IDS.has(a.protocolId));
   const blendedApy = routableApys.length
     ? routableApys.reduce((s, a) => s + a.apyPercent, 0) / routableApys.length
