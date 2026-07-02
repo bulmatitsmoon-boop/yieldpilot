@@ -4,10 +4,17 @@ import { useApys } from "@/hooks/useApys";
 import { Card, CardHeader, fmt } from "@/components/ui";
 import { useState, useEffect } from "react";
 
+// Only these protocol IDs have an on-chain deploy_to_* instruction — everything
+// else (Drift, and LP pools when opted in) must never get a "ROUTING HERE" /
+// "20% HERE" badge, regardless of riskScore or APY rank.
+const ROUTABLE_PROTOCOL_IDS = new Set([
+  "kamino-usdc", "kamino-sol", "marinade-sol", "jito-sol", "solend-usdc",
+]);
+
 const RISK_LABEL: Record<number, { label: string; color: string }> = {
-  1: { label: "Low",    color: "var(--green)" },
-  2: { label: "Medium", color: "var(--yellow)" },
-  3: { label: "High",   color: "var(--red)" },
+  1: { label: "Low",    color: "var(--signal)" },
+  2: { label: "Medium", color: "var(--warn)" },
+  3: { label: "High",   color: "var(--loss)" },
 };
 
 function fmtTvl(usd: number) {
@@ -30,40 +37,42 @@ function ILRiskModal({ onAccept, onDecline }: { onAccept: () => void; onDecline:
       <div
         onClick={e => e.stopPropagation()}
         style={{
-          background: "var(--surface)", border: "1px solid var(--border)",
+          background: "var(--ink-800)", border: "1px solid var(--line)",
           borderRadius: 16, maxWidth: 520, width: "100%", padding: "36px 32px",
           margin: "auto", maxHeight: "90vh", overflowY: "auto",
         }}
       >
         <div style={{
           display: "inline-flex", alignItems: "center", gap: 8,
-          background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.25)",
+          background: "rgba(255,107,107,0.1)", border: "1px solid rgba(255,107,107,0.25)",
           borderRadius: 6, padding: "5px 12px", marginBottom: 20,
         }}>
-          <div style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--red)" }} />
-          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--red)", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+          <div style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--loss)" }} />
+          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--loss)", letterSpacing: "0.08em", textTransform: "uppercase", fontFamily: "var(--font-mono)" }}>
             Risk Disclosure
           </span>
         </div>
 
-        <h2 style={{ fontSize: 20, fontWeight: 800, letterSpacing: "-0.02em", marginBottom: 8 }}>
+        <h2 style={{ fontFamily: "var(--font-display)", fontSize: 20, fontWeight: 700, letterSpacing: "-0.015em", marginBottom: 8, color: "var(--text-hi)" }}>
           LP pools carry impermanent loss risk.
         </h2>
-        <p style={{ fontSize: 14, color: "var(--text-muted)", lineHeight: 1.7, marginBottom: 20 }}>
+        <p style={{ fontSize: 14, color: "var(--text-mid)", lineHeight: 1.7, marginBottom: 20 }}>
           Raydium and Orca are <strong>liquidity provider (LP) pools</strong>, not lending protocols.
-          When you provide liquidity to these pools, your returns depend on trading fees — but you
-          also take on <strong>impermanent loss (IL)</strong>.
+          They are shown here as reference market data only — YieldPilot has no on-chain instruction
+          that can route your funds there, and never will unless that changes. When you provide liquidity
+          to pools like these, your returns depend on trading fees — but you also take on
+          <strong> impermanent loss (IL)</strong>.
         </p>
 
         <div style={{
-          background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.15)",
+          background: "rgba(255,107,107,0.06)", border: "1px solid rgba(255,107,107,0.15)",
           borderRadius: 10, padding: "18px 20px", marginBottom: 20,
         }}>
-          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10, color: "var(--text)" }}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10, color: "var(--text-hi)" }}>
             What is impermanent loss?
           </div>
-          <p style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.7, margin: 0 }}>
-            LP pools hold two assets (e.g. USDC + SOL) in a fixed ratio. If SOL's price moves
+          <p style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.7, margin: 0 }}>
+            LP pools hold two assets (e.g. USDC + SOL) in a fixed ratio. If SOL&apos;s price moves
             significantly up or down while your funds are in the pool, you end up with <em>less value</em> than
             if you had simply held the assets. This loss can <strong>exceed the trading fees earned</strong>,
             meaning you lose principal — not just yield.
@@ -71,22 +80,22 @@ function ILRiskModal({ onAccept, onDecline }: { onAccept: () => void; onDecline:
         </div>
 
         <div style={{
-          background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.15)",
+          background: "rgba(255,107,107,0.06)", border: "1px solid rgba(255,107,107,0.15)",
           borderRadius: 10, padding: "18px 20px", marginBottom: 28,
         }}>
-          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10, color: "var(--text)" }}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10, color: "var(--text-hi)" }}>
             Why this is toggled off by default
           </div>
-          <ul style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.8, margin: 0, paddingLeft: 18 }}>
+          <ul style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.8, margin: 0, paddingLeft: 18 }}>
             <li>IL is not a fee — it is a structural price risk on your principal</li>
             <li>High displayed APYs (20-25%) can still result in a net loss during volatile markets</li>
-            <li>YieldPilot's default protocols are lending and liquid staking — no price exposure to two assets</li>
+            <li>YieldPilot&apos;s vault only ever routes to lending and liquid staking — no price exposure to two assets</li>
           </ul>
         </div>
 
-        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)", marginBottom: 20 }}>
-          By enabling LP pools you acknowledge you understand and accept impermanent loss risk,
-          and that your principal is not protected from price-driven losses.
+        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-mid)", marginBottom: 20 }}>
+          This only affects what&apos;s displayed on this page — it does not change where your deposited
+          funds are routed.
         </div>
 
         <div style={{ display: "flex", gap: 12 }}>
@@ -94,8 +103,9 @@ function ILRiskModal({ onAccept, onDecline }: { onAccept: () => void; onDecline:
             onClick={onDecline}
             style={{
               flex: 1, padding: "12px 0", borderRadius: 8,
-              border: "1px solid var(--border)", background: "transparent",
-              color: "var(--text-muted)", fontSize: 13, fontWeight: 600, cursor: "pointer",
+              border: "1px solid var(--line)", background: "transparent",
+              color: "var(--text-mid)", fontSize: 13, fontWeight: 600, cursor: "pointer",
+              fontFamily: "var(--font-body)",
             }}
           >
             Cancel
@@ -104,11 +114,12 @@ function ILRiskModal({ onAccept, onDecline }: { onAccept: () => void; onDecline:
             onClick={onAccept}
             style={{
               flex: 1, padding: "12px 0", borderRadius: 8,
-              border: "1px solid rgba(239,68,68,0.4)", background: "rgba(239,68,68,0.1)",
-              color: "var(--red)", fontSize: 13, fontWeight: 700, cursor: "pointer",
+              border: "1px solid rgba(255,107,107,0.4)", background: "rgba(255,107,107,0.1)",
+              color: "var(--loss)", fontSize: 13, fontWeight: 700, cursor: "pointer",
+              fontFamily: "var(--font-body)",
             }}
           >
-            I understand — enable LP pools
+            I understand — show LP pools
           </button>
         </div>
       </div>
@@ -123,19 +134,15 @@ export default function ApysPage() {
   const [lpEnabled, setLpEnabled] = useState(false);
   const [showModal, setShowModal] = useState(false);
 
-  // Persist LP toggle preference across page reloads
   useEffect(() => {
     setLpEnabled(localStorage.getItem("yp_lp_enabled") === "true");
   }, []);
 
   function handleToggle() {
     if (lpEnabled) {
-      // Turning off — no confirmation needed
-      const next = false;
-      setLpEnabled(next);
+      setLpEnabled(false);
       localStorage.setItem("yp_lp_enabled", "false");
     } else {
-      // Turning on — show disclosure modal first
       setShowModal(true);
     }
   }
@@ -154,37 +161,37 @@ export default function ApysPage() {
     .filter(p => lpEnabled || !LP_PROTOCOL_IDS.has(p.protocolId))
     .sort((a, b) => b.apyBps - a.apyBps);
 
-  // Safe protocols only (for ROUTING HERE label — never point to LP)
-  const safeProtocols = sorted.filter(p => !LP_PROTOCOL_IDS.has(p.protocolId));
+  // Only real routable protocols are eligible for ROUTING HERE / 20% HERE —
+  // riskScore alone isn't a safe proxy (Drift is riskScore 1 but not routable).
+  const routableSorted = sorted.filter(p => ROUTABLE_PROTOCOL_IDS.has(p.protocolId));
 
   return (
     <>
       {showModal && <ILRiskModal onAccept={acceptLpRisk} onDecline={declineLpRisk} />}
 
-      <div style={{ maxWidth: 860, margin: "0 auto", padding: "48px 24px 80px" }}>
+      <div style={{ maxWidth: 860, margin: "0 auto", padding: "48px 24px 80px", position: "relative" }}>
+        <div className="aurora-bg" />
 
-        {/* Page header */}
-        <div style={{ marginBottom: 48 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-dim)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 10 }}>
+        <div style={{ marginBottom: 48, position: "relative", zIndex: 1 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-low)", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 10, fontFamily: "var(--font-mono)" }}>
             Live data
           </div>
-          <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: "-0.025em", marginBottom: 4 }}>
+          <h1 style={{ fontFamily: "var(--font-display)", fontSize: 28, fontWeight: 700, letterSpacing: "-0.015em", marginBottom: 4, color: "var(--text-hi)" }}>
             Protocol rates.
           </h1>
-          <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: "-0.025em", color: "var(--purple-light)", marginBottom: 20 }}>
+          <h1 style={{ fontFamily: "var(--font-display)", fontSize: 28, fontWeight: 700, letterSpacing: "-0.015em", color: "var(--signal)", marginBottom: 20 }}>
             Updated every 15 minutes.
           </h1>
-          <p style={{ color: "var(--text-muted)", fontSize: 14, lineHeight: 1.7, maxWidth: 520 }}>
+          <p style={{ color: "var(--text-mid)", fontSize: 14, lineHeight: 1.7, maxWidth: 520 }}>
             YieldPilot monitors these protocols continuously. 80% of vault assets route to the top rate,
             20% stays in the runner-up. Rates update every 15 minutes; display refreshes every 60 seconds.
           </p>
         </div>
 
-        {/* Routing logic strip */}
         <div style={{
           display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-          gap: 1, background: "var(--border)", borderRadius: 10, overflow: "hidden",
-          marginBottom: 40, border: "1px solid var(--border)",
+          gap: 1, background: "var(--line)", borderRadius: 10, overflow: "hidden",
+          marginBottom: 40, border: "1px solid var(--line)", position: "relative", zIndex: 1,
         }}>
           {[
             { label: "Primary allocation", value: "80%" },
@@ -192,62 +199,60 @@ export default function ApysPage() {
             { label: "Rebalance threshold", value: "0.5%" },
             { label: "Rebalance cycle", value: "15 min" },
           ].map(({ label, value }) => (
-            <div key={label} style={{ background: "var(--surface)", padding: "20px 24px" }}>
-              <div style={{ fontFamily: "var(--mono)", fontSize: 22, fontWeight: 700, color: "var(--text)", marginBottom: 4 }}>
+            <div key={label} style={{ background: "var(--ink-800)", padding: "20px 24px" }}>
+              <div className="mono-num" style={{ fontSize: 22, fontWeight: 500, color: "var(--text-hi)", marginBottom: 4 }}>
                 {value}
               </div>
-              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{label}</div>
+              <div style={{ fontSize: 12, color: "var(--text-mid)" }}>{label}</div>
             </div>
           ))}
         </div>
 
-        {/* APY table */}
+        <div style={{ position: "relative", zIndex: 1 }}>
         <Card>
           <CardHeader
             title="All Protocols"
             right={
               <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-                {/* LP toggle */}
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500 }}>LP pools</span>
+                  <span style={{ fontSize: 12, color: "var(--text-mid)", fontWeight: 500 }}>LP pools</span>
                   <button
                     onClick={handleToggle}
                     aria-label="Toggle LP pools"
                     style={{
                       position: "relative", width: 40, height: 22, borderRadius: 11,
-                      border: lpEnabled ? "1px solid rgba(239,68,68,0.5)" : "1px solid var(--border)",
-                      background: lpEnabled ? "rgba(239,68,68,0.15)" : "var(--bg)",
+                      border: lpEnabled ? "1px solid rgba(255,107,107,0.5)" : "1px solid var(--line)",
+                      background: lpEnabled ? "rgba(255,107,107,0.15)" : "var(--ink-900)",
                       cursor: "pointer", flexShrink: 0, transition: "all 0.2s",
                     }}
                   >
                     <span style={{
                       position: "absolute", top: 3, left: lpEnabled ? 20 : 3,
                       width: 14, height: 14, borderRadius: "50%",
-                      background: lpEnabled ? "var(--red)" : "var(--text-dim)",
+                      background: lpEnabled ? "var(--loss)" : "var(--text-low)",
                       transition: "left 0.2s",
                     }} />
                   </button>
                   {lpEnabled && (
                     <span style={{
-                      fontSize: 10, fontWeight: 700, color: "var(--red)",
-                      background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.25)",
-                      borderRadius: 4, padding: "2px 6px", letterSpacing: "0.06em",
+                      fontSize: 10, fontWeight: 700, color: "var(--loss)",
+                      background: "rgba(255,107,107,0.1)", border: "1px solid rgba(255,107,107,0.25)",
+                      borderRadius: 4, padding: "2px 6px", letterSpacing: "0.06em", fontFamily: "var(--font-mono)",
                     }}>IL RISK</span>
                   )}
                 </div>
-                <span style={{ color: "var(--text-muted)", fontSize: 12 }}>
-                  {loading ? "Refreshing..." : "Auto-refreshes every 60s"}
+                <span style={{ color: "var(--text-mid)", fontSize: 12, fontFamily: "var(--font-mono)" }}>
+                  {loading ? "Refreshing…" : "Auto-refreshes every 60s"}
                 </span>
               </div>
             }
           />
 
-          {/* Table header */}
           <div style={{
             display: "grid", gridTemplateColumns: "1fr 80px 100px 80px 80px",
-            padding: "8px 20px", borderBottom: "1px solid var(--border)",
-            color: "var(--text-dim)", fontSize: 11, fontWeight: 700,
-            textTransform: "uppercase", letterSpacing: "0.06em",
+            padding: "8px 20px", borderBottom: "1px solid var(--line)",
+            color: "var(--text-low)", fontSize: 11, fontWeight: 600,
+            textTransform: "uppercase", letterSpacing: "0.06em", fontFamily: "var(--font-mono)",
           }}>
             <span>Protocol</span>
             <span style={{ textAlign: "right" }}>Asset</span>
@@ -257,59 +262,67 @@ export default function ApysPage() {
           </div>
 
           {sorted.map((p, i) => {
-            const risk = RISK_LABEL[p.riskScore] || { label: "—", color: "var(--text-muted)" };
+            const risk = RISK_LABEL[p.riskScore] || { label: "—", color: "var(--text-mid)" };
             const isLP = LP_PROTOCOL_IDS.has(p.protocolId);
-            // ROUTING HERE / 20% HERE badges only apply to safe protocols
-            const safeRank = safeProtocols.findIndex(s => s.protocolId === p.protocolId);
+            const isRoutable = ROUTABLE_PROTOCOL_IDS.has(p.protocolId);
+            const routableRank = routableSorted.findIndex(s => s.protocolId === p.protocolId);
             return (
               <div key={p.protocolId} style={{
                 display: "grid", gridTemplateColumns: "1fr 80px 100px 80px 80px",
-                padding: "14px 20px", borderTop: i === 0 ? "none" : "1px solid var(--border)",
+                padding: "14px 20px", borderTop: i === 0 ? "none" : "1px solid var(--line)",
                 alignItems: "center",
-                background: safeRank === 0 ? "rgba(124,58,237,0.04)" : isLP ? "rgba(239,68,68,0.03)" : "var(--surface)",
+                background: routableRank === 0 ? "rgba(63,224,160,0.04)" : isLP ? "rgba(255,107,107,0.03)" : "var(--ink-800)",
                 opacity: isLP ? 0.85 : 1,
               }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   <div style={{
                     width: 7, height: 7, borderRadius: "50%",
-                    background: isLP ? "var(--red)" : (p.color || "var(--purple)"), flexShrink: 0,
+                    background: isLP ? "var(--loss)" : (p.color || "var(--signal)"), flexShrink: 0,
                   }} />
-                  <span style={{ fontWeight: 600, fontSize: 13 }}>{p.name}</span>
-                  {safeRank === 0 && (
+                  <span style={{ fontWeight: 600, fontSize: 13, color: "var(--text-hi)" }}>{p.name}</span>
+                  {routableRank === 0 && (
                     <span style={{
                       fontSize: 10, fontWeight: 700, padding: "2px 7px",
-                      borderRadius: 4, background: "rgba(52,211,153,0.12)",
-                      color: "var(--green)", border: "1px solid rgba(52,211,153,0.2)",
-                      letterSpacing: "0.04em",
+                      borderRadius: 4, background: "rgba(63,224,160,0.12)",
+                      color: "var(--signal)", border: "1px solid rgba(63,224,160,0.25)",
+                      letterSpacing: "0.04em", fontFamily: "var(--font-mono)",
                     }}>ROUTING HERE</span>
                   )}
-                  {safeRank === 1 && (
+                  {routableRank === 1 && (
                     <span style={{
                       fontSize: 10, fontWeight: 700, padding: "2px 7px",
-                      borderRadius: 4, background: "rgba(124,58,237,0.1)",
-                      color: "var(--purple-light)", border: "1px solid rgba(124,58,237,0.2)",
-                      letterSpacing: "0.04em",
+                      borderRadius: 4, background: "rgba(34,179,126,0.1)",
+                      color: "var(--signal-dim)", border: "1px solid rgba(34,179,126,0.2)",
+                      letterSpacing: "0.04em", fontFamily: "var(--font-mono)",
                     }}>20% HERE</span>
                   )}
                   {isLP && (
                     <span style={{
                       fontSize: 10, fontWeight: 700, padding: "2px 7px",
-                      borderRadius: 4, background: "rgba(239,68,68,0.1)",
-                      color: "var(--red)", border: "1px solid rgba(239,68,68,0.2)",
-                      letterSpacing: "0.04em",
+                      borderRadius: 4, background: "rgba(255,107,107,0.1)",
+                      color: "var(--loss)", border: "1px solid rgba(255,107,107,0.2)",
+                      letterSpacing: "0.04em", fontFamily: "var(--font-mono)",
                     }}>LP · IL RISK</span>
                   )}
+                  {!isLP && !isRoutable && (
+                    <span style={{
+                      fontSize: 10, fontWeight: 700, padding: "2px 7px",
+                      borderRadius: 4, background: "rgba(154,168,184,0.08)",
+                      color: "var(--text-mid)", border: "1px solid var(--line)",
+                      letterSpacing: "0.04em", fontFamily: "var(--font-mono)",
+                    }}>REFERENCE ONLY</span>
+                  )}
                 </div>
-                <span style={{ textAlign: "right", color: "var(--text-muted)", fontSize: 12, fontFamily: "var(--mono)" }}>
+                <span className="mono-num" style={{ textAlign: "right", color: "var(--text-mid)", fontSize: 12 }}>
                   {p.asset}
                 </span>
-                <span style={{
-                  textAlign: "right", fontFamily: "var(--mono)", fontWeight: 700, fontSize: 15,
-                  color: isLP ? "var(--red)" : (safeRank === 0 ? "var(--green)" : "var(--text)"),
+                <span className="mono-num" style={{
+                  textAlign: "right", fontWeight: 500, fontSize: 15,
+                  color: isLP ? "var(--loss)" : (routableRank === 0 ? "var(--signal)" : "var(--text-hi)"),
                 }}>
                   {fmt(p.apyPercent)}%
                 </span>
-                <span style={{ textAlign: "right", color: "var(--text-muted)", fontSize: 12, fontFamily: "var(--mono)" }}>
+                <span className="mono-num" style={{ textAlign: "right", color: "var(--text-mid)", fontSize: 12 }}>
                   {fmtTvl(p.tvlUsd)}
                 </span>
                 <span style={{ textAlign: "right", fontSize: 12, fontWeight: 600, color: risk.color }}>
@@ -319,20 +332,21 @@ export default function ApysPage() {
             );
           })}
         </Card>
+        </div>
 
         {lpEnabled && (
           <div style={{
             marginTop: 16, padding: "14px 18px", borderRadius: 10,
-            background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.2)",
-            fontSize: 13, color: "var(--red)", lineHeight: 1.6,
+            background: "rgba(255,107,107,0.06)", border: "1px solid rgba(255,107,107,0.2)",
+            fontSize: 13, color: "var(--loss)", lineHeight: 1.6, position: "relative", zIndex: 1,
           }}>
-            <strong>LP pools are enabled.</strong> Raydium and Orca carry impermanent loss risk —
-            your principal is not protected from price-driven losses. YieldPilot will still route
-            80/20 to safe lending protocols unless you are opted into LP routing via vault settings.
+            <strong>LP pools are shown for reference.</strong> Raydium and Orca carry impermanent loss risk —
+            your principal is not protected from price-driven losses. YieldPilot has no on-chain path to route
+            your deposited funds there.
           </div>
         )}
 
-        <p style={{ marginTop: 20, color: "var(--text-dim)", fontSize: 11, lineHeight: 1.65 }}>
+        <p style={{ marginTop: 20, color: "var(--text-low)", fontSize: 11, lineHeight: 1.65, position: "relative", zIndex: 1 }}>
           APYs are estimates based on recent protocol data and may change. Past performance does not
           guarantee future returns. LP pool APYs displayed when enabled are gross of impermanent loss.
           Always do your own research before depositing.
