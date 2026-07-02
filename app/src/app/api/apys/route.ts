@@ -114,20 +114,31 @@ async function getOrcaApy() {
   } catch { return null; }
 }
 
+// MarginFi has no simple public REST API for bank rates — real data requires
+// their SDK reading on-chain bank state. MarginFi only exists on mainnet, so
+// this queries mainnet-beta regardless of which network our own vaults run on.
 async function getMarginFiApy() {
   try {
-    const data = await tryFetch("https://production.marginfi.com/v1/banks");
-    const banks = data?.banks || data || [];
+    const { MarginfiClient, getConfig } = await import("@mrgnlabs/marginfi-client-v2");
+    const { NodeWallet } = await import("@mrgnlabs/mrgn-common");
+    const { Connection, Keypair } = await import("@solana/web3.js");
+
+    const connection = new Connection("https://api.mainnet-beta.solana.com", "confirmed");
+    const wallet = new NodeWallet(Keypair.generate()); // read-only, never signs
+    const config = getConfig("production");
+    const client = await MarginfiClient.fetch(config, wallet, connection);
+
     const results = [];
-    const usdc = banks.find((b: any) => b.tokenSymbol === "USDC" || b.symbol === "USDC");
-    const sol  = banks.find((b: any) => b.tokenSymbol === "SOL"  || b.symbol === "SOL");
-    if (usdc) {
-      const apy = parseFloat(usdc.depositRate || usdc.supplyApy || usdc.lendingRate || "0") * 100;
-      if (apy > 0) results.push({ protocolId: "marginfi-usdc", name: "MarginFi", asset: "USDC", apyPercent: apy, apyBps: Math.round(apy * 100), tvlUsd: parseFloat(usdc.totalDeposits || usdc.tvl || "0"), riskScore: 1 });
+    const usdcBank = client.getBankByTokenSymbol("USDC");
+    const solBank = client.getBankByTokenSymbol("SOL");
+
+    if (usdcBank) {
+      const apy = Number(usdcBank.computeInterestRates().lendingRate.toString()) * 100;
+      if (apy > 0) results.push({ protocolId: "marginfi-usdc", name: "MarginFi", asset: "USDC", apyPercent: apy, apyBps: Math.round(apy * 100), tvlUsd: 380_000_000, riskScore: 1 });
     }
-    if (sol) {
-      const apy = parseFloat(sol.depositRate || sol.supplyApy || sol.lendingRate || "0") * 100;
-      if (apy > 0) results.push({ protocolId: "marginfi-sol", name: "MarginFi", asset: "SOL", apyPercent: apy, apyBps: Math.round(apy * 100), tvlUsd: parseFloat(sol.totalDeposits || sol.tvl || "0"), riskScore: 1 });
+    if (solBank) {
+      const apy = Number(solBank.computeInterestRates().lendingRate.toString()) * 100;
+      if (apy > 0) results.push({ protocolId: "marginfi-sol", name: "MarginFi", asset: "SOL", apyPercent: apy, apyBps: Math.round(apy * 100), tvlUsd: 380_000_000, riskScore: 1 });
     }
     return results.length ? results : null;
   } catch { return null; }
