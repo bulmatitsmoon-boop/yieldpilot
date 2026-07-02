@@ -10,6 +10,8 @@ import { useYieldPilot } from "@/hooks/useYieldPilot";
 import { fmt } from "@/components/ui";
 import { RoutingVisual } from "@/components/dashboard/RoutingVisual";
 import { FleetRadar } from "@/components/dashboard/FleetRadar";
+import { HowItWorksStepper } from "@/components/dashboard/HowItWorksStepper";
+import { TierLadder } from "@/components/dashboard/TierLadder";
 
 // Only these protocol IDs are actually routable on-chain (have a deploy_to_* instruction).
 // Everything else (e.g. Drift) is informational-only and must never show "ROUTING HERE"
@@ -57,7 +59,15 @@ export default function Home() {
   const { setVisible } = useWalletModal();
   const { connected } = useWallet();
   const { apys } = useApys();
-  const { vaults } = useYieldPilot(VAULT_ADDRESSES);
+  const { vaults, userGateBalance } = useYieldPilot(VAULT_ADDRESSES);
+
+  // Real tier for the connected wallet — null (no highlight) if disconnected.
+  const primaryVault = vaults[0];
+  const yourTierKey = !connected || !primaryVault ? null
+    : userGateBalance >= (primaryVault.goldThreshold ?? 1_000_000) ? "gold"
+    : userGateBalance >= (primaryVault.silverThreshold ?? 100_000) ? "silver"
+    : userGateBalance >= (primaryVault.bronzeThreshold ?? 10_000) ? "bronze"
+    : "standard";
 
   const routable = apys.filter(a => ROUTABLE_PROTOCOL_IDS.has(a.protocolId)).sort((a, b) => b.apyBps - a.apyBps);
   const informational = apys.filter(a => !ROUTABLE_PROTOCOL_IDS.has(a.protocolId));
@@ -248,39 +258,11 @@ export default function Home() {
         {/* ── Fleet Radar (real, live data — no fabricated numbers) ──────────── */}
         <FleetRadar totalDeposited={totalDepositedUsd} blendedApy={blendedApy} />
 
-        {/* ── How it works ──────────────────────────────────────────────────── */}
+        {/* ── How it works (animated stepper) ─────────────────────────────────── */}
         <div style={{ marginBottom: 96, position: "relative", zIndex: 1 }}>
           <Reveal>
-            <div style={{ marginBottom: 40 }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-low)", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 10, fontFamily: "var(--font-mono)" }}>
-                How it works
-              </div>
-              <h2 style={{ fontFamily: "var(--font-display)", fontSize: 26, fontWeight: 700, letterSpacing: "-0.015em", color: "var(--text-hi)" }}>
-                Set it up once. The protocol handles the rest.
-              </h2>
-            </div>
+            <HowItWorksStepper />
           </Reveal>
-
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", border: "1px solid var(--line)", borderRadius: 12, overflow: "hidden" }}>
-            {[
-              { n: "01", title: "Deposit", desc: "Deposit USDC or SOL into the vault. You receive shares proportional to your stake in the pool." },
-              { n: "02", title: "Monitor", desc: "The keeper bot fetches live APY data from every supported protocol on a 15-minute cycle." },
-              { n: "03", title: "Route", desc: "80% of the vault moves to the highest-yielding protocol. 20% stays in the runner-up." },
-              { n: "04", title: "Compound", desc: "Yield is harvested and reinvested every hour. Your position grows without any action from you." },
-            ].map(({ n, title, desc }, i) => (
-              <Reveal key={n} delay={i * 0.06}>
-                <div style={{
-                  padding: "32px 28px", height: "100%",
-                  background: "var(--ink-800)",
-                  borderLeft: i > 0 ? "1px solid var(--line)" : "none",
-                }}>
-                  <div className="mono-num" style={{ fontSize: 11, color: "var(--text-low)", marginBottom: 20, fontWeight: 500 }}>{n}</div>
-                  <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 10, color: "var(--text-hi)" }}>{title}</div>
-                  <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.65 }}>{desc}</div>
-                </div>
-              </Reveal>
-            ))}
-          </div>
         </div>
 
         {/* ── Live rates ─────────────────────────────────────────────────────── */}
@@ -381,44 +363,11 @@ export default function Home() {
           </Reveal>
         </div>
 
-        {/* ── Access tiers ──────────────────────────────────────────────────── */}
+        {/* ── Access tiers (animated ladder) ──────────────────────────────────── */}
         <div style={{ marginBottom: 96, position: "relative", zIndex: 1 }}>
           <Reveal>
-            <div style={{ marginBottom: 40 }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-low)", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 10, fontFamily: "var(--font-mono)" }}>
-                Access tiers
-              </div>
-              <h2 style={{ fontFamily: "var(--font-display)", fontSize: 26, fontWeight: 700, letterSpacing: "-0.015em", color: "var(--text-hi)", marginBottom: 16 }}>
-                Hold $YPILOT. Pay less on profit.
-              </h2>
-              <p style={{ color: "var(--text-mid)", fontSize: 14, maxWidth: 520, lineHeight: 1.65 }}>
-                Performance fees are tiered by how much $YPILOT you hold — Gold pays nothing, Silver pays 3%,
-                Bronze pays 6%. No $YPILOT at all still works, at the 9% standard rate. No deposit fees, no
-                management fees, ever. Fees apply to profit only — never your principal.
-              </p>
-            </div>
+            <TierLadder yourTierKey={yourTierKey} />
           </Reveal>
-
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
-            {[
-              { tier: "Gold", color: "var(--token)", req: "1,000,000+ $YPILOT", fee: "0%" },
-              { tier: "Silver", color: "var(--text-mid)", req: "100,000+ $YPILOT", fee: "3%" },
-              { tier: "Bronze", color: "#CD7F32", req: "10,000+ $YPILOT", fee: "6%" },
-              { tier: "Standard", color: "var(--text-low)", req: "No $YPILOT required", fee: "9%" },
-            ].map(({ tier, color, req, fee }, i) => (
-              <Reveal key={tier} delay={i * 0.05}>
-                <div style={{
-                  border: "1px solid var(--line)", borderRadius: 12, padding: "22px 20px",
-                  background: "var(--ink-800)", height: "100%",
-                }}>
-                  <div style={{ fontWeight: 700, fontSize: 15, color, marginBottom: 4, fontFamily: "var(--font-display)" }}>{tier}</div>
-                  <div style={{ fontSize: 12, color: "var(--text-low)", marginBottom: 16 }}>{req}</div>
-                  <div className="mono-num" style={{ fontSize: 28, fontWeight: 500, color: "var(--text-hi)", marginBottom: 2 }}>{fee}</div>
-                  <div style={{ fontSize: 11, color: "var(--text-low)" }}>on profit at exit — no deposit cap, ever</div>
-                </div>
-              </Reveal>
-            ))}
-          </div>
         </div>
 
         {/* ── Transparency ──────────────────────────────────────────────────── */}
