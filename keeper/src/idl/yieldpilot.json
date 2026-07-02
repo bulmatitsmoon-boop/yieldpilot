@@ -513,7 +513,8 @@
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
         {
-          "name": "stake_pool_program"
+          "name": "stake_pool_program",
+          "address": "SPoo1Ku8WFXoNDMHPsrGSTSG1Y47rzgn41SLUNakuHy"
         }
       ],
       "args": [
@@ -1521,7 +1522,8 @@
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
         {
-          "name": "stake_pool_program"
+          "name": "stake_pool_program",
+          "address": "SPoo1Ku8WFXoNDMHPsrGSTSG1Y47rzgn41SLUNakuHy"
         }
       ],
       "args": [
