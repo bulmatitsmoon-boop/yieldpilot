@@ -314,7 +314,7 @@ pub mod yieldpilot {
                 _ => STANDARD_FEE_BPS,
             }
         } else {
-            STANDARD_FEE_BPS // no gate token active — everyone is Tier 4el rate when gating is disabled
+            STANDARD_FEE_BPS // no gate token active — standard fee rate when gating is disabled
         };
 
         // Whitelist check: waive fee entirely for whitelisted wallets
