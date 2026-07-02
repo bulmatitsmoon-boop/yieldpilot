@@ -373,11 +373,11 @@ export default function Home() {
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
             {[
-              { tier: "Gold", color: "var(--token)", req: "1,000,000+ $YPILOT", cap: "Unlimited", fee: "0%" },
-              { tier: "Silver", color: "var(--text-mid)", req: "100,000+ $YPILOT", cap: "$10,000", fee: "3%" },
-              { tier: "Bronze", color: "#CD7F32", req: "10,000+ $YPILOT", cap: "$1,000", fee: "6%" },
-              { tier: "Standard", color: "var(--text-low)", req: "No $YPILOT required", cap: "Unlimited", fee: "9%" },
-            ].map(({ tier, color, req, cap, fee }, i) => (
+              { tier: "Gold", color: "var(--token)", req: "1,000,000+ $YPILOT", fee: "0%" },
+              { tier: "Silver", color: "var(--text-mid)", req: "100,000+ $YPILOT", fee: "3%" },
+              { tier: "Bronze", color: "#CD7F32", req: "10,000+ $YPILOT", fee: "6%" },
+              { tier: "Standard", color: "var(--text-low)", req: "No $YPILOT required", fee: "9%" },
+            ].map(({ tier, color, req, fee }, i) => (
               <Reveal key={tier} delay={i * 0.05}>
                 <div style={{
                   border: "1px solid var(--line)", borderRadius: 12, padding: "22px 20px",
@@ -386,10 +386,7 @@ export default function Home() {
                   <div style={{ fontWeight: 700, fontSize: 15, color, marginBottom: 4, fontFamily: "var(--font-display)" }}>{tier}</div>
                   <div style={{ fontSize: 12, color: "var(--text-low)", marginBottom: 16 }}>{req}</div>
                   <div className="mono-num" style={{ fontSize: 28, fontWeight: 500, color: "var(--text-hi)", marginBottom: 2 }}>{fee}</div>
-                  <div style={{ fontSize: 11, color: "var(--text-low)", marginBottom: 14 }}>on profit at exit</div>
-                  <div style={{ fontSize: 12, color: "var(--text-mid)", borderTop: "1px solid var(--line)", paddingTop: 12 }}>
-                    Cap: <span className="mono-num">{cap}</span>
-                  </div>
+                  <div style={{ fontSize: 11, color: "var(--text-low)" }}>on profit at exit — no deposit cap, ever</div>
                 </div>
               </Reveal>
             ))}
