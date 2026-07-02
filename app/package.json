@@ -11,8 +11,6 @@
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.31.0",
-    "@mrgnlabs/marginfi-client-v2": "^6.4.2",
-    "@mrgnlabs/mrgn-common": "^2.0.7",
     "@solana/spl-token": "^0.4.6",
     "@solana/wallet-adapter-backpack": "^0.1.13",
     "@solana/wallet-adapter-base": "^0.9.23",
