@@ -14,13 +14,13 @@ export function Footer() {
           {/* Brand */}
           <div style={{ maxWidth: 260 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-              <div style={{ width: 28, height: 28, borderRadius: 7, background: "var(--purple)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <div style={{ width: 28, height: 28, borderRadius: 7, background: "var(--ink-700)", border: "1px solid var(--line)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                   <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                    <path d="M7 1L12 4V10L7 13L2 10V4L7 1Z" stroke="#fff" strokeWidth="1.5" strokeLinejoin="round"/>
-                    <circle cx="7" cy="7" r="2" fill="#fff"/>
+                    <path d="M7 1L12 4V10L7 13L2 10V4L7 1Z" stroke="var(--signal)" strokeWidth="1.5" strokeLinejoin="round"/>
+                    <circle cx="7" cy="7" r="2" fill="var(--signal)"/>
                   </svg>
                 </div>
-              <span style={{ fontWeight: 800, fontSize: 15 }}>YieldPilot</span>
+              <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15, color: "var(--text-hi)" }}>YieldPilot</span>
             </div>
             <p style={{ color: "var(--text-muted)", fontSize: 13, lineHeight: 1.6 }}>
               Automated yield optimization on Solana. Non-custodial, transparent, always on.
@@ -31,7 +31,7 @@ export function Footer() {
           <div style={{ display: "flex", gap: 48, flexWrap: "wrap" }}>
             <div>
               <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 12 }}>Product</div>
-              {[["Home", "/"], ["Dashboard", "/dashboard"], ["Live APYs", "/apys"]].map(([label, href]) => (
+              {[["Home", "/"], ["Dashboard", "/dashboard"], ["Live Rates", "/apys"]].map(([label, href]) => (
                 <div key={href} style={{ marginBottom: 8 }}>
                   <Link href={href} style={{ color: "var(--text-muted)", fontSize: 13, textDecoration: "none" }}>{label}</Link>
                 </div>
@@ -61,7 +61,7 @@ export function Footer() {
             © {new Date().getFullYear()} YieldPilot. Not financial advice.
           </p>
           <p style={{ color: "var(--text-dim)", fontSize: 12 }}>
-            Currently on <span style={{ color: "var(--yellow)" }}>Devnet</span> — do not deposit real funds.
+            Currently on <span style={{ color: "var(--warn)" }}>Devnet</span> — do not deposit real funds.
           </p>
         </div>
       </div>
