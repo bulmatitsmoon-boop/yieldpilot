@@ -1,21 +1,23 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-// Force this route to run per-request. Without this, Next.js statically
-// pre-renders it at build time (since the MarginFi SDK call doesn't use the
-// fetch() cache hints the other protocol fetchers do), permanently freezing
-// whatever value happened to resolve during that one build.
-export const dynamic = "force-dynamic";
-
 // All protocols here are lending or liquid staking — no LP impermanent loss risk.
 // Liquid staking exits (Jito, Marinade) go via DEX swap at <0.3% slippage,
 // which the keeper accounts for before deciding to rebalance out of them.
+//
+// MarginFi is intentionally NOT listed here. Their protocol evolved into
+// "Project 0" (a multi-venue prime broker) in late 2025, and their official
+// marginfi-client-v2 SDK (even the latest published version) throws a decode
+// error reading their own current mainnet bank accounts — confirmed via a
+// local reproduction, not a network/config issue on our end. We were also
+// never able to confirm our on-chain deploy_to_marginfi/recall_from_marginfi
+// CPI instructions (built against the original marginfi-v2 layout) still work
+// against their current state. Re-add once we've verified against whatever
+// Project 0 actually exposes for integration.
 
 const COLORS: Record<string, string> = {
   "kamino-usdc":      "#7C3AED",
   "kamino-sol":       "#9F67F5",
-  "marginfi-usdc":    "#F59E0B",
-  "marginfi-sol":     "#F97316",
   "jito-sol":         "#10B981",
   "marinade-sol":     "#06B6D4",
   "drift-sol":        "#14B8A6",
@@ -25,11 +27,9 @@ const COLORS: Record<string, string> = {
 };
 
 const FALLBACK = [
-  { protocolId: "marginfi-usdc",    name: "MarginFi",   asset: "USDC",     apyPercent: 11.40, apyBps: 1140, tvlUsd: 380_000_000,   riskScore: 1 },
   { protocolId: "jito-sol",         name: "Jito",       asset: "SOL",      apyPercent: 8.90,  apyBps:  890, tvlUsd: 2_100_000_000, riskScore: 1 },
   { protocolId: "kamino-usdc",      name: "Kamino",     asset: "USDC",     apyPercent: 8.42,  apyBps:  842, tvlUsd: 412_000_000,   riskScore: 1 },
   { protocolId: "marinade-sol",     name: "Marinade",   asset: "SOL",      apyPercent: 7.21,  apyBps:  721, tvlUsd: 1_230_000_000, riskScore: 1 },
-  { protocolId: "marginfi-sol",     name: "MarginFi",   asset: "SOL",      apyPercent: 7.10,  apyBps:  710, tvlUsd: 380_000_000,   riskScore: 1 },
   { protocolId: "kamino-sol",       name: "Kamino",     asset: "SOL",      apyPercent: 6.20,  apyBps:  620, tvlUsd: 280_000_000,   riskScore: 1 },
   { protocolId: "drift-sol",        name: "Drift",      asset: "SOL",      apyPercent: 5.88,  apyBps:  588, tvlUsd: 220_000_000,   riskScore: 1 },
   { protocolId: "solend-usdc",      name: "Solend",     asset: "USDC",     apyPercent: 5.10,  apyBps:  510, tvlUsd: 95_000_000,    riskScore: 1 },
@@ -120,47 +120,11 @@ async function getOrcaApy() {
   } catch { return null; }
 }
 
-// MarginFi has no simple public REST API for bank rates — real data requires
-// their SDK reading on-chain bank state. MarginFi only exists on mainnet, so
-// this queries mainnet-beta regardless of which network our own vaults run on.
-let lastMarginFiError: string | null = null;
-
-async function getMarginFiApy() {
-  try {
-    const { MarginfiClient, getConfig } = await import("@mrgnlabs/marginfi-client-v2");
-    const { NodeWallet } = await import("@mrgnlabs/mrgn-common");
-    const { Connection, Keypair } = await import("@solana/web3.js");
-
-    const connection = new Connection("https://api.mainnet-beta.solana.com", "confirmed");
-    const wallet = new NodeWallet(Keypair.generate()); // read-only, never signs
-    const config = getConfig("production");
-    const client = await MarginfiClient.fetch(config, wallet, connection);
-
-    const results = [];
-    const usdcBank = client.getBankByTokenSymbol("USDC");
-    const solBank = client.getBankByTokenSymbol("SOL");
-
-    if (usdcBank) {
-      const apy = Number(usdcBank.computeInterestRates().lendingRate.toString()) * 100;
-      if (apy > 0) results.push({ protocolId: "marginfi-usdc", name: "MarginFi", asset: "USDC", apyPercent: apy, apyBps: Math.round(apy * 100), tvlUsd: 380_000_000, riskScore: 1 });
-    }
-    if (solBank) {
-      const apy = Number(solBank.computeInterestRates().lendingRate.toString()) * 100;
-      if (apy > 0) results.push({ protocolId: "marginfi-sol", name: "MarginFi", asset: "SOL", apyPercent: apy, apyBps: Math.round(apy * 100), tvlUsd: 380_000_000, riskScore: 1 });
-    }
-    return results.length ? results : null;
-  } catch (e: any) {
-    lastMarginFiError = e?.message || String(e);
-    return null;
-  }
-}
-
 export async function GET(_req: NextRequest) {
-  const [kaminoData, marinadeData, jitoData, marginfiData, raydiumData, orcaData] = await Promise.all([
+  const [kaminoData, marinadeData, jitoData, raydiumData, orcaData] = await Promise.all([
     getKaminoApy(),
     getMarinadeApy(),
     getJitoApy(),
-    getMarginFiApy(),
     getRaydiumApy(),
     getOrcaApy(),
   ]);
@@ -170,7 +134,6 @@ export async function GET(_req: NextRequest) {
     ...(kaminoData   || []),
     ...(marinadeData || []),
     ...(jitoData     || []),
-    ...(marginfiData || []),
     ...(raydiumData  || []),
     ...(orcaData     || []),
   ].forEach(p => liveMap.set(p.protocolId, p));
@@ -184,9 +147,6 @@ export async function GET(_req: NextRequest) {
   result.sort((a, b) => b.apyBps - a.apyBps);
 
   return NextResponse.json(result, {
-    headers: {
-      "Cache-Control": "s-maxage=60, stale-while-revalidate=120",
-      "X-MarginFi-Debug": lastMarginFiError || "no-error",
-    },
+    headers: { "Cache-Control": "s-maxage=60, stale-while-revalidate=120" },
   });
 }
