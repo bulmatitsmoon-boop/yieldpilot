@@ -34,12 +34,15 @@ export function useApys() {
   };
 }
 
-// Fallback while loading or if API fails
+// Fallback while loading or if API fails.
+// Only protocols the program can actually route to appear as routable (riskScore < 3).
+// Drift is informational-only (no deploy_to_drift instruction exists on-chain) — kept
+// at riskScore 3 so it renders in the "not routable" bucket rather than the live table.
 export const FALLBACK_APYS: ProtocolApy[] = [
-  { protocolId: "kamino-usdc", name: "Kamino", asset: "USDC", apyPercent: 8.42, apyBps: 842, tvlUsd: 412_000_000, riskScore: 1, color: "#7C3AED" },
-  { protocolId: "marinade-sol", name: "Marinade", asset: "SOL", apyPercent: 7.21, apyBps: 721, tvlUsd: 1_230_000_000, riskScore: 1, color: "#06B6D4" },
-  { protocolId: "raydium-usdc-sol", name: "Raydium", asset: "USDC-SOL", apyPercent: 24.7, apyBps: 2470, tvlUsd: 89_000_000, riskScore: 3, color: "#F59E0B" },
-  { protocolId: "drift-sol", name: "Drift", asset: "SOL", apyPercent: 5.88, apyBps: 588, tvlUsd: 220_000_000, riskScore: 1, color: "#10B981" },
-  { protocolId: "orca-usdc-eth", name: "Orca", asset: "USDC-ETH", apyPercent: 18.3, apyBps: 1830, tvlUsd: 67_000_000, riskScore: 3, color: "#EC4899" },
-  { protocolId: "solend-usdt", name: "Solend", asset: "USDT", apyPercent: 6.95, apyBps: 695, tvlUsd: 310_000_000, riskScore: 1, color: "#3B82F6" },
+  { protocolId: "kamino-usdc", name: "Kamino", asset: "USDC", apyPercent: 8.42, apyBps: 842, tvlUsd: 412_000_000, riskScore: 1, color: "#3FE0A0" },
+  { protocolId: "kamino-sol", name: "Kamino", asset: "SOL", apyPercent: 6.20, apyBps: 620, tvlUsd: 280_000_000, riskScore: 1, color: "#3FE0A0" },
+  { protocolId: "marinade-sol", name: "Marinade", asset: "SOL", apyPercent: 7.21, apyBps: 721, tvlUsd: 1_230_000_000, riskScore: 1, color: "#7C5CFF" },
+  { protocolId: "jito-sol", name: "Jito", asset: "SOL", apyPercent: 8.90, apyBps: 890, tvlUsd: 2_100_000_000, riskScore: 1, color: "#F5B84B" },
+  { protocolId: "solend-usdc", name: "Solend", asset: "USDC", apyPercent: 5.10, apyBps: 510, tvlUsd: 95_000_000, riskScore: 1, color: "#9BA8B8" },
+  { protocolId: "drift-sol", name: "Drift", asset: "SOL", apyPercent: 5.88, apyBps: 588, tvlUsd: 220_000_000, riskScore: 3, color: "#5D6B7C" },
 ];
