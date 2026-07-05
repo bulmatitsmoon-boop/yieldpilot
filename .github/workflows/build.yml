@@ -6,6 +6,15 @@ on:
     paths:
       - 'programs/**'
   workflow_dispatch:
+    inputs:
+      network:
+        description: 'Network to deploy to'
+        required: true
+        default: 'devnet'
+        type: choice
+        options:
+          - devnet
+          - mainnet
 
 permissions:
   contents: write
@@ -85,10 +94,18 @@ jobs:
           python3 scripts/decode_deploy_key.py /tmp/deploy-authority.json
 
       - name: Deploy to devnet
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.network == 'devnet'
         env:
           DEVNET_RPC_URL: ${{ secrets.DEVNET_RPC_URL }}
         run: |
           solana program deploy --program-id 8c7Boyk91MWkn5jabf5CnYD8DrG6p4hYm9eDdAAWXEKH --keypair /tmp/deploy-authority.json --url "${DEVNET_RPC_URL}" target/deploy/yieldpilot.so
+
+      - name: Deploy to mainnet
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.network == 'mainnet'
+        env:
+          MAINNET_RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
+        run: |
+          solana program deploy --program-id 8c7Boyk91MWkn5jabf5CnYD8DrG6p4hYm9eDdAAWXEKH --keypair /tmp/deploy-authority.json --url "${MAINNET_RPC_URL}" target/deploy/yieldpilot.so
 
       - name: Clean up keypair
         if: always()
