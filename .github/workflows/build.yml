@@ -61,19 +61,29 @@ jobs:
       - name: Build program binary (does NOT touch program id / keys)
         run: |
           cd programs/yieldpilot
-          cargo-build-sbf --manifest-path Cargo.toml
+          if [ "${{ github.event.inputs.network }}" == "mainnet" ]; then
+            cargo-build-sbf --manifest-path Cargo.toml --features mainnet
+          else
+            cargo-build-sbf --manifest-path Cargo.toml
+          fi
 
       - name: Generate IDL only (does NOT touch program id / keys)
         run: |
           mkdir -p target/idl
-          anchor idl build -o target/idl/yieldpilot.json
+          if [ "${{ github.event.inputs.network }}" == "mainnet" ]; then
+            anchor idl build -o target/idl/yieldpilot.json -- --features mainnet
+          else
+            anchor idl build -o target/idl/yieldpilot.json
+          fi
 
       - name: Sync IDL to app and keeper
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.network == 'devnet'
         run: |
           cp target/idl/yieldpilot.json app/src/idl/yieldpilot.json
           cp target/idl/yieldpilot.json keeper/src/idl/yieldpilot.json
 
       - name: Commit updated IDL
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.network == 'devnet'
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: 'chore: sync IDL from anchor idl build [skip ci]'
@@ -82,8 +92,10 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: yieldpilot-so
-          path: target/deploy/yieldpilot.so
+          name: yieldpilot-so-${{ github.event.inputs.network || 'devnet' }}
+          path: |
+            target/deploy/yieldpilot.so
+            target/idl/yieldpilot.json
           retention-days: 7
 
       - name: Write deploy authority keypair from base58 secret
@@ -100,13 +112,21 @@ jobs:
         run: |
           solana program deploy --program-id 8c7Boyk91MWkn5jabf5CnYD8DrG6p4hYm9eDdAAWXEKH --keypair /tmp/deploy-authority.json --url "${DEVNET_RPC_URL}" target/deploy/yieldpilot.so
 
+      - name: Write mainnet program keypair from base58 secret
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.network == 'mainnet'
+        env:
+          MAINNET_PROGRAM_KEYPAIR: ${{ secrets.MAINNET_PROGRAM_KEYPAIR }}
+        run: |
+          pip3 install --quiet base58
+          python3 scripts/decode_mainnet_program_key.py /tmp/mainnet-program-keypair.json
+
       - name: Deploy to mainnet
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.network == 'mainnet'
         env:
           MAINNET_RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
         run: |
-          solana program deploy --program-id 8c7Boyk91MWkn5jabf5CnYD8DrG6p4hYm9eDdAAWXEKH --keypair /tmp/deploy-authority.json --url "${MAINNET_RPC_URL}" target/deploy/yieldpilot.so
+          solana program deploy --program-id /tmp/mainnet-program-keypair.json --upgrade-authority /tmp/deploy-authority.json --keypair /tmp/deploy-authority.json --url "${MAINNET_RPC_URL}" target/deploy/yieldpilot.so
 
-      - name: Clean up keypair
+      - name: Clean up keypairs
         if: always()
-        run: rm -f /tmp/deploy-authority.json
+        run: rm -f /tmp/deploy-authority.json /tmp/mainnet-program-keypair.json
