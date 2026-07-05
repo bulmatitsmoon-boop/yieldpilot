@@ -13,7 +13,14 @@ use adapters::{
     {AdapterError, ProtocolAdapter, ProtocolKind, assert_state_matches},
 };
 
+// Program ID differs by network — devnet and mainnet are separate deployments
+// with separate addresses (the devnet address was never usable on mainnet;
+// see project memory for why). PDA derivations implicitly use this ID, so it
+// must match whichever address the binary is actually deployed to.
+#[cfg(not(feature = "mainnet"))]
 declare_id!("8c7Boyk91MWkn5jabf5CnYD8DrG6p4hYm9eDdAAWXEKH");
+#[cfg(feature = "mainnet")]
+declare_id!("BvBALz1Rv5Si4ypc1jn84NndN17wkMJa74A4T5ksyQCx");
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
