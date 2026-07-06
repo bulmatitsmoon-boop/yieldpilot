@@ -692,6 +692,7 @@ export class SolanaClient {
             lendingMarket: SOLEND_MAIN_MARKET,
             lendingMarketAuthority,
             pythOracle: SOLEND_USDC_ORACLE,
+            switchboardOracle: SystemProgram.programId,
             tokenProgram: TOKEN_PROGRAM_ID,
             solendProgram: SOLEND_PROGRAM,
           })
@@ -726,6 +727,7 @@ export class SolanaClient {
             lendingMarket: SOLEND_MAIN_MARKET,
             lendingMarketAuthority,
             pythOracle: SOLEND_USDC_ORACLE,
+            switchboardOracle: SystemProgram.programId,
             tokenProgram: TOKEN_PROGRAM_ID,
             solendProgram: SOLEND_PROGRAM,
           })
