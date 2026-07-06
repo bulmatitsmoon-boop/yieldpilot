@@ -65,6 +65,12 @@ pub struct SolendDeposit<'info> {
     /// CHECK: Solend validates
     pub pyth_oracle: AccountInfo<'info>,
 
+    /// Switchboard oracle for refreshing reserve. Pass the System Program ID
+    /// when the reserve has no switchboard oracle configured (verified via
+    /// Solend's public reserve config for the USDC main-pool reserve).
+    /// CHECK: Solend validates
+    pub switchboard_oracle: AccountInfo<'info>,
+
     /// CHECK: clock sysvar
     #[account(address = anchor_lang::solana_program::sysvar::clock::ID)]
     pub clock_sysvar: AccountInfo<'info>,
@@ -117,6 +123,10 @@ pub struct SolendWithdraw<'info> {
     /// CHECK: Solend validates
     pub pyth_oracle: AccountInfo<'info>,
 
+    /// Switchboard oracle — System Program ID when unconfigured (see SolendDeposit).
+    /// CHECK: Solend validates
+    pub switchboard_oracle: AccountInfo<'info>,
+
     /// CHECK: clock
     #[account(address = anchor_lang::solana_program::sysvar::clock::ID)]
     pub clock_sysvar: AccountInfo<'info>,
@@ -141,6 +151,7 @@ pub fn solend_deposit<'info>(
     let refresh_metas = vec![
         AccountMeta::new(*ctx.accounts.reserve.key, false),
         AccountMeta::new_readonly(*ctx.accounts.pyth_oracle.key, false),
+        AccountMeta::new_readonly(*ctx.accounts.switchboard_oracle.key, false),
         AccountMeta::new_readonly(*ctx.accounts.clock_sysvar.key, false),
     ];
     anchor_lang::solana_program::program::invoke(
@@ -152,6 +163,7 @@ pub fn solend_deposit<'info>(
         &[
             ctx.accounts.reserve.clone(),
             ctx.accounts.pyth_oracle.clone(),
+            ctx.accounts.switchboard_oracle.clone(),
             ctx.accounts.clock_sysvar.clone(),
         ],
     )?;
@@ -209,6 +221,7 @@ pub fn solend_withdraw<'info>(
     let refresh_metas = vec![
         AccountMeta::new(*ctx.accounts.reserve.key, false),
         AccountMeta::new_readonly(*ctx.accounts.pyth_oracle.key, false),
+        AccountMeta::new_readonly(*ctx.accounts.switchboard_oracle.key, false),
         AccountMeta::new_readonly(*ctx.accounts.clock_sysvar.key, false),
     ];
     anchor_lang::solana_program::program::invoke(
@@ -220,6 +233,7 @@ pub fn solend_withdraw<'info>(
         &[
             ctx.accounts.reserve.clone(),
             ctx.accounts.pyth_oracle.clone(),
+            ctx.accounts.switchboard_oracle.clone(),
             ctx.accounts.clock_sysvar.clone(),
         ],
     )?;
