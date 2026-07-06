@@ -1,8 +1,13 @@
 use anchor_lang::prelude::*;
+use anchor_lang::system_program::{self, Transfer as SystemTransfer};
 use anchor_spl::{
-    associated_token::AssociatedToken,
-    token::{self, Mint, MintTo, Token, TokenAccount, Transfer, Burn},
+    associated_token::{self, AssociatedToken, Create},
+    token::{self, Mint, MintTo, Token, TokenAccount, Transfer, Burn, CloseAccount, SyncNative},
 };
+
+// WSOL mint — used to recreate the vault's SOL token account after a full
+// unwrap-for-Marinade cycle (see deploy_to_marinade).
+const WSOL_MINT: Pubkey = pubkey!("So11111111111111111111111111111111111111112");
 
 pub mod adapters;
 use adapters::{
@@ -673,18 +678,42 @@ pub mod yieldpilot {
         let vault_key = v.key();
         let seeds: &[&[u8]] = &[b"vault", vault_key.as_ref(), &[v.authority_bump]];
 
+        // ── Unwrap: Marinade's deposit_sol needs NATIVE SOL, but the vault's
+        // idle balance is held as wrapped SOL (an SPL token). SPL Token's
+        // Transfer instruction doesn't move real lamports for any mint
+        // (including native) — only CloseAccount does, and it drains the
+        // WHOLE account. So: close the account entirely (all its lamports
+        // land as native SOL on vault_authority), do the Marinade deposit,
+        // then recreate the same account and re-wrap whatever's left over.
+        // This whole sequence is one atomic instruction — if any step fails,
+        // Solana reverts everything, so there's no possibility of ending up
+        // half-unwrapped.
+        let total_idle = ctx.accounts.vault_token_account.amount;
+        require!(total_idle >= lamports, VaultError::InsufficientIdle);
+        let remainder = total_idle - lamports;
+
+        token::close_account(CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            CloseAccount {
+                account:     ctx.accounts.vault_token_account.to_account_info(),
+                destination: ctx.accounts.vault_authority.to_account_info(),
+                authority:   ctx.accounts.vault_authority.to_account_info(),
+            },
+            &[seeds],
+        ))?;
+
         marinade_deposit(
             CpiContext::new_with_signer(
                 ctx.accounts.marinade_program.to_account_info(),
                 MarinadeDeposit {
                     vault_authority:            ctx.accounts.vault_authority.to_account_info(),
                     marinade_state:             ctx.accounts.marinade_state.to_account_info(),
-                    msol_mint:                  ctx.accounts.msol_mint.clone(),
+                    msol_mint:                  (*ctx.accounts.msol_mint).clone(),
                     liq_pool_sol_leg:           ctx.accounts.liq_pool_sol_leg.to_account_info(),
-                    liq_pool_msol_leg:          ctx.accounts.liq_pool_msol_leg.clone(),
+                    liq_pool_msol_leg:          (*ctx.accounts.liq_pool_msol_leg).clone(),
                     liq_pool_msol_leg_authority:ctx.accounts.liq_pool_msol_leg_authority.to_account_info(),
                     reserve_pda:                ctx.accounts.reserve_pda.to_account_info(),
-                    vault_msol_account:         ctx.accounts.vault_msol_account.clone(),
+                    vault_msol_account:         (*ctx.accounts.vault_msol_account).clone(),
                     msol_mint_authority:        ctx.accounts.msol_mint_authority.to_account_info(),
                     system_program:             ctx.accounts.system_program.clone(),
                     token_program:              ctx.accounts.token_program.clone(),
@@ -695,6 +724,39 @@ pub mod yieldpilot {
             lamports,
             seeds,
         )?;
+
+        // ── Recreate the vault's WSOL account at the same (deterministic ATA)
+        // address, then re-wrap the leftover idle balance into it.
+        associated_token::create(CpiContext::new_with_signer(
+            ctx.accounts.associated_token_program.to_account_info(),
+            Create {
+                payer:            ctx.accounts.vault_authority.to_account_info(),
+                associated_token: ctx.accounts.vault_token_account.to_account_info(),
+                authority:        ctx.accounts.vault_authority.to_account_info(),
+                mint:             ctx.accounts.wsol_mint.to_account_info(),
+                system_program:   ctx.accounts.system_program.to_account_info(),
+                token_program:    ctx.accounts.token_program.to_account_info(),
+            },
+            &[seeds],
+        ))?;
+
+        if remainder > 0 {
+            system_program::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.system_program.to_account_info(),
+                    SystemTransfer {
+                        from: ctx.accounts.vault_authority.to_account_info(),
+                        to:   ctx.accounts.vault_token_account.to_account_info(),
+                    },
+                    &[seeds],
+                ),
+                remainder,
+            )?;
+            token::sync_native(CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                SyncNative { account: ctx.accounts.vault_token_account.to_account_info() },
+            ))?;
+        }
 
         v.protocols[idx].deployed_balance = v.protocols[idx].deployed_balance
             .checked_add(lamports).ok_or(VaultError::MathOverflow)?;
@@ -717,6 +779,12 @@ pub mod yieldpilot {
         let vault_key = v.key();
         let seeds: &[&[u8]] = &[b"vault", vault_key.as_ref(), &[v.authority_bump]];
 
+        // Measure native SOL received by vault_authority across the CPI (the
+        // exact amount depends on Marinade's live exchange rate, not known
+        // in advance) so we know exactly how much to wrap back into the
+        // vault's WSOL account afterward.
+        let lamports_before = ctx.accounts.vault_authority.lamports();
+
         marinade_liquid_unstake(
             CpiContext::new_with_signer(
                 ctx.accounts.marinade_program.to_account_info(),
@@ -738,6 +806,29 @@ pub mod yieldpilot {
             msol_amount,
             seeds,
         )?;
+
+        let received = ctx.accounts.vault_authority.lamports().saturating_sub(lamports_before);
+
+        // ── Wrap the received native SOL back into the vault's WSOL account.
+        // No close/recreate needed here — the account is already open, this
+        // is just topping it up.
+        if received > 0 {
+            system_program::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.system_program.to_account_info(),
+                    SystemTransfer {
+                        from: ctx.accounts.vault_authority.to_account_info(),
+                        to:   ctx.accounts.vault_token_account.to_account_info(),
+                    },
+                    &[seeds],
+                ),
+                received,
+            )?;
+            token::sync_native(CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                SyncNative { account: ctx.accounts.vault_token_account.to_account_info() },
+            ))?;
+        }
 
         v.protocols[idx].deployed_balance = v.protocols[idx].deployed_balance
             .saturating_sub(msol_amount);
@@ -1331,25 +1422,37 @@ pub struct DeployToMarinade<'info> {
     #[account(mut)]
     pub keeper: Signer<'info>,
     #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
-    pub vault: Account<'info, Vault>,
+    pub vault: Box<Account<'info, Vault>>,
     /// CHECK: PDA
     #[account(mut, seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
     pub vault_authority: UncheckedAccount<'info>,
+    /// Vault's wrapped-SOL account. Marinade's deposit_sol requires NATIVE
+    /// SOL, not WSOL — this account gets fully closed (unwrapped to native
+    /// lamports on vault_authority), then recreated at the same address with
+    /// the leftover balance re-wrapped in, all within this one atomic
+    /// instruction. See project memory for why a partial unwrap isn't
+    /// possible (SPL Token's Transfer doesn't move real lamports; only
+    /// CloseAccount does, and it drains the whole account).
+    #[account(mut)]
+    pub vault_token_account: Box<Account<'info, TokenAccount>>,
+    #[account(address = WSOL_MINT)]
+    pub wsol_mint: Box<Account<'info, Mint>>,
     /// CHECK: Marinade validates
     #[account(mut)] pub marinade_state: UncheckedAccount<'info>,
-    #[account(mut)] pub msol_mint: Account<'info, Mint>,
+    #[account(mut)] pub msol_mint: Box<Account<'info, Mint>>,
     /// CHECK: Marinade validates
     #[account(mut)] pub liq_pool_sol_leg: UncheckedAccount<'info>,
-    #[account(mut)] pub liq_pool_msol_leg: Account<'info, TokenAccount>,
+    #[account(mut)] pub liq_pool_msol_leg: Box<Account<'info, TokenAccount>>,
     /// CHECK: Marinade validates
     pub liq_pool_msol_leg_authority: UncheckedAccount<'info>,
     /// CHECK: Marinade validates
     #[account(mut)] pub reserve_pda: UncheckedAccount<'info>,
-    #[account(mut)] pub vault_msol_account: Account<'info, TokenAccount>,
+    #[account(mut)] pub vault_msol_account: Box<Account<'info, TokenAccount>>,
     /// CHECK: Marinade validates
     pub msol_mint_authority: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
     pub token_program:  Program<'info, Token>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
     /// CHECK: address constraint
     #[account(address = adapters::marinade::MARINADE_MAINNET_PROGRAM)]
     pub marinade_program: UncheckedAccount<'info>,
@@ -1364,6 +1467,11 @@ pub struct RecallFromMarinade<'info> {
     /// CHECK: PDA
     #[account(mut, seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
     pub vault_authority: UncheckedAccount<'info>,
+    /// Vault's wrapped-SOL account — native SOL received from Marinade gets
+    /// wrapped back in here (transfer + sync_native), no close/recreate
+    /// needed since we're topping up an already-open account.
+    #[account(mut)]
+    pub vault_token_account: Box<Account<'info, TokenAccount>>,
     /// CHECK: Marinade validates
     #[account(mut)] pub marinade_state: UncheckedAccount<'info>,
     #[account(mut)] pub msol_mint: Box<Account<'info, Mint>>,
