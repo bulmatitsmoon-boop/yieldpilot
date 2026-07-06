@@ -3,6 +3,9 @@ name: Close Mainnet Program
 on:
   workflow_dispatch:
     inputs:
+      program_id:
+        description: 'Mainnet program address to close'
+        required: true
       confirm:
         description: 'Type CONFIRM to actually close the mainnet program (irreversible — permanently burns the address)'
         required: true
@@ -35,7 +38,7 @@ jobs:
         env:
           MAINNET_RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
         run: |
-          solana program close BvBALz1Rv5Si4ypc1jn84NndN17wkMJa74A4T5ksyQCx \
+          solana program close ${{ github.event.inputs.program_id }} \
             --keypair /tmp/deploy-authority.json \
             --url "${MAINNET_RPC_URL}" \
             --bypass-warning
