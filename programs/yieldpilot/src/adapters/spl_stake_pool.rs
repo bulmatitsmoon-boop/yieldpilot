@@ -137,6 +137,10 @@ pub fn spl_stake_pool_deposit<'info>(
     let mut data = vec![DEPOSIT_SOL_TAG];
     data.extend_from_slice(&lamports.to_le_bytes());
 
+    // Real SPL Stake Pool DepositSol takes exactly 10 accounts with no clock sysvar —
+    // an earlier version of this code inserted clock_sysvar here, which shifted
+    // system_program/token_program one slot too late and caused IncorrectProgramId
+    // on mainnet (confirmed live 2026-07-06).
     let metas = vec![
         AccountMeta::new(*ctx.accounts.stake_pool.key, false),
         AccountMeta::new_readonly(*ctx.accounts.withdraw_authority.key, false),
@@ -146,7 +150,6 @@ pub fn spl_stake_pool_deposit<'info>(
         AccountMeta::new(ctx.accounts.manager_fee_account.key(), false),
         AccountMeta::new(ctx.accounts.vault_lst_account.key(), false),   // referral = same as dest
         AccountMeta::new(ctx.accounts.pool_mint.key(), false),
-        AccountMeta::new_readonly(*ctx.accounts.clock_sysvar.key, false),
         AccountMeta::new_readonly(*ctx.accounts.system_program.key, false),
         AccountMeta::new_readonly(*ctx.accounts.token_program.key, false),
     ];
@@ -166,7 +169,6 @@ pub fn spl_stake_pool_deposit<'info>(
             ctx.accounts.manager_fee_account.to_account_info(),
             ctx.accounts.vault_lst_account.to_account_info(),
             ctx.accounts.pool_mint.to_account_info(),
-            ctx.accounts.clock_sysvar.clone(),
             ctx.accounts.system_program.to_account_info(),
             ctx.accounts.token_program.to_account_info(),
         ],
