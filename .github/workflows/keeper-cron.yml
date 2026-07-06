@@ -36,7 +36,7 @@ jobs:
           KEEPER_KEYPAIR_PATH: ./keeper.json
           PROGRAM_ID: BvBALz1Rv5Si4ypc1jn84NndN17wkMJa74A4T5ksyQCx
           VAULT_ADDRESSES: AborKLCjKvPzdXLBshAtbRbdnsGfmk5joXUxFFEZKMi1,EZBEWAm75JsX3MwnB1fbutx7EiyFgkhZUhLTdJ9Nxkc
-          IDL_PATH: ../idl/yieldpilot.mainnet.json
+          IDL_PATH: idl/yieldpilot.mainnet.json
           KAMINO_API_URL: https://api.kamino.finance
           MARINADE_API_URL: https://api.marinade.finance
 
