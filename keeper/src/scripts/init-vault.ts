@@ -40,27 +40,32 @@ import os from "os";
 const USDC_MINT  = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
 const WSOL_MINT  = new PublicKey("So11111111111111111111111111111111111111112");
 
+// Kamino USDC — verified against solanaClient.ts (reserve.collateral.mintPubkey), 2026-07
 const KAMINO_USDC_RESERVE         = new PublicKey("D6q6wuQSrifJKZYpR1M8R4YawnLDtDsMmWM1NbBmgJ59");
-const KAMINO_USDC_COLLATERAL_MINT = new PublicKey("FzMDnMHYkEMFU6JHZX2BHPJ6L4PZkLEpRXFcbGMGaPS");
-const KAMINO_SOL_RESERVE          = new PublicKey("d4A2prbA2whesmvHaL88BH6Ewn5N4bTSU2Ze8P6Bc4Q");
-const KAMINO_SOL_COLLATERAL_MINT  = new PublicKey("2UywZrUdyqs5vDchy7fKQJKau2RVyuzBev2XKGPDSiX1");
+const KAMINO_USDC_COLLATERAL_MINT = new PublicKey("B8V6WVjPxW1UGwVDfxH2d2r8SyT4cqn7dQRK6XneVa7D");
+
 const MSOL_MINT    = new PublicKey("mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So");
 const JITOSOL_MINT = new PublicKey("J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn");
 const JITO_POOL    = new PublicKey("Jito4APyf642JPZPx3hGc6WWJ8zPKtRbRs4P815Awbb");
-const MARGINFI_USDC_BANK = new PublicKey("2s37akK2eyBbp8DZgCm7RtsaEz8eJP3Nxd4urLHQv7yB");
-const MARINADE_STATE     = new PublicKey("8szGkuLTAux9XMgZ2vtY39jVSowEcpBfFfD8hXSEqdGC");
+const MARINADE_STATE = new PublicKey("8szGkuLTAux9XMgZ2vtY39jVSowEcpBfFfD8hXSEqdGC");
+
+// Solend USDC — matches SOLEND_* constants in keeper/src/solanaClient.ts
+const SOLEND_USDC_RESERVE         = new PublicKey("BgxfHJDzm44T7XG68MYKx7YisTjZu73tVovyZSjJMpmw");
+const SOLEND_USDC_COLLATERAL_MINT = new PublicKey("993dVFL2uXWYeoXuEBFXR4BijeXdTv4s6BzsCjJZuwqk");
 
 // ─── Protocol definitions ─────────────────────────────────────────────────────
 
 interface ProtocolDef {
   label: string;
-  kind: number;           // 0=Kamino-style lending, 1=Marinade-style liquid stake
+  kind: number;           // 0=lending-style, 1=liquid-stake-style
   externalState: PublicKey;
   receiptMint: PublicKey;
   targetBps: number;
 }
 
-// USDC vault: 80% Kamino USDC, 20% MarginFi USDC
+// USDC vault: 80% Kamino USDC, 20% Solend USDC
+// (MarginFi dropped — its deploy/recall CPI was removed from the on-chain program;
+// the keeper has no handler for a "marginfi-usdc" label, see solanaClient.ts executeRebalance)
 const USDC_PROTOCOLS: ProtocolDef[] = [
   {
     label: "kamino-usdc",
@@ -70,10 +75,10 @@ const USDC_PROTOCOLS: ProtocolDef[] = [
     targetBps: 8000,
   },
   {
-    label: "marginfi-usdc",
+    label: "solend-usdc",
     kind: 0,
-    externalState: MARGINFI_USDC_BANK,
-    receiptMint: USDC_MINT, // MarginFi tracks position internally, no separate receipt token
+    externalState: SOLEND_USDC_RESERVE,
+    receiptMint: SOLEND_USDC_COLLATERAL_MINT,
     targetBps: 2000,
   },
 ];
@@ -144,7 +149,7 @@ async function main() {
   const provider  = new anchor.AnchorProvider(connection, wallet, { commitment: "confirmed" });
   anchor.setProvider(provider);
 
-  const idlPath = path.resolve(__dirname, "../idl/yieldpilot.json");
+  const idlPath = path.resolve(__dirname, process.env.IDL_PATH || "../idl/yieldpilot.json");
   const idl     = JSON.parse(fs.readFileSync(idlPath, "utf8"));
   const program  = new anchor.Program(idl, provider);
 
