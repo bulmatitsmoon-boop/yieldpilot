@@ -144,7 +144,7 @@ export class SolanaClient {
     anchor.setProvider(provider);
 
     // Load IDL
-    const idlPath = path.resolve(__dirname, "idl/yieldpilot.json");
+    const idlPath = path.resolve(__dirname, process.env.IDL_PATH || "idl/yieldpilot.json");
     const idl = JSON.parse(fs.readFileSync(idlPath, "utf8"));
     this.program = new anchor.Program(idl, provider);
 
