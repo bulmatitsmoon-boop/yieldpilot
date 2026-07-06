@@ -278,6 +278,23 @@
           }
         },
         {
+          "name": "vault_token_account",
+          "docs": [
+            "Vault's wrapped-SOL account. Marinade's deposit_sol requires NATIVE",
+            "SOL, not WSOL — this account gets fully closed (unwrapped to native",
+            "lamports on vault_authority), then recreated at the same address with",
+            "the leftover balance re-wrapped in, all within this one atomic",
+            "instruction. See project memory for why a partial unwrap isn't",
+            "possible (SPL Token's Transfer doesn't move real lamports; only",
+            "CloseAccount does, and it drains the whole account)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "wsol_mint",
+          "address": "So11111111111111111111111111111111111111112"
+        },
+        {
           "name": "marinade_state",
           "writable": true
         },
@@ -314,6 +331,10 @@
         {
           "name": "token_program",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
         },
         {
           "name": "marinade_program",
@@ -1205,6 +1226,15 @@
               }
             ]
           }
+        },
+        {
+          "name": "vault_token_account",
+          "docs": [
+            "Vault's wrapped-SOL account — native SOL received from Marinade gets",
+            "wrapped back in here (transfer + sync_native), no close/recreate",
+            "needed since we're topping up an already-open account."
+          ],
+          "writable": true
         },
         {
           "name": "marinade_state",
