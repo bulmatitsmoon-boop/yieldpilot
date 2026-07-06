@@ -1,0 +1,46 @@
+name: Keeper Cron
+
+on:
+  schedule:
+    - cron: "*/45 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  run-keeper:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: keeper/package-lock.json
+
+      - name: Install dependencies
+        working-directory: keeper
+        run: npm ci
+
+      - name: Write keeper keypair
+        working-directory: keeper
+        run: echo "$KEEPER_KEYPAIR_JSON" > keeper.json
+        env:
+          KEEPER_KEYPAIR_JSON: ${{ secrets.KEEPER_KEYPAIR_JSON }}
+
+      - name: Run single keeper cycle
+        working-directory: keeper
+        run: npx ts-node src/run_once.ts
+        env:
+          RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
+          KEEPER_KEYPAIR_PATH: ./keeper.json
+          PROGRAM_ID: BvBALz1Rv5Si4ypc1jn84NndN17wkMJa74A4T5ksyQCx
+          VAULT_ADDRESSES: AborKLCjKvPzdXLBshAtbRbdnsGfmk5joXUxFFEZKMi1,EZBEWAm75JsX3MwnB1fbutx7EiyFgkhZUhLTdJ9Nxkc
+          IDL_PATH: ../idl/yieldpilot.mainnet.json
+          KAMINO_API_URL: https://api.kamino.finance
+          MARINADE_API_URL: https://api.marinade.finance
+
+      - name: Clean up keeper keypair
+        if: always()
+        working-directory: keeper
+        run: rm -f keeper.json
