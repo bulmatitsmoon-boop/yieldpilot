@@ -972,6 +972,7 @@ pub mod yieldpilot {
                     lending_market:           ctx.accounts.lending_market.to_account_info(),
                     lending_market_authority: ctx.accounts.lending_market_authority.to_account_info(),
                     pyth_oracle:              ctx.accounts.pyth_oracle.to_account_info(),
+                    switchboard_oracle:       ctx.accounts.switchboard_oracle.to_account_info(),
                     clock_sysvar:             ctx.accounts.clock_sysvar.to_account_info(),
                     token_program:            ctx.accounts.token_program.clone(),
                     solend_program:           ctx.accounts.solend_program.to_account_info(),
@@ -1015,6 +1016,7 @@ pub mod yieldpilot {
                     lending_market:           ctx.accounts.lending_market.to_account_info(),
                     lending_market_authority: ctx.accounts.lending_market_authority.to_account_info(),
                     pyth_oracle:              ctx.accounts.pyth_oracle.to_account_info(),
+                    switchboard_oracle:       ctx.accounts.switchboard_oracle.to_account_info(),
                     clock_sysvar:             ctx.accounts.clock_sysvar.to_account_info(),
                     token_program:            ctx.accounts.token_program.clone(),
                     solend_program:           ctx.accounts.solend_program.to_account_info(),
@@ -1579,6 +1581,8 @@ pub struct DeployToSolend<'info> {
     pub lending_market_authority: UncheckedAccount<'info>,
     /// CHECK: Pyth oracle
     pub pyth_oracle: UncheckedAccount<'info>,
+    /// CHECK: Switchboard oracle — System Program ID when reserve has none configured
+    pub switchboard_oracle: UncheckedAccount<'info>,
     /// CHECK: clock
     #[account(address = anchor_lang::solana_program::sysvar::clock::ID)]
     pub clock_sysvar: UncheckedAccount<'info>,
@@ -1610,6 +1614,8 @@ pub struct RecallFromSolend<'info> {
     pub lending_market_authority: UncheckedAccount<'info>,
     /// CHECK: Pyth oracle
     pub pyth_oracle: UncheckedAccount<'info>,
+    /// CHECK: Switchboard oracle — System Program ID when reserve has none configured
+    pub switchboard_oracle: UncheckedAccount<'info>,
     /// CHECK: clock
     #[account(address = anchor_lang::solana_program::sysvar::clock::ID)]
     pub clock_sysvar: UncheckedAccount<'info>,
