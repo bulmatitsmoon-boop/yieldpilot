@@ -209,6 +209,8 @@ export class SolanaClient {
       { mint: KAMINO_USDC_COLLATERAL_MINT,   label: "kUSDC (Kamino USDC collateral)" },
       { mint: KAMINO_SOL_COLLATERAL_MINT,    label: "kSOL (Kamino SOL collateral)" },
       { mint: MSOL_MINT,                     label: "mSOL (Marinade)" },
+      { mint: JITOSOL_MINT,                  label: "jitoSOL (Jito)" },
+      { mint: SOLEND_USDC_COLLATERAL_MINT,   label: "cUSDC (Solend collateral)" },
     ];
 
     const tx = new Transaction();
