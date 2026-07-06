@@ -5,6 +5,10 @@ on:
     branches: [main]
     paths:
       - 'programs/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'programs/**'
   workflow_dispatch:
     inputs:
       network:
@@ -77,13 +81,13 @@ jobs:
           fi
 
       - name: Sync IDL to app and keeper
-        if: github.event_name != 'workflow_dispatch' || github.event.inputs.network == 'devnet'
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.network == 'devnet')
         run: |
           cp target/idl/yieldpilot.json app/src/idl/yieldpilot.json
           cp target/idl/yieldpilot.json keeper/src/idl/yieldpilot.json
 
       - name: Commit updated IDL
-        if: github.event_name != 'workflow_dispatch' || github.event.inputs.network == 'devnet'
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.network == 'devnet')
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: 'chore: sync IDL from anchor idl build [skip ci]'
@@ -106,7 +110,7 @@ jobs:
           python3 scripts/decode_deploy_key.py /tmp/deploy-authority.json
 
       - name: Deploy to devnet
-        if: github.event_name != 'workflow_dispatch' || github.event.inputs.network == 'devnet'
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.network == 'devnet')
         env:
           DEVNET_RPC_URL: ${{ secrets.DEVNET_RPC_URL }}
         run: |
