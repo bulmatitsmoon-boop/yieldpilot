@@ -519,6 +519,9 @@
           "name": "pyth_oracle"
         },
         {
+          "name": "switchboard_oracle"
+        },
+        {
           "name": "clock_sysvar",
           "address": "SysvarC1ock11111111111111111111111111111111"
         },
@@ -1437,6 +1440,9 @@
         },
         {
           "name": "pyth_oracle"
+        },
+        {
+          "name": "switchboard_oracle"
         },
         {
           "name": "clock_sysvar",
