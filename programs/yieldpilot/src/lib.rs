@@ -1255,7 +1255,6 @@ pub struct RemoveFromWhitelist<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(wallet: Pubkey)]
 pub struct DeployToKamino<'info> {
     #[account(mut)]
     pub keeper: Signer<'info>,
