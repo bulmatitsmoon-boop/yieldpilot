@@ -1,0 +1,43 @@
+name: Close Mainnet Program
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type CONFIRM to actually close the mainnet program (irreversible — permanently burns the address)'
+        required: true
+
+jobs:
+  close:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Abort unless explicitly confirmed
+        if: github.event.inputs.confirm != 'CONFIRM'
+        run: |
+          echo "Confirmation text did not match 'CONFIRM' — aborting."
+          exit 1
+
+      - name: Install Solana CLI
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+
+      - name: Write deploy authority keypair from base58 secret
+        env:
+          SOLANA_DEPLOY_KEY: ${{ secrets.SOLANA_DEPLOY_KEY }}
+        run: |
+          pip3 install --quiet base58
+          python3 scripts/decode_deploy_key.py /tmp/deploy-authority.json
+
+      - name: Close mainnet program
+        env:
+          MAINNET_RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
+        run: |
+          solana program close BvBALz1Rv5Si4ypc1jn84NndN17wkMJa74A4T5ksyQCx \
+            --keypair /tmp/deploy-authority.json \
+            --url "${MAINNET_RPC_URL}" \
+            --bypass-warning
+
+      - name: Clean up keypair
+        if: always()
+        run: rm -f /tmp/deploy-authority.json
