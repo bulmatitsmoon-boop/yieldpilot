@@ -25,7 +25,7 @@ use adapters::{
 #[cfg(not(feature = "mainnet"))]
 declare_id!("8c7Boyk91MWkn5jabf5CnYD8DrG6p4hYm9eDdAAWXEKH");
 #[cfg(feature = "mainnet")]
-declare_id!("BvBALz1Rv5Si4ypc1jn84NndN17wkMJa74A4T5ksyQCx");
+declare_id!("3cBtxxYxhG5pHyZQUiLsNzhckFqsVCeKn8yiuJAm78TB");
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
