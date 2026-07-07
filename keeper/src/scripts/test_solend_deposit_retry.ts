@@ -28,12 +28,17 @@ async function main() {
   const usdcVault = "5heGDKagzMLe9tEvLBBwPjURRzrSxENywAJifm3pRifC";
   const vaultPubkey = new PublicKey(usdcVault);
 
+  console.log("Fetching vault state...");
   const vault = await client.fetchVault(usdcVault);
+  console.log("Vault fetched. protocol_count:", vault.protocolCount ?? (vault.protocols as any[]).length);
   const solendIdx = (vault.protocols as any[]).findIndex((p: any) => Buffer.from(p.label).toString().startsWith("solend-usdc"));
+  console.log("solendIdx:", solendIdx);
   if (solendIdx === -1) throw new Error("solend-usdc protocol not registered on this vault");
 
   const vaultAuthority = client.getVaultAuthority(vaultPubkey, vault.authorityBump);
+  console.log("vaultAuthority:", vaultAuthority.toBase58());
   const vaultCollateralAccount = getAssociatedTokenAddressSync(SOLEND_USDC_COLLATERAL_MINT, vaultAuthority, true);
+  console.log("vaultCollateralAccount:", vaultCollateralAccount.toBase58());
   const [lendingMarketAuthority] = PublicKey.findProgramAddressSync(
     [SOLEND_MAIN_MARKET.toBuffer()],
     SOLEND_PROGRAM
@@ -72,4 +77,7 @@ async function main() {
   }
 }
 
-main().catch(() => process.exit(1));
+main().catch((err: any) => {
+  console.error("Unhandled error:", err.stack ?? err.message ?? err);
+  process.exit(1);
+});
