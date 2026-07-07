@@ -80,18 +80,31 @@ jobs:
             anchor idl build -o target/idl/yieldpilot.json
           fi
 
-      - name: Sync IDL to app and keeper
+      - name: Sync IDL to app and keeper (devnet)
         if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.network == 'devnet')
         run: |
           cp target/idl/yieldpilot.json app/src/idl/yieldpilot.json
           cp target/idl/yieldpilot.json keeper/src/idl/yieldpilot.json
 
-      - name: Commit updated IDL
+      - name: Sync IDL to app and keeper (mainnet)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.network == 'mainnet'
+        run: |
+          cp target/idl/yieldpilot.json app/src/idl/yieldpilot.mainnet.json
+          cp target/idl/yieldpilot.json keeper/src/idl/yieldpilot.mainnet.json
+
+      - name: Commit updated IDL (devnet)
         if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.network == 'devnet')
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: 'chore: sync IDL from anchor idl build [skip ci]'
           file_pattern: 'app/src/idl/yieldpilot.json keeper/src/idl/yieldpilot.json'
+
+      - name: Commit updated IDL (mainnet)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.network == 'mainnet'
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: 'chore: sync mainnet IDL from anchor idl build [skip ci]'
+          file_pattern: 'app/src/idl/yieldpilot.mainnet.json keeper/src/idl/yieldpilot.mainnet.json'
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
