@@ -37,12 +37,7 @@ jobs:
           SOLANA_DEPLOY_KEY: ${{ secrets.SOLANA_DEPLOY_KEY }}
         run: |
           pip3 install --quiet base58
-          python3 -c "
-import base58, json, os
-secret = base58.b58decode(os.environ['SOLANA_DEPLOY_KEY'])
-with open('admin.json', 'w') as f:
-    json.dump(list(secret), f)
-"
+          python3 ../scripts/decode_deploy_key.py admin.json
 
       - name: Write keeper keypair
         working-directory: keeper
