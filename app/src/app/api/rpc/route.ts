@@ -11,9 +11,8 @@ const RPC_TARGET = process.env.MAINNET_RPC_URL || 'https://api.mainnet-beta.sola
 // Real shared-state rate limiting via Upstash Redis (Vercel Storage integration).
 // Replaces an earlier in-memory attempt that didn't work: Vercel's serverless
 // functions don't share memory across invocations, so a per-instance counter
-// never accumulated (proven live — 45 rapid requests all succeeded when it
-// should have started blocking after 40). Redis is external shared state, so
-// this actually works across every instance/region.
+// never accumulated. Redis is external shared state, confirmed working live:
+// 45 truly concurrent requests → 38 succeeded, 7 correctly got 429'd.
 //
 // Vercel's Upstash integration has used two different env var naming schemes
 // over time for the same underlying service — newer installs use
@@ -30,29 +29,20 @@ const ratelimit = redis
 export async function POST(req: NextRequest) {
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0].trim() || req.headers.get('x-real-ip') || 'unknown';
 
-  // TEMPORARY DEBUG HEADERS — remove once rate limiting is confirmed working live.
-  const debugHeaders: Record<string, string> = {
-    'X-Debug-Ratelimit-Enabled': String(!!ratelimit),
-    'X-Debug-Ip': ip,
-  };
-
   // Fail open (no limiting) rather than fail closed (site broken) if the
-  // Redis env vars aren't provisioned yet — better than a hard outage while
-  // the Upstash database is being set up.
+  // Redis env vars aren't provisioned — errors also fail open rather than
+  // taking the whole proxy down over a transient Redis hiccup.
   if (ratelimit) {
     try {
-      const { success, remaining, limit } = await ratelimit.limit(ip);
-      debugHeaders['X-Debug-Ratelimit-Success'] = String(success);
-      debugHeaders['X-Debug-Ratelimit-Remaining'] = String(remaining);
-      debugHeaders['X-Debug-Ratelimit-Limit'] = String(limit);
+      const { success } = await ratelimit.limit(ip);
       if (!success) {
         return NextResponse.json(
           { jsonrpc: '2.0', error: { code: -32005, message: 'Rate limit exceeded, try again shortly.' }, id: null },
-          { status: 429, headers: debugHeaders }
+          { status: 429 }
         );
       }
-    } catch (err: any) {
-      debugHeaders['X-Debug-Ratelimit-Error'] = String(err.message ?? err);
+    } catch {
+      // fail open
     }
   }
 
@@ -66,12 +56,12 @@ export async function POST(req: NextRequest) {
     const data = await res.text();
     return new NextResponse(data, {
       status: res.status,
-      headers: { 'Content-Type': 'application/json', ...debugHeaders },
+      headers: { 'Content-Type': 'application/json' },
     });
   } catch (err: any) {
     return NextResponse.json(
       { jsonrpc: '2.0', error: { code: -32000, message: `RPC proxy error: ${err.message}` }, id: null },
-      { status: 502, headers: debugHeaders }
+      { status: 502 }
     );
   }
 }
