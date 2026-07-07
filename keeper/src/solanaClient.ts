@@ -33,6 +33,7 @@ const KAMINO_SOL_RESERVE = new PublicKey("d4A2prbA2whesmvHaL88BH6Ewn5N4bTSU2Ze8P
 const KAMINO_SOL_LIQUIDITY_SUPPLY = new PublicKey("GafNuUXj9rxGLn4y79dPu6MHSuPWeJR6UtTWuexpGh3U"); // verified: 347k SOL balance
 const KAMINO_SOL_COLLATERAL_MINT = new PublicKey("2UywZrUdyqs5vDchy7fKQJKau2RVyuzBev2XKGPDSiX1"); // verified: mintAuth=KaminoMarketAuth
 const KAMINO_SOL_COLLATERAL_SUPPLY = new PublicKey("8NXMyRD91p3nof61BTkJvrfpGTASHygz1cUvc3HvwyGS"); // verified from reserve.collateral.supplyVault
+const KAMINO_SCOPE_PRICES = new PublicKey("3t4JZcueEzTbVP6kLxXrL3VpWx45jDer4eqysweBchNH"); // Scope price feed used by both USDC and SOL reserves
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Marinade mainnet constants
@@ -346,7 +347,7 @@ export class SolanaClient {
     vaultAddress: string,
     protocolIndex: number,
     amount: anchor.BN,
-    oracleAccounts: PublicKey[] = []
+    oracleAccounts: PublicKey[] = [KAMINO_PROGRAM_ID, KAMINO_PROGRAM_ID, KAMINO_PROGRAM_ID, KAMINO_SCOPE_PRICES]
   ): Promise<string | null> {
     const vaultPubkey = new PublicKey(vaultAddress);
     const vault = await this.fetchVault(vaultAddress);
@@ -388,7 +389,7 @@ export class SolanaClient {
     vaultAddress: string,
     protocolIndex: number,
     collateralAmount: anchor.BN,
-    oracleAccounts: PublicKey[] = []
+    oracleAccounts: PublicKey[] = [KAMINO_PROGRAM_ID, KAMINO_PROGRAM_ID, KAMINO_PROGRAM_ID, KAMINO_SCOPE_PRICES]
   ): Promise<string | null> {
     const vaultPubkey = new PublicKey(vaultAddress);
     const vault = await this.fetchVault(vaultAddress);
@@ -432,7 +433,7 @@ export class SolanaClient {
     vaultAddress: string,
     protocolIndex: number,
     amount: anchor.BN,
-    oracleAccounts: PublicKey[] = []
+    oracleAccounts: PublicKey[] = [KAMINO_PROGRAM_ID, KAMINO_PROGRAM_ID, KAMINO_PROGRAM_ID, KAMINO_SCOPE_PRICES]
   ): Promise<string | null> {
     const vaultPubkey = new PublicKey(vaultAddress);
     const vault = await this.fetchVault(vaultAddress);
@@ -475,7 +476,7 @@ export class SolanaClient {
     vaultAddress: string,
     protocolIndex: number,
     collateralAmount: anchor.BN,
-    oracleAccounts: PublicKey[] = []
+    oracleAccounts: PublicKey[] = [KAMINO_PROGRAM_ID, KAMINO_PROGRAM_ID, KAMINO_PROGRAM_ID, KAMINO_SCOPE_PRICES]
   ): Promise<string | null> {
     const vaultPubkey = new PublicKey(vaultAddress);
     const vault = await this.fetchVault(vaultAddress);
