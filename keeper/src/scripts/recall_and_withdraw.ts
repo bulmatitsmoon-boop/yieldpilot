@@ -55,31 +55,41 @@ async function main() {
   const marinadeProtocol = solVault.protocols[marinadeIdx];
 
   if (marinadeProtocol.deployedBalance.toNumber() > 0) {
-    const [vaultAuthority] = PublicKey.findProgramAddressSync([Buffer.from("vault"), solVaultPda.toBuffer()], programId);
-    const vaultMsolAccount = getAssociatedTokenAddressSync(MSOL_MINT, vaultAuthority, true);
-    const msolBal = await connection.getTokenAccountBalance(vaultMsolAccount);
-    const msolAmount = new anchor.BN(msolBal.value.amount);
-    console.log("Recalling from Marinade, mSOL amount:", msolAmount.toString());
+    // KNOWN BUG on this deployed (round-3) program: recall_from_marinade's on-chain
+    // liquid_unstake discriminator is wrong (fixed in source, but this program predates
+    // the fix and can't be upgraded — see project memory). This will always fail here.
+    // We attempt it anyway (in case a future redeploy of this same program ID ever fixes
+    // it) but don't let the failure block withdrawing the rest of the vault's funds.
+    try {
+      const [vaultAuthority] = PublicKey.findProgramAddressSync([Buffer.from("vault"), solVaultPda.toBuffer()], programId);
+      const vaultMsolAccount = getAssociatedTokenAddressSync(MSOL_MINT, vaultAuthority, true);
+      const msolBal = await connection.getTokenAccountBalance(vaultMsolAccount);
+      const msolAmount = new anchor.BN(msolBal.value.amount);
+      console.log("Recalling from Marinade, mSOL amount:", msolAmount.toString());
 
-    const sig = await keeperProgram.methods
-      .recallFromMarinade(marinadeIdx, msolAmount)
-      .accounts({
-        keeper: keeper.publicKey,
-        vault: solVaultPda,
-        vaultAuthority,
-        vaultTokenAccount: solVault.vaultTokenAccount,
-        marinadeState: MARINADE_STATE,
-        msolMint: MSOL_MINT,
-        liqPoolSolLeg: MARINADE_LIQ_POOL_SOL_LEG,
-        liqPoolMsolLeg: MARINADE_LIQ_POOL_MSOL_LEG,
-        treasuryMsolAccount: MARINADE_TREASURY_MSOL,
-        vaultMsolAccount,
-        systemProgram: anchor.web3.SystemProgram.programId,
-        tokenProgram: TOKEN_PROGRAM_ID,
-        marinadeProgram: MARINADE_PROGRAM,
-      } as any)
-      .rpc();
-    console.log("Recall from Marinade OK. Tx:", sig);
+      const sig = await keeperProgram.methods
+        .recallFromMarinade(marinadeIdx, msolAmount)
+        .accounts({
+          keeper: keeper.publicKey,
+          vault: solVaultPda,
+          vaultAuthority,
+          vaultTokenAccount: solVault.vaultTokenAccount,
+          marinadeState: MARINADE_STATE,
+          msolMint: MSOL_MINT,
+          liqPoolSolLeg: MARINADE_LIQ_POOL_SOL_LEG,
+          liqPoolMsolLeg: MARINADE_LIQ_POOL_MSOL_LEG,
+          treasuryMsolAccount: MARINADE_TREASURY_MSOL,
+          vaultMsolAccount,
+          systemProgram: anchor.web3.SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          marinadeProgram: MARINADE_PROGRAM,
+        } as any)
+        .rpc();
+      console.log("Recall from Marinade OK. Tx:", sig);
+    } catch (err: any) {
+      console.log("Recall from Marinade failed as expected (known bug on this deployed program):", err.message ?? err);
+      console.log("Continuing to withdraw the rest of the vault's funds.");
+    }
   } else {
     console.log("Nothing deployed to Marinade, skipping recall.");
   }
