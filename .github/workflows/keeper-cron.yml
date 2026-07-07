@@ -35,7 +35,7 @@ jobs:
           RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
           KEEPER_KEYPAIR_PATH: ./keeper.json
           PROGRAM_ID: CVJrJGoKjseTJqiFGctssYde3pLAnPaRZtjAaKXd8pWk
-          VAULT_ADDRESSES: C5DYzmGnQ1avDENSNNyrJrZLxG2XXNggPrZqLzuKmoUw,3izsbbZfney3ep9Fd8nBHxvAgJCp5XmkGfYs55mP5mty
+          VAULT_ADDRESSES: 5heGDKagzMLe9tEvLBBwPjURRzrSxENywAJifm3pRifC,3UB19cUZFjNf4jhJxZBpxFZd56m3H68JJJaRtBamyKWK
           IDL_PATH: idl/yieldpilot.mainnet.json
           KAMINO_API_URL: https://api.kamino.finance
           MARINADE_API_URL: https://api.marinade.finance
