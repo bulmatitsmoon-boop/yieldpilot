@@ -1,0 +1,66 @@
+name: Withdraw Round 3 Vault Funds
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type CONFIRM to recall + withdraw all funds from both round-3 vaults'
+        required: true
+
+jobs:
+  withdraw:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check confirmation
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "CONFIRM" ]; then
+            echo "Confirmation not provided, aborting."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: keeper/package-lock.json
+
+      - name: Install dependencies
+        working-directory: keeper
+        run: npm ci
+
+      - name: Write admin keypair from base58 secret
+        working-directory: keeper
+        env:
+          SOLANA_DEPLOY_KEY: ${{ secrets.SOLANA_DEPLOY_KEY }}
+        run: |
+          pip3 install --quiet base58
+          python3 -c "
+import base58, json, os
+secret = base58.b58decode(os.environ['SOLANA_DEPLOY_KEY'])
+with open('admin.json', 'w') as f:
+    json.dump(list(secret), f)
+"
+
+      - name: Write keeper keypair
+        working-directory: keeper
+        run: echo "$KEEPER_KEYPAIR_JSON" > keeper.json
+        env:
+          KEEPER_KEYPAIR_JSON: ${{ secrets.KEEPER_KEYPAIR_JSON }}
+
+      - name: Recall from Marinade + withdraw all vault funds
+        working-directory: keeper
+        run: npx ts-node src/scripts/recall_and_withdraw.ts
+        env:
+          RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
+          ADMIN_KEYPAIR_PATH: ./admin.json
+          KEEPER_KEYPAIR_PATH: ./keeper.json
+          PROGRAM_ID: BDEvvSeg11AqjMmKHUsHppPtQF3kjZtwPm1g2G1SqKX5
+          IDL_PATH: ../idl/yieldpilot.mainnet.json
+
+      - name: Clean up keypairs
+        if: always()
+        working-directory: keeper
+        run: rm -f admin.json keeper.json
