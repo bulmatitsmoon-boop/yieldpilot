@@ -141,6 +141,28 @@ async function main() {
   await withdrawAll(solVaultPda, WSOL_MINT, "SOL");
 
   console.log("\nAll recalls/withdrawals complete.");
+
+  // ── Step 4 & 5: close both vaults (admin-signed) — reclaims vault rent ──
+  async function closeVault(vaultPda: PublicKey, label: string) {
+    const vaultAccount: any = await (adminProgram.account as any).vault.fetch(vaultPda);
+    if (vaultAccount.totalShares.toNumber() !== 0) {
+      console.log(`${label} vault: total_shares != 0 (${vaultAccount.totalShares.toString()}), skipping close.`);
+      return;
+    }
+    const sig = await adminProgram.methods
+      .closeVault()
+      .accounts({
+        admin: admin.publicKey,
+        vault: vaultPda,
+      } as any)
+      .rpc();
+    console.log(`${label} vault closed. Tx:`, sig);
+  }
+
+  await closeVault(usdcVaultPda, "USDC");
+  await closeVault(solVaultPda, "SOL");
+
+  console.log("\nBoth vaults closed (or skipped if not empty).");
 }
 
 main().catch((err) => {
