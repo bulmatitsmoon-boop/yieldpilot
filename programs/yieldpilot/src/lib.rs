@@ -861,6 +861,25 @@ pub mod yieldpilot {
         let vault_key = v.key();
         let seeds: &[&[u8]] = &[b"vault", vault_key.as_ref(), &[v.authority_bump]];
 
+        // ── Unwrap (same pattern as deploy_to_marinade — see its comments for
+        // the full explanation): SPL Stake Pool's DepositSol needs native SOL,
+        // but the vault holds it as wrapped SOL. Close the WSOL account fully,
+        // deposit into the stake pool, recreate the account, re-wrap the rest.
+        // All atomic — any failure reverts the whole thing.
+        let total_idle = ctx.accounts.vault_token_account.amount;
+        require!(total_idle >= lamports, VaultError::InsufficientIdle);
+        let remainder = total_idle - lamports;
+
+        token::close_account(CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            CloseAccount {
+                account:     ctx.accounts.vault_token_account.to_account_info(),
+                destination: ctx.accounts.vault_authority.to_account_info(),
+                authority:   ctx.accounts.vault_authority.to_account_info(),
+            },
+            &[seeds],
+        ))?;
+
         spl_stake_pool_deposit(
             CpiContext::new_with_signer(
                 ctx.accounts.stake_pool_program.to_account_info(),
@@ -884,6 +903,37 @@ pub mod yieldpilot {
             seeds,
         )?;
 
+        associated_token::create(CpiContext::new_with_signer(
+            ctx.accounts.associated_token_program.to_account_info(),
+            Create {
+                payer:            ctx.accounts.vault_authority.to_account_info(),
+                associated_token: ctx.accounts.vault_token_account.to_account_info(),
+                authority:        ctx.accounts.vault_authority.to_account_info(),
+                mint:             ctx.accounts.wsol_mint.to_account_info(),
+                system_program:   ctx.accounts.system_program.to_account_info(),
+                token_program:    ctx.accounts.token_program.to_account_info(),
+            },
+            &[seeds],
+        ))?;
+
+        if remainder > 0 {
+            system_program::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.system_program.to_account_info(),
+                    SystemTransfer {
+                        from: ctx.accounts.vault_authority.to_account_info(),
+                        to:   ctx.accounts.vault_token_account.to_account_info(),
+                    },
+                    &[seeds],
+                ),
+                remainder,
+            )?;
+            token::sync_native(CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                SyncNative { account: ctx.accounts.vault_token_account.to_account_info() },
+            ))?;
+        }
+
         v.protocols[idx].deployed_balance = v.protocols[idx].deployed_balance
             .checked_add(lamports).ok_or(VaultError::MathOverflow)?;
 
@@ -904,6 +954,8 @@ pub mod yieldpilot {
 
         let vault_key = v.key();
         let seeds: &[&[u8]] = &[b"vault", vault_key.as_ref(), &[v.authority_bump]];
+
+        let lamports_before = ctx.accounts.vault_authority.lamports();
 
         spl_stake_pool_withdraw(
             CpiContext::new_with_signer(
@@ -927,6 +979,27 @@ pub mod yieldpilot {
             lst_amount,
             seeds,
         )?;
+
+        // Wrap the received native SOL back into the vault's WSOL account —
+        // same pattern as recall_from_marinade.
+        let received = ctx.accounts.vault_authority.lamports().saturating_sub(lamports_before);
+        if received > 0 {
+            system_program::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.system_program.to_account_info(),
+                    SystemTransfer {
+                        from: ctx.accounts.vault_authority.to_account_info(),
+                        to:   ctx.accounts.vault_token_account.to_account_info(),
+                    },
+                    &[seeds],
+                ),
+                received,
+            )?;
+            token::sync_native(CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                SyncNative { account: ctx.accounts.vault_token_account.to_account_info() },
+            ))?;
+        }
 
         v.protocols[idx].deployed_balance = v.protocols[idx].deployed_balance
             .saturating_sub(lst_amount);
@@ -1509,6 +1582,13 @@ pub struct DeployToSolLst<'info> {
     #[account(mut)] pub manager_fee_account: Box<Account<'info, TokenAccount>>,
     /// LST pool mint (jitoSOL)
     #[account(mut)] pub pool_mint: Box<Account<'info, Mint>>,
+    /// Vault's wrapped-SOL account. SPL Stake Pool's DepositSol needs NATIVE
+    /// SOL, same unwrap requirement as Marinade — see deploy_to_marinade for
+    /// the full explanation of why a partial unwrap isn't possible.
+    #[account(mut)]
+    pub vault_token_account: Box<Account<'info, TokenAccount>>,
+    #[account(address = WSOL_MINT)]
+    pub wsol_mint: Box<Account<'info, Mint>>,
     /// CHECK: clock
     #[account(address = anchor_lang::solana_program::sysvar::clock::ID)]
     pub clock_sysvar: UncheckedAccount<'info>,
@@ -1517,6 +1597,7 @@ pub struct DeployToSolLst<'info> {
     pub stake_history_sysvar: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
     pub token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
     /// CHECK: Jito's SPL Stake Pool fork — pinned, only address the keeper ever uses
     #[account(address = adapters::spl_stake_pool::jito::PROGRAM)]
     pub stake_pool_program: UncheckedAccount<'info>,
@@ -1528,6 +1609,11 @@ pub struct RecallFromSolLst<'info> {
     pub keeper: Signer<'info>,
     #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
     pub vault: Box<Account<'info, Vault>>,
+    /// Vault's wrapped-SOL account — native SOL received from the stake pool
+    /// gets wrapped back in here (transfer + sync_native), no close/recreate
+    /// needed since we're topping up an already-open account.
+    #[account(mut)]
+    pub vault_token_account: Box<Account<'info, TokenAccount>>,
     /// CHECK: PDA
     #[account(mut, seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
     pub vault_authority: UncheckedAccount<'info>,
@@ -1553,6 +1639,7 @@ pub struct RecallFromSolLst<'info> {
     /// CHECK: native stake program
     #[account(address = anchor_lang::solana_program::stake::program::ID)]
     pub stake_program: UncheckedAccount<'info>,
+    pub system_program: Program<'info, System>,
     pub token_program: Program<'info, Token>,
     /// CHECK: Jito's SPL Stake Pool fork — pinned, only address the keeper ever uses
     #[account(address = adapters::spl_stake_pool::jito::PROGRAM)]
