@@ -125,6 +125,31 @@ function parseArgs() {
   };
 }
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Retry a read against a just-confirmed account. RPC nodes can lag a few
+ * hundred ms to a couple seconds behind the confirmed slot they just
+ * acknowledged a transaction on, so an immediate account fetch right after
+ * `.rpc()` resolves can transiently return "Account does not exist or has
+ * no data" even though the write already landed. Retry instead of failing.
+ */
+async function retryFetch<T>(fn: () => Promise<T>, attempts = 6, delayMs = 1500): Promise<T> {
+  let lastErr: any;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      lastErr = err;
+      const msg = err.message ?? String(err);
+      if (!msg.includes("Account does not exist") && !msg.includes("has no data")) throw err;
+      console.log(`  (RPC read-lag, retry ${i + 1}/${attempts}...)`);
+      await new Promise(r => setTimeout(r, delayMs));
+    }
+  }
+  throw lastErr;
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -227,7 +252,7 @@ async function main() {
 
   // ── 2: Register protocols ─────────────────────────────────────────────────
   console.log("\n[2/2] Registering protocols...");
-  const vaultAccount = await (program.account as any).vault.fetch(vaultPda) as any;
+  const vaultAccount = await retryFetch(() => (program.account as any).vault.fetch(vaultPda)) as any;
   const alreadyRegistered: number = vaultAccount.protocolCount;
   console.log(`  ${alreadyRegistered} already registered.`);
 
