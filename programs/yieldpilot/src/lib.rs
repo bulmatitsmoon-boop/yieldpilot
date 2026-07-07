@@ -1427,7 +1427,7 @@ pub struct DeployToKamino<'info> {
     #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
     pub vault: Account<'info, Vault>,
     /// CHECK: PDA
-    #[account(seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
+    #[account(mut, seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
     pub vault_authority: UncheckedAccount<'info>,
     #[account(mut, constraint = vault_token_account.key() == vault.vault_token_account)]
     pub vault_token_account: Account<'info, TokenAccount>,
@@ -1462,7 +1462,7 @@ pub struct RecallFromKamino<'info> {
     #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
     pub vault: Account<'info, Vault>,
     /// CHECK: PDA
-    #[account(seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
+    #[account(mut, seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
     pub vault_authority: UncheckedAccount<'info>,
     #[account(mut, constraint = vault_token_account.key() == vault.vault_token_account)]
     pub vault_token_account: Account<'info, TokenAccount>,

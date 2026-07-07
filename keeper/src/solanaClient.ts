@@ -65,6 +65,7 @@ const SOLEND_USDC_RESERVE = new PublicKey("BgxfHJDzm44T7XG68MYKx7YisTjZu73tVovyZ
 const SOLEND_USDC_LIQUIDITY_SUPPLY = new PublicKey("8SheGtsopRUDzdiD6v6BR9a6bqZ9QwywYQY99Fp5meNf");
 const SOLEND_USDC_COLLATERAL_MINT = new PublicKey("993dVFL2uXWYeoXuEBFXR4BijeXdTv4s6BzsCjJZuwqk");
 const SOLEND_USDC_ORACLE = new PublicKey("Dpw1EAVrSB1ibxiDQyTAW6Zip3J4Btk2x4SgApQCeFbX"); // fixed 2026-07-06: previous value was stale/wrong, verified against Solend's public API (reserve.liquidity.pythOracle)
+const SOLEND_NULL_ORACLE = new PublicKey("nu11111111111111111111111111111111111111111"); // Solend's sentinel for "no switchboard oracle configured" — NOT the same as SystemProgram.programId; confirmed by decoding the real reserve account bytes 2026-07-07
 
 // MarginFi is intentionally not integrated — see apyFetcher.ts for why
 // (their SDK cannot decode their own current mainnet state).
@@ -702,7 +703,7 @@ export class SolanaClient {
             lendingMarket: SOLEND_MAIN_MARKET,
             lendingMarketAuthority,
             pythOracle: SOLEND_USDC_ORACLE,
-            switchboardOracle: SystemProgram.programId,
+            switchboardOracle: SOLEND_NULL_ORACLE,
             tokenProgram: TOKEN_PROGRAM_ID,
             solendProgram: SOLEND_PROGRAM,
           })
@@ -737,7 +738,7 @@ export class SolanaClient {
             lendingMarket: SOLEND_MAIN_MARKET,
             lendingMarketAuthority,
             pythOracle: SOLEND_USDC_ORACLE,
-            switchboardOracle: SystemProgram.programId,
+            switchboardOracle: SOLEND_NULL_ORACLE,
             tokenProgram: TOKEN_PROGRAM_ID,
             solendProgram: SOLEND_PROGRAM,
           })
