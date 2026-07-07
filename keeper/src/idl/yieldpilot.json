@@ -159,6 +159,7 @@
         },
         {
           "name": "vault_authority",
+          "writable": true,
           "pda": {
             "seeds": [
               {
@@ -1126,6 +1127,7 @@
         },
         {
           "name": "vault_authority",
+          "writable": true,
           "pda": {
             "seeds": [
               {
