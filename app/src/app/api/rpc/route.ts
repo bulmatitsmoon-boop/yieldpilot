@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 // Server-only env var (not NEXT_PUBLIC_) — never exposed to the client bundle,
-// and never hardcoded in source. Falls back to the public devnet RPC only if
-// unset; that public endpoint has intermittently had an expired TLS cert, so
-// the real endpoint should always be set in Vercel's project env vars.
-const RPC_TARGET = process.env.DEVNET_RPC_URL || 'https://api.devnet.solana.com';
+// and never hardcoded in source. Falls back to the public mainnet RPC only if
+// unset; that public endpoint is heavily rate-limited, so the real endpoint
+// should always be set in Vercel's project env vars.
+const RPC_TARGET = process.env.MAINNET_RPC_URL || 'https://api.mainnet-beta.solana.com';
 
 export async function POST(req: NextRequest) {
   const body = await req.text();
