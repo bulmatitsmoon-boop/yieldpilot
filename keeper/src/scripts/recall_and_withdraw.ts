@@ -50,7 +50,7 @@ async function main() {
   const usdcVaultPda = new PublicKey("Fr4icKU4YGWh1W3FtHjKj43jwo6ivVQyCdkiQAxMwG1C");
 
   // ── Step 1: recall from Marinade ──────────────────────────────────────
-  const solVault: any = await keeperProgram.account.vault.fetch(solVaultPda);
+  const solVault: any = await (keeperProgram.account as any).vault.fetch(solVaultPda);
   const marinadeIdx = solVault.protocols.findIndex((p: any) => Buffer.from(p.label).toString().startsWith("marinade-sol"));
   const marinadeProtocol = solVault.protocols[marinadeIdx];
 
@@ -87,7 +87,7 @@ async function main() {
   // ── Step 2 & 3: withdraw all shares from both vaults (admin-signed) ──
   async function withdrawAll(vaultPda: PublicKey, mint: PublicKey, label: string) {
     const [vaultAuthority] = PublicKey.findProgramAddressSync([Buffer.from("vault"), vaultPda.toBuffer()], programId);
-    const vaultAccount: any = await adminProgram.account.vault.fetch(vaultPda);
+    const vaultAccount: any = await (adminProgram.account as any).vault.fetch(vaultPda);
     const sharesMint = vaultAccount.sharesMint as PublicKey;
     const vaultTokenAccount = vaultAccount.vaultTokenAccount as PublicKey;
 
@@ -98,7 +98,7 @@ async function main() {
       programId
     );
 
-    const posAccount: any = await adminProgram.account.userPosition.fetch(userPosition);
+    const posAccount: any = await (adminProgram.account as any).userPosition.fetch(userPosition);
     const shares = posAccount.shares;
     console.log(`\n${label} vault: shares to withdraw =`, shares.toString());
 
