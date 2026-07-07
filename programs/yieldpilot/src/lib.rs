@@ -42,6 +42,13 @@ const GOLD_THRESHOLD:   u64 = 1_000_000;     // 1M tokens  → unlimited deposit
 const SILVER_THRESHOLD: u64 =   100_000;     // 100k tokens → $10k cap, 3% fee
 const BRONZE_THRESHOLD: u64 =    10_000;     // 10k tokens  → $1k cap, 6% fee
 
+// Minimum time between update_tier_thresholds calls — prevents thresholds being
+// spiked right before a specific withdrawal to force a worse fee tier onto a user
+// who held a good tier for their whole deposit (withdraw fee uses the worse of
+// current-tier vs tier-at-deposit, so a same-block admin change could otherwise
+// override that snapshot's intent).
+const TIER_THRESHOLD_COOLDOWN_SECS: i64 = 30 * 24 * 60 * 60; // 30 days
+
 // Tiered performance fees (in bps). Applied on profit at withdrawal.
 const GOLD_FEE_BPS:   u64 =   0; // 0%
 const SILVER_FEE_BPS: u64 = 300; // 3%
@@ -85,6 +92,7 @@ pub mod yieldpilot {
         v.auto_compound       = params.auto_compound;
         v.auto_rebalance      = params.auto_rebalance;
         v.last_compound_ts    = Clock::get()?.unix_timestamp;
+        v.last_threshold_update_ts = 0; // 0 = never updated; first update_tier_thresholds call is never blocked
         v.name                = params.name;
         v.bump                = ctx.bumps.vault;
         v.authority_bump      = ctx.bumps.vault_authority;
@@ -467,9 +475,15 @@ pub mod yieldpilot {
 
     pub fn update_tier_thresholds(ctx: Context<UpdateTierThresholds>, gold: u64, silver: u64, bronze: u64) -> Result<()> {
         let v = &mut ctx.accounts.vault;
+        let now = Clock::get()?.unix_timestamp;
+        require!(
+            now - v.last_threshold_update_ts >= TIER_THRESHOLD_COOLDOWN_SECS,
+            VaultError::ThresholdCooldownActive
+        );
         v.gold_threshold = gold;
         v.silver_threshold = silver;
         v.bronze_threshold = bronze;
+        v.last_threshold_update_ts = now;
         Ok(())
     }
 
@@ -1169,6 +1183,7 @@ pub struct Vault {
     pub auto_rebalance:      bool,
     pub paused:              bool,
     pub last_compound_ts:    i64,
+    pub last_threshold_update_ts: i64, // last update_tier_thresholds call; enforces TIER_THRESHOLD_COOLDOWN_SECS
     pub bump:                u8,
     pub authority_bump:      u8,
     pub protocol_count:      u8,
@@ -1182,7 +1197,7 @@ impl Vault {
         + 32 * 8         // pubkeys (admin, keeper, mint, vault_token_account, shares_mint, treasury, gate_mint, pending_admin)
         + 8 * 2          // u64 totals (total_deposits, total_shares)
         + 3              // bools
-        + 8              // i64
+        + 8 * 2          // i64 (last_compound_ts, last_threshold_update_ts)
         + 3              // bumps + count
         + 8              // tvl_cap
         + 4 + 32         // name string
@@ -1790,6 +1805,7 @@ pub enum VaultError {
     #[msg("Allocation must sum to exactly 10000 bps")]         AllocationNotFull,
     #[msg("No pending admin transfer")]                        NoPendingAdmin,
     #[msg("Not the pending admin")]                            NotPendingAdmin,
+    #[msg("Tier thresholds were updated too recently")]        ThresholdCooldownActive,
     #[msg("Output below minimum — slippage exceeded")]         SlippageExceeded,
     #[msg("Gate mint already set and cannot be changed")]     GateMintAlreadySet,
     #[msg("Vault still has deposits — withdraw all before closing")] VaultNotEmpty,
