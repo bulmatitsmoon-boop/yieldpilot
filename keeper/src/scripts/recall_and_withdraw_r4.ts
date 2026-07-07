@@ -31,7 +31,11 @@ async function main() {
   const admin = loadKeypair(process.env.ADMIN_KEYPAIR_PATH!);
   const programId = new PublicKey(process.env.PROGRAM_ID!);
 
-  const idlPath = path.resolve(__dirname, process.env.IDL_PATH!);
+  // Hardcoded relative to this file's own location — deliberately NOT using
+  // process.env.IDL_PATH here, since SolanaClient (constructed below) resolves
+  // that same env var relative to ITS OWN __dirname (keeper/src/), not this
+  // script's (keeper/src/scripts/). One shared env var can't satisfy both.
+  const idlPath = path.resolve(__dirname, "..", "idl", "yieldpilot.mainnet.json");
   const idl = JSON.parse(fs.readFileSync(idlPath, "utf8"));
 
   const adminWallet = new anchor.Wallet(admin);
