@@ -32,7 +32,6 @@ declare_id!("CVJrJGoKjseTJqiFGctssYde3pLAnPaRZtjAaKXd8pWk");
 const BPS_DENOM: u64          = 10_000;
 const MAX_PROTOCOLS: usize    = 8;
 const COMPOUND_INTERVAL: i64  = 3_600;        // 1 hour
-const MAX_PERF_FEE_BPS: u64   = 1_000;        // 10%
 const MIN_FIRST_DEPOSIT: u64  = 1_000_000;    // $1 minimum first deposit (anti-donation-attack)
 // Keeper must leave at least 10% of total deposits idle at all times.
 // Prevents keeper from deploying 100% of funds, which would block all withdrawals.
@@ -61,7 +60,6 @@ pub mod yieldpilot {
     // ── Vault lifecycle ───────────────────────────────────────────────────────
 
     pub fn initialize_vault(ctx: Context<InitializeVault>, params: InitVaultParams) -> Result<()> {
-        require!(params.perf_fee_bps <= MAX_PERF_FEE_BPS, VaultError::FeeTooHigh);
         require!(params.name.len() <= 32, VaultError::NameTooLong);
         require!(params.tvl_cap >= MIN_FIRST_DEPOSIT, VaultError::TvlCapTooLow);
 
@@ -84,7 +82,6 @@ pub mod yieldpilot {
         v.pending_admin       = Pubkey::default();
         v.total_deposits      = 0;
         v.total_shares        = 0;
-        v.perf_fee_bps        = params.perf_fee_bps;
         v.auto_compound       = params.auto_compound;
         v.auto_rebalance      = params.auto_rebalance;
         v.last_compound_ts    = Clock::get()?.unix_timestamp;
@@ -495,8 +492,6 @@ pub mod yieldpilot {
     }
 
     // update_settings controls only operational behaviour — no financial parameters.
-    // perf_fee_bps is fixed at vault initialization and cannot be changed after launch.
-    // Users can verify the fee on-chain before depositing and trust it never changes.
     pub fn update_settings(
         ctx: Context<AdminOnly>,
         auto_compound: bool,
@@ -1170,7 +1165,6 @@ pub struct Vault {
     pub pending_admin:       Pubkey,  // two-step admin transfer; Pubkey::default = no pending transfer
     pub total_deposits:      u64,
     pub total_shares:        u64,
-    pub perf_fee_bps:        u64,
     pub auto_compound:       bool,
     pub auto_rebalance:      bool,
     pub paused:              bool,
@@ -1186,7 +1180,7 @@ pub struct Vault {
 impl Vault {
     pub const LEN: usize = 8
         + 32 * 8         // pubkeys (admin, keeper, mint, vault_token_account, shares_mint, treasury, gate_mint, pending_admin)
-        + 8 * 3          // u64 totals + fee
+        + 8 * 2          // u64 totals (total_deposits, total_shares)
         + 3              // bools
         + 8              // i64
         + 3              // bumps + count
@@ -1229,7 +1223,6 @@ impl UserPosition {
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct InitVaultParams {
-    pub perf_fee_bps:  u64,
     pub auto_compound: bool,
     pub auto_rebalance:bool,
     pub tvl_cap:       u64,
@@ -1774,7 +1767,6 @@ pub struct RecallFromSolend<'info> {
 #[error_code]
 pub enum VaultError {
     #[msg("Unauthorized")]                    Unauthorized,
-    #[msg("Fee exceeds 10% maximum")]         FeeTooHigh,
     #[msg("Name too long (max 32 chars)")]    NameTooLong,
     #[msg("Allocation exceeds 100%")]         AllocationExceeded,
     #[msg("Allocation count mismatch")]       AllocationMismatch,
