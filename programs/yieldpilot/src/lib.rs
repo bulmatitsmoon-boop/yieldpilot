@@ -621,6 +621,8 @@ pub mod yieldpilot {
         let vault_key = v.key();
         let seeds: &[&[u8]] = &[b"vault", vault_key.as_ref(), &[v.authority_bump]];
 
+        let underlying_before = ctx.accounts.vault_token_account.amount;
+
         kamino_withdraw(
             CpiContext::new_with_signer(
                 ctx.accounts.kamino_program.to_account_info(),
@@ -646,8 +648,21 @@ pub mod yieldpilot {
             ctx.remaining_accounts,
         )?;
 
-        v.protocols[idx].deployed_balance = v.protocols[idx].deployed_balance
-            .saturating_sub(collateral_amount);
+        // Real underlying returned may exceed what's recorded as deployed (kToken
+        // value grows as yield accrues) — realize that excess into total_deposits
+        // instead of silently discarding it. deployed_balance was previously
+        // decremented by collateral_amount (kToken units), a unit mismatch against
+        // its own underlying-token accounting.
+        ctx.accounts.vault_token_account.reload()?;
+        let received = ctx.accounts.vault_token_account.amount.saturating_sub(underlying_before);
+        let deployed = v.protocols[idx].deployed_balance;
+        if received > deployed {
+            let gain = received - deployed;
+            v.total_deposits = v.total_deposits.checked_add(gain).ok_or(VaultError::MathOverflow)?;
+            v.protocols[idx].deployed_balance = 0;
+        } else {
+            v.protocols[idx].deployed_balance = deployed.saturating_sub(received);
+        }
 
         emit!(FundsRecalled { vault: v.key(), protocol_index, collateral_amount });
         Ok(())
@@ -830,8 +845,20 @@ pub mod yieldpilot {
             ))?;
         }
 
-        v.protocols[idx].deployed_balance = v.protocols[idx].deployed_balance
-            .saturating_sub(msol_amount);
+        // received (real underlying SOL, computed above from the lamports diff
+        // around the CPI) may exceed what's recorded as deployed — kToken-style
+        // exchange-rate growth from accrued yield. Realize the excess into
+        // total_deposits instead of discarding it. Previously decremented by
+        // msol_amount (mSOL units), a unit mismatch against underlying-token
+        // accounting.
+        let deployed = v.protocols[idx].deployed_balance;
+        if received > deployed {
+            let gain = received - deployed;
+            v.total_deposits = v.total_deposits.checked_add(gain).ok_or(VaultError::MathOverflow)?;
+            v.protocols[idx].deployed_balance = 0;
+        } else {
+            v.protocols[idx].deployed_balance = deployed.saturating_sub(received);
+        }
 
         emit!(FundsRecalled { vault: v.key(), protocol_index, collateral_amount: msol_amount });
         Ok(())
@@ -1001,8 +1028,15 @@ pub mod yieldpilot {
             ))?;
         }
 
-        v.protocols[idx].deployed_balance = v.protocols[idx].deployed_balance
-            .saturating_sub(lst_amount);
+        // Same unit-mismatch fix as recall_from_marinade — see its comments.
+        let deployed = v.protocols[idx].deployed_balance;
+        if received > deployed {
+            let gain = received - deployed;
+            v.total_deposits = v.total_deposits.checked_add(gain).ok_or(VaultError::MathOverflow)?;
+            v.protocols[idx].deployed_balance = 0;
+        } else {
+            v.protocols[idx].deployed_balance = deployed.saturating_sub(received);
+        }
 
         emit!(FundsRecalled { vault: v.key(), protocol_index, collateral_amount: lst_amount });
         Ok(())
@@ -1076,6 +1110,8 @@ pub mod yieldpilot {
         let vault_key = v.key();
         let seeds: &[&[u8]] = &[b"vault", vault_key.as_ref(), &[v.authority_bump]];
 
+        let underlying_before = ctx.accounts.vault_token_account.amount;
+
         solend_withdraw(
             CpiContext::new_with_signer(
                 ctx.accounts.solend_program.to_account_info(),
@@ -1100,8 +1136,17 @@ pub mod yieldpilot {
             seeds,
         )?;
 
-        v.protocols[idx].deployed_balance = v.protocols[idx].deployed_balance
-            .saturating_sub(collateral_amount);
+        // Same unit-mismatch fix as recall_from_kamino — see its comments.
+        ctx.accounts.vault_token_account.reload()?;
+        let received = ctx.accounts.vault_token_account.amount.saturating_sub(underlying_before);
+        let deployed = v.protocols[idx].deployed_balance;
+        if received > deployed {
+            let gain = received - deployed;
+            v.total_deposits = v.total_deposits.checked_add(gain).ok_or(VaultError::MathOverflow)?;
+            v.protocols[idx].deployed_balance = 0;
+        } else {
+            v.protocols[idx].deployed_balance = deployed.saturating_sub(received);
+        }
         emit!(FundsRecalled { vault: v.key(), protocol_index, collateral_amount });
         Ok(())
     }
