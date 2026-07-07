@@ -30,16 +30,29 @@ const ratelimit = redis
 export async function POST(req: NextRequest) {
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0].trim() || req.headers.get('x-real-ip') || 'unknown';
 
+  // TEMPORARY DEBUG HEADERS — remove once rate limiting is confirmed working live.
+  const debugHeaders: Record<string, string> = {
+    'X-Debug-Ratelimit-Enabled': String(!!ratelimit),
+    'X-Debug-Ip': ip,
+  };
+
   // Fail open (no limiting) rather than fail closed (site broken) if the
   // Redis env vars aren't provisioned yet — better than a hard outage while
   // the Upstash database is being set up.
   if (ratelimit) {
-    const { success } = await ratelimit.limit(ip);
-    if (!success) {
-      return NextResponse.json(
-        { jsonrpc: '2.0', error: { code: -32005, message: 'Rate limit exceeded, try again shortly.' }, id: null },
-        { status: 429 }
-      );
+    try {
+      const { success, remaining, limit } = await ratelimit.limit(ip);
+      debugHeaders['X-Debug-Ratelimit-Success'] = String(success);
+      debugHeaders['X-Debug-Ratelimit-Remaining'] = String(remaining);
+      debugHeaders['X-Debug-Ratelimit-Limit'] = String(limit);
+      if (!success) {
+        return NextResponse.json(
+          { jsonrpc: '2.0', error: { code: -32005, message: 'Rate limit exceeded, try again shortly.' }, id: null },
+          { status: 429, headers: debugHeaders }
+        );
+      }
+    } catch (err: any) {
+      debugHeaders['X-Debug-Ratelimit-Error'] = String(err.message ?? err);
     }
   }
 
@@ -53,12 +66,12 @@ export async function POST(req: NextRequest) {
     const data = await res.text();
     return new NextResponse(data, {
       status: res.status,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...debugHeaders },
     });
   } catch (err: any) {
     return NextResponse.json(
       { jsonrpc: '2.0', error: { code: -32000, message: `RPC proxy error: ${err.message}` }, id: null },
-      { status: 502 }
+      { status: 502, headers: debugHeaders }
     );
   }
 }
