@@ -53,7 +53,7 @@ jobs:
           ADMIN_KEYPAIR_PATH: ./admin.json
           KEEPER_KEYPAIR_PATH: ./keeper.json
           PROGRAM_ID: CNsmezyyy3VpoUDcARbmES2wHyCXPNHTGahjLAE4iEhq
-          IDL_PATH: ../idl/yieldpilot.mainnet.json
+          IDL_PATH: idl/yieldpilot.mainnet.json
 
       - name: Clean up keypairs
         if: always()
