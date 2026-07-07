@@ -33,6 +33,7 @@ jobs:
           RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
           KEEPER_KEYPAIR_PATH: ./keeper.json
           PROGRAM_ID: CVJrJGoKjseTJqiFGctssYde3pLAnPaRZtjAaKXd8pWk
+          IDL_PATH: idl/yieldpilot.mainnet.json
 
       - name: Clean up keypair
         if: always()
