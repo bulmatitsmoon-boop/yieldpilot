@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { Ratelimit } from '@upstash/ratelimit';
+import { Redis } from '@upstash/redis';
 
 // Server-only env var (not NEXT_PUBLIC_) — never exposed to the client bundle,
 // and never hardcoded in source. Falls back to the public mainnet RPC only if
@@ -6,35 +8,39 @@ import { NextRequest, NextResponse } from 'next/server';
 // should always be set in Vercel's project env vars.
 const RPC_TARGET = process.env.MAINNET_RPC_URL || 'https://api.mainnet-beta.solana.com';
 
-// Basic per-IP rate limit. This proxy now forwards to a paid Helius endpoint
-// with an embedded API key, so an unauthenticated open door here means anyone
-// hammering it directly (bypassing the actual dApp) racks up cost on that key.
-// In-memory sliding window: resets on cold start / doesn't share state across
-// concurrent Vercel instances, so it's a basic deterrent, not a hard cap —
-// good enough to stop casual abuse without adding external infra (Redis/Upstash)
-// tonight. Revisit if real abuse shows up in Helius usage dashboards.
-const WINDOW_MS = 10_000;
-const MAX_REQUESTS_PER_WINDOW = 40;
-const requestLog = new Map<string, number[]>();
+// Real shared-state rate limiting via Upstash Redis (Vercel Storage integration).
+// Replaces an earlier in-memory attempt that didn't work: Vercel's serverless
+// functions don't share memory across invocations, so a per-instance counter
+// never accumulated (proven live — 45 rapid requests all succeeded when it
+// should have started blocking after 40). Redis is external shared state, so
+// this actually works across every instance/region.
+//
+// Vercel's Upstash integration has used two different env var naming schemes
+// over time for the same underlying service — newer installs use
+// UPSTASH_REDIS_REST_URL/TOKEN, older "Vercel KV" branded ones use
+// KV_REST_API_URL/TOKEN. Support both instead of guessing which applies.
+const redisUrl = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
+const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
 
-function isRateLimited(ip: string): boolean {
-  const now = Date.now();
-  const timestamps = (requestLog.get(ip) ?? []).filter(t => now - t < WINDOW_MS);
-  timestamps.push(now);
-  requestLog.set(ip, timestamps);
-  // Prevent unbounded growth if many distinct IPs hit this in one instance's lifetime.
-  if (requestLog.size > 5000) requestLog.clear();
-  return timestamps.length > MAX_REQUESTS_PER_WINDOW;
-}
+const redis = redisUrl && redisToken ? new Redis({ url: redisUrl, token: redisToken }) : null;
+const ratelimit = redis
+  ? new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(40, '10 s'), prefix: 'yp-rpc-proxy' })
+  : null;
 
 export async function POST(req: NextRequest) {
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0].trim() || req.headers.get('x-real-ip') || 'unknown';
 
-  if (isRateLimited(ip)) {
-    return NextResponse.json(
-      { jsonrpc: '2.0', error: { code: -32005, message: 'Rate limit exceeded, try again shortly.' }, id: null },
-      { status: 429 }
-    );
+  // Fail open (no limiting) rather than fail closed (site broken) if the
+  // Redis env vars aren't provisioned yet — better than a hard outage while
+  // the Upstash database is being set up.
+  if (ratelimit) {
+    const { success } = await ratelimit.limit(ip);
+    if (!success) {
+      return NextResponse.json(
+        { jsonrpc: '2.0', error: { code: -32005, message: 'Rate limit exceeded, try again shortly.' }, id: null },
+        { status: 429 }
+      );
+    }
   }
 
   const body = await req.text();
