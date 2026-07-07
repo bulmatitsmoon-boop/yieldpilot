@@ -2200,10 +2200,6 @@
         "kind": "struct",
         "fields": [
           {
-            "name": "perf_fee_bps",
-            "type": "u64"
-          },
-          {
             "name": "auto_compound",
             "type": "bool"
           },
@@ -2459,10 +2455,6 @@
           },
           {
             "name": "total_shares",
-            "type": "u64"
-          },
-          {
-            "name": "perf_fee_bps",
             "type": "u64"
           },
           {
