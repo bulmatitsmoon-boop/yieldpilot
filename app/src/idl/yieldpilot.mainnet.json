@@ -1,5 +1,5 @@
 {
-  "address": "CNsmezyyy3VpoUDcARbmES2wHyCXPNHTGahjLAE4iEhq",
+  "address": "CVJrJGoKjseTJqiFGctssYde3pLAnPaRZtjAaKXd8pWk",
   "metadata": {
     "name": "yieldpilot",
     "version": "0.1.0",
@@ -159,6 +159,7 @@
         },
         {
           "name": "vault_authority",
+          "writable": true,
           "pda": {
             "seeds": [
               {
@@ -1126,6 +1127,7 @@
         },
         {
           "name": "vault_authority",
+          "writable": true,
           "pda": {
             "seeds": [
               {
