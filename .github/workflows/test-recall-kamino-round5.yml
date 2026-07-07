@@ -1,0 +1,41 @@
+name: Test Recall Kamino Round 5
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  recall:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: keeper/package-lock.json
+
+      - name: Install dependencies
+        working-directory: keeper
+        run: npm ci
+
+      - name: Write keeper keypair
+        working-directory: keeper
+        run: echo "$KEEPER_KEYPAIR_JSON" > keeper.json
+        env:
+          KEEPER_KEYPAIR_JSON: ${{ secrets.KEEPER_KEYPAIR_JSON }}
+
+      - name: Partial recall from Kamino (1,000,000 kUSDC units)
+        working-directory: keeper
+        run: npx ts-node src/scripts/test_recall_kamino.ts --collateral 1000000
+        env:
+          RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
+          KEEPER_KEYPAIR_PATH: ./keeper.json
+          PROGRAM_ID: CVJrJGoKjseTJqiFGctssYde3pLAnPaRZtjAaKXd8pWk
+          IDL_PATH: idl/yieldpilot.mainnet.json
+
+      - name: Clean up keypair
+        if: always()
+        working-directory: keeper
+        run: rm -f keeper.json
