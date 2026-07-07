@@ -39,7 +39,7 @@ pub mod devnet {
 
 // Instruction discriminators from Marinade IDL
 const DEPOSIT_SOL_IX:      [u8; 8] = [0xf2, 0x23, 0xc6, 0x89, 0x52, 0xe1, 0xf2, 0xb6];
-const LIQUID_UNSTAKE_IX:   [u8; 8] = [0x5c, 0x56, 0x68, 0xe7, 0x89, 0x5e, 0xb4, 0xc6]; // sha256("global:liquidUnstake")[:8]
+const LIQUID_UNSTAKE_IX:   [u8; 8] = [0x1e, 0x1e, 0x77, 0xf0, 0xbf, 0xe3, 0x0c, 0x10]; // sha256("global:liquid_unstake")[:8] — Anchor discriminators hash the snake_case Rust fn name, not the camelCase IDL display name (confirmed live: the old value caused Marinade's own program to reject the CPI with InstructionFallbackNotFound)
 
 // ── Account contexts ──────────────────────────────────────────────────────────
 
