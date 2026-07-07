@@ -2474,6 +2474,10 @@
             "type": "i64"
           },
           {
+            "name": "last_threshold_update_ts",
+            "type": "i64"
+          },
+          {
             "name": "bump",
             "type": "u8"
           },
