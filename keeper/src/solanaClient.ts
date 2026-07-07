@@ -616,9 +616,12 @@ export class SolanaClient {
             reserveStake: poolConfig.reserveStake,
             managerFeeAccount: poolConfig.managerFeeAccount,
             poolMint: poolConfig.poolMint,
+            vaultTokenAccount: vault.vaultTokenAccount,
+            wsolMint: WSOL_MINT,
             stakePoolProgram: poolConfig.stakePoolProgram,
             systemProgram: anchor.web3.SystemProgram.programId,
             tokenProgram: TOKEN_PROGRAM_ID,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
           })
           .rpc(),
       `deployToSolLst(${vaultAddress.slice(0, 8)}... ${lamports.toString()} lamports)`
@@ -658,7 +661,9 @@ export class SolanaClient {
             reserveStake: poolConfig.reserveStake,
             managerFeeAccount: poolConfig.managerFeeAccount,
             poolMint: poolConfig.poolMint,
+            vaultTokenAccount: vault.vaultTokenAccount,
             stakePoolProgram: poolConfig.stakePoolProgram,
+            systemProgram: anchor.web3.SystemProgram.programId,
             tokenProgram: TOKEN_PROGRAM_ID,
           })
           .rpc(),
