@@ -964,11 +964,11 @@ pub mod yieldpilot {
                 ctx.accounts.solend_program.to_account_info(),
                 SolendDeposit {
                     vault_authority:          ctx.accounts.vault_authority.to_account_info(),
-                    vault_token_account:      ctx.accounts.vault_token_account.clone(),
-                    vault_collateral_account: ctx.accounts.vault_collateral_account.clone(),
+                    vault_token_account:      (*ctx.accounts.vault_token_account).clone(),
+                    vault_collateral_account: (*ctx.accounts.vault_collateral_account).clone(),
                     reserve:                  ctx.accounts.reserve.to_account_info(),
                     reserve_liquidity_supply: ctx.accounts.reserve_liquidity_supply.to_account_info(),
-                    reserve_collateral_mint:  ctx.accounts.reserve_collateral_mint.clone(),
+                    reserve_collateral_mint:  (*ctx.accounts.reserve_collateral_mint).clone(),
                     lending_market:           ctx.accounts.lending_market.to_account_info(),
                     lending_market_authority: ctx.accounts.lending_market_authority.to_account_info(),
                     pyth_oracle:              ctx.accounts.pyth_oracle.to_account_info(),
@@ -1008,10 +1008,10 @@ pub mod yieldpilot {
                 ctx.accounts.solend_program.to_account_info(),
                 SolendWithdraw {
                     vault_authority:          ctx.accounts.vault_authority.to_account_info(),
-                    vault_collateral_account: ctx.accounts.vault_collateral_account.clone(),
-                    vault_token_account:      ctx.accounts.vault_token_account.clone(),
+                    vault_collateral_account: (*ctx.accounts.vault_collateral_account).clone(),
+                    vault_token_account:      (*ctx.accounts.vault_token_account).clone(),
                     reserve:                  ctx.accounts.reserve.to_account_info(),
-                    reserve_collateral_mint:  ctx.accounts.reserve_collateral_mint.clone(),
+                    reserve_collateral_mint:  (*ctx.accounts.reserve_collateral_mint).clone(),
                     reserve_liquidity_supply: ctx.accounts.reserve_liquidity_supply.to_account_info(),
                     lending_market:           ctx.accounts.lending_market.to_account_info(),
                     lending_market_authority: ctx.accounts.lending_market_authority.to_account_info(),
@@ -1563,18 +1563,18 @@ pub struct RecallFromSolLst<'info> {
 pub struct DeployToSolend<'info> {
     #[account(mut)] pub keeper: Signer<'info>,
     #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
-    pub vault: Account<'info, Vault>,
+    pub vault: Box<Account<'info, Vault>>,
     /// CHECK: PDA
     #[account(mut, seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
     pub vault_authority: UncheckedAccount<'info>,
     #[account(mut, constraint = vault_token_account.key() == vault.vault_token_account)]
-    pub vault_token_account: Account<'info, TokenAccount>,
-    #[account(mut)] pub vault_collateral_account: Account<'info, TokenAccount>,
+    pub vault_token_account: Box<Account<'info, TokenAccount>>,
+    #[account(mut)] pub vault_collateral_account: Box<Account<'info, TokenAccount>>,
     /// CHECK: Solend validates
     #[account(mut)] pub reserve: UncheckedAccount<'info>,
     /// CHECK: Solend validates
     #[account(mut)] pub reserve_liquidity_supply: UncheckedAccount<'info>,
-    #[account(mut)] pub reserve_collateral_mint: Account<'info, Mint>,
+    #[account(mut)] pub reserve_collateral_mint: Box<Account<'info, Mint>>,
     /// CHECK: Solend validates
     pub lending_market: UncheckedAccount<'info>,
     /// CHECK: Solend validates
@@ -1596,16 +1596,16 @@ pub struct DeployToSolend<'info> {
 pub struct RecallFromSolend<'info> {
     #[account(mut)] pub keeper: Signer<'info>,
     #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
-    pub vault: Account<'info, Vault>,
+    pub vault: Box<Account<'info, Vault>>,
     /// CHECK: PDA
     #[account(mut, seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
     pub vault_authority: UncheckedAccount<'info>,
-    #[account(mut)] pub vault_collateral_account: Account<'info, TokenAccount>,
+    #[account(mut)] pub vault_collateral_account: Box<Account<'info, TokenAccount>>,
     #[account(mut, constraint = vault_token_account.key() == vault.vault_token_account)]
-    pub vault_token_account: Account<'info, TokenAccount>,
+    pub vault_token_account: Box<Account<'info, TokenAccount>>,
     /// CHECK: Solend validates
     #[account(mut)] pub reserve: UncheckedAccount<'info>,
-    #[account(mut)] pub reserve_collateral_mint: Account<'info, Mint>,
+    #[account(mut)] pub reserve_collateral_mint: Box<Account<'info, Mint>>,
     /// CHECK: Solend validates
     #[account(mut)] pub reserve_liquidity_supply: UncheckedAccount<'info>,
     /// CHECK: Solend validates
