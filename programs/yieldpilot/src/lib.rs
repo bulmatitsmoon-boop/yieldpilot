@@ -884,6 +884,9 @@ pub mod yieldpilot {
         require!(!v.paused, AdapterError::VaultPaused);
         let idx = protocol_index as usize;
         require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
+        // SECURITY: validate the stake pool passed matches what's registered for this
+        // index — same check every other protocol (Kamino/Marinade/Solend) already has.
+        assert_state_matches(&v.protocols[idx], ctx.accounts.stake_pool.key)?;
 
         // SECURITY: enforce the same minimum idle liquidity buffer as deploy_to_kamino,
         // so this protocol can't be used to deploy 100% of funds and block withdrawals.
@@ -987,6 +990,9 @@ pub mod yieldpilot {
         let v = &mut ctx.accounts.vault;
         let idx = protocol_index as usize;
         require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
+        // SECURITY: validate the stake pool passed matches what's registered for this
+        // index — same check every other protocol (Kamino/Marinade/Solend) already has.
+        assert_state_matches(&v.protocols[idx], ctx.accounts.stake_pool.key)?;
 
         let vault_key = v.key();
         let seeds: &[&[u8]] = &[b"vault", vault_key.as_ref(), &[v.authority_bump]];
