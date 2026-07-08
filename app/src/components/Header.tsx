@@ -1,4 +1,5 @@
 ﻿"use client";
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useWallet } from "@solana/wallet-adapter-react";
@@ -10,6 +11,7 @@ export function Header() {
   const { setVisible } = useWalletModal();
   const pathname = usePathname();
   const isAdmin = publicKey?.toBase58() === process.env.NEXT_PUBLIC_ADMIN_WALLET;
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const isMainnet = process.env.NEXT_PUBLIC_SOLANA_NETWORK === "mainnet-beta";
 
@@ -119,7 +121,56 @@ export function Header() {
             Connect
           </button>
         )}
+
+        {/* Mobile menu toggle — only visible on narrow screens via CSS */}
+        <button
+          className="header-burger"
+          aria-label="Toggle menu"
+          onClick={() => setMobileMenuOpen(o => !o)}
+          style={{
+            display: "none",
+            background: "transparent", border: "1px solid var(--line)",
+            borderRadius: 7, width: 34, height: 34,
+            alignItems: "center", justifyContent: "center", cursor: "pointer",
+            marginLeft: 4, flexShrink: 0,
+          }}
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            {mobileMenuOpen ? (
+              <path d="M3 3L13 13M13 3L3 13" stroke="var(--text-hi)" strokeWidth="1.5" strokeLinecap="round" />
+            ) : (
+              <path d="M2 4H14M2 8H14M2 12H14" stroke="var(--text-hi)" strokeWidth="1.5" strokeLinecap="round" />
+            )}
+          </svg>
+        </button>
       </div>
+
+      {/* Mobile dropdown menu — only rendered/visible on narrow screens via CSS */}
+      {mobileMenuOpen && (
+        <div className="header-mobile-menu" style={{
+          position: "absolute", top: 60, left: 0, right: 0,
+          background: "var(--surface)", borderBottom: "1px solid var(--border)",
+          display: "flex", flexDirection: "column", padding: "8px 16px 16px",
+          zIndex: 49,
+        }}>
+          {navLinks.map(([label, href]) => {
+            const active = href === "/" ? pathname === "/" : pathname?.startsWith(href);
+            return (
+              <Link
+                key={href}
+                href={href}
+                onClick={() => setMobileMenuOpen(false)}
+                style={{
+                  padding: "12px 8px", borderRadius: 7, fontSize: 15, fontWeight: 500,
+                  color: active ? "var(--text)" : "var(--text-muted)",
+                  background: active ? "var(--surface-2)" : "transparent",
+                  textDecoration: "none",
+                }}
+              >{label}</Link>
+            );
+          })}
+        </div>
+      )}
     </header>
   );
 }
