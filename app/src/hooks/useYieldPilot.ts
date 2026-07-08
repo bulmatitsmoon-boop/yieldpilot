@@ -344,6 +344,14 @@ export function useYieldPilot(vaultAddresses: string[]) {
         const userTokenAccount = await getAssociatedTokenAddress(mintPubkey, publicKey);
         const userSharesAccount = await getAssociatedTokenAddress(sharesMint, publicKey);
 
+        // Treasury token account: derived from the vault's treasury WALLET address
+        // (vaultRaw.treasury) — must always be passed, since withdraw() requires it
+        // whenever the withdrawal realizes any profit (perf_fee > 0). Passing null
+        // here caused every profitable withdrawal to fail (the exact bug hit live
+        // in rounds 2/3/5 — see the program-side fix in withdraw()'s treasury check).
+        const treasuryPubkey = new PublicKey((vaultRaw.treasury as PublicKey).toBase58());
+        const treasuryTokenAccount = await getAssociatedTokenAddress(mintPubkey, treasuryPubkey);
+
         const gateMint = new PublicKey((vaultRaw.gateMint as PublicKey).toBase58());
         const isGatingEnabled = gateMint.toBase58() !== PublicKey.default.toBase58();
         const userGateAccount = isGatingEnabled
@@ -381,7 +389,7 @@ export function useYieldPilot(vaultAddresses: string[]) {
 
         return program.methods
           .withdraw(shares, minAmountOut)
-          .accounts({
+          .accountsPartial({
             user: publicKey,
             vault: vaultPubkey,
             vaultAuthority: vaultAuthorityPda,
@@ -390,7 +398,7 @@ export function useYieldPilot(vaultAddresses: string[]) {
             sharesMint,
             userPosition: positionPda,
             userSharesAccount,
-            treasuryTokenAccount: null as any,
+            treasuryTokenAccount,
             userGateAccount: userGateAccount as any,
             whitelistEntry: whitelistEntry as any,
             tokenProgram: TOKEN_PROGRAM_ID,
