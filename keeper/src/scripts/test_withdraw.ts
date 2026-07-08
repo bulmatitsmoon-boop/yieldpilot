@@ -46,6 +46,8 @@ async function main() {
   const vaultAccount = await (program.account as any).vault.fetch(vaultPda);
   const sharesMint = vaultAccount.sharesMint as PublicKey;
   const vaultTokenAccount = vaultAccount.vaultTokenAccount as PublicKey;
+  const treasury = vaultAccount.treasury as PublicKey;
+  const treasuryTokenAccount = getAssociatedTokenAddressSync(mint, treasury, true);
 
   const userTokenAccount = getAssociatedTokenAddressSync(mint, user.publicKey, true);
   const userSharesAccount = getAssociatedTokenAddressSync(sharesMint, user.publicKey, true);
@@ -73,7 +75,7 @@ async function main() {
       sharesMint,
       userPosition,
       userSharesAccount,
-      treasuryTokenAccount: null,
+      treasuryTokenAccount,
       userGateAccount: null,
       whitelistEntry: null,
       tokenProgram: TOKEN_PROGRAM_ID,
