@@ -285,9 +285,9 @@ export default function Home() {
           </Reveal>
 
           <Reveal delay={0.08}>
-            <div style={{ border: "1px solid var(--line)", borderRadius: 12, overflow: "hidden" }}>
-              <div style={{
-                display: "grid", gridTemplateColumns: "1fr 100px 100px",
+            <div className="rate-table" style={{ border: "1px solid var(--line)", borderRadius: 12, overflow: "hidden" }}>
+              <div className="rate-row" style={{
+                display: "grid", gridTemplateColumns: "minmax(0,1fr) 70px 70px",
                 padding: "10px 20px", background: "var(--ink-700)",
                 fontSize: 11, fontWeight: 600, color: "var(--text-low)",
                 textTransform: "uppercase", letterSpacing: "0.06em", fontFamily: "var(--font-mono)",
@@ -297,13 +297,13 @@ export default function Home() {
                 <span style={{ textAlign: "right" }}>APY</span>
               </div>
               {routable.slice(0, 5).map((p, i) => (
-                <div key={p.protocolId} style={{
-                  display: "grid", gridTemplateColumns: "1fr 100px 100px",
+                <div key={p.protocolId} className="rate-row" style={{
+                  display: "grid", gridTemplateColumns: "minmax(0,1fr) 70px 70px",
                   padding: "14px 20px", borderTop: "1px solid var(--line)",
                   alignItems: "center",
                   background: "var(--ink-800)",
                 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, flexWrap: "wrap" }}>
                     <div style={{ width: 6, height: 6, borderRadius: "50%", background: p.color, flexShrink: 0 }} />
                     <span style={{ fontWeight: 600, fontSize: 13, color: "var(--text-hi)" }}>{p.name}</span>
                     {i === 0 && (
@@ -335,14 +335,14 @@ export default function Home() {
                 </div>
               ))}
               {informational.map((p) => (
-                <div key={p.protocolId} style={{
-                  display: "grid", gridTemplateColumns: "1fr 100px 100px",
+                <div key={p.protocolId} className="rate-row" style={{
+                  display: "grid", gridTemplateColumns: "minmax(0,1fr) 70px 70px",
                   padding: "14px 20px", borderTop: "1px solid var(--line)",
                   alignItems: "center",
                   background: "var(--ink-800)",
                   opacity: 0.5,
                 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, flexWrap: "wrap" }}>
                     <div style={{ width: 6, height: 6, borderRadius: "50%", background: p.color, flexShrink: 0 }} />
                     <span style={{ fontWeight: 600, fontSize: 13, color: "var(--text-hi)" }}>{p.name}</span>
                     <span style={{
