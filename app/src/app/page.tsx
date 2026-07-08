@@ -105,7 +105,7 @@ export default function Home() {
         <div className="aurora-bg" />
 
         {/* ── Hero ────────────────────────────────────────────────────────── */}
-        <div style={{
+        <div className="hero-grid" style={{
           display: "grid", gridTemplateColumns: "1.1fr 0.9fr", gap: 48,
           alignItems: "center", padding: "88px 0 72px", position: "relative", zIndex: 1,
         }}>
