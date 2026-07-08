@@ -56,6 +56,10 @@ async function main() {
   const posAccount = await (program.account as any).userPosition.fetch(userPosition);
   const shares = opts.sharesOverride ? new anchor.BN(opts.sharesOverride) : posAccount.shares;
   console.log("Vault:", vaultPda.toBase58());
+  console.log("Vault mint (raw pubkey):", vaultAccount.mint.toBase58());
+  console.log("Vault treasury (raw pubkey):", treasury.toBase58());
+  console.log("Derived treasuryTokenAccount:", treasuryTokenAccount.toBase58());
+  console.log("Derived userTokenAccount:", userTokenAccount.toBase58());
   console.log("Total shares held:", posAccount.shares.toString());
   console.log("Shares to withdraw (this call):", shares.toString());
 
