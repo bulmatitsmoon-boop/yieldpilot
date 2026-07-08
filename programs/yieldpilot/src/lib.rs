@@ -23,10 +23,14 @@ use adapters::{
 // Not yet exposed anywhere (no frontend, not part of the core routing promise)
 // — this is Phase 2 groundwork, deliberately unmerged/unannounced until ready.
 pub mod lp_vault;
-use lp_vault::{
-    InitLpVaultParams, InitializeLpVault, DepositLp, WithdrawLp,
-    initialize_lp_vault_handler, deposit_lp_handler, withdraw_lp_handler,
-};
+// Must be `pub use ... ::*` (not a plain `use` of named items): the
+// `#[program]` macro below expects each instruction's Accounts struct's
+// macro-generated `__client_accounts_*` module to be reachable at the crate
+// root (`crate::__client_accounts_initialize_lp_vault`, etc.) — since those
+// structs live inside the `lp_vault` module, not the crate root, a plain
+// `use` doesn't re-export their generated modules and `#[program]` fails to
+// resolve them. Glob re-exporting fixes it.
+pub use lp_vault::*;
 
 // Program ID differs by network — devnet and mainnet are separate deployments
 // with separate addresses (the devnet address was never usable on mainnet;
