@@ -48,6 +48,8 @@ html, body {
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  max-width: 100vw;
+  overflow-x: hidden;
 }
 
 .mono-num {
@@ -137,8 +139,14 @@ html, body {
 ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
 
 /* ── Responsive ──────────────────────────────────────────────────────────── */
+/* Prevent the hamburger menu and any mobile-only elements from ever
+   appearing on wider screens, regardless of component state. */
+.header-mobile-menu { display: none; }
+
 @media (max-width: 640px) {
   .header-nav { display: none !important; }
+  .header-burger { display: flex !important; }
+  .header-mobile-menu { display: flex !important; }
   .header-root { padding: 0 16px !important; }
   .header-logo-sub { display: none !important; }
 
@@ -152,6 +160,7 @@ html, body {
   .table-scroll { overflow-x: auto !important; -webkit-overflow-scrolling: touch; }
 
   .hero-h1 { font-size: 32px !important; }
+  .hero-grid { grid-template-columns: 1fr !important; gap: 32px !important; padding: 40px 0 48px !important; }
 
   .footer-inner { flex-direction: column !important; gap: 24px !important; }
   .footer-links { flex-direction: row !important; gap: 32px !important; }
