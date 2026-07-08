@@ -354,12 +354,20 @@ pub mod yieldpilot {
             shares,
         )?;
 
-        // Validate treasury account: must match vault.treasury pubkey AND vault.mint.
-        // Without the key check, any user could pass their own token account as treasury
+        // Validate treasury account: must be OWNED by vault.treasury and use vault.mint.
+        // Without the owner check, any user could pass their own token account as treasury
         // and steal the performance fee that belongs to the vault operator.
+        //
+        // BUG FIX: v.treasury stores the treasury WALLET address ("wallet that receives
+        // performance fees" per InitVaultParams), not a specific token account's own
+        // address — so this must check ownership, not exact account-key equality. The
+        // old `.key() == v.treasury` check could never pass for any real treasury wallet
+        // (their token account's address never equals their wallet address), meaning
+        // performance-fee routing was structurally broken any time perf_fee > 0. This is
+        // the same failure the team hit on SOL withdraws in earlier rounds (round 2/3).
         if let Some(treasury_acct) = ctx.accounts.treasury_token_account.as_ref() {
             require!(treasury_acct.mint == v.mint, VaultError::InvalidTreasuryAccount);
-            require!(treasury_acct.key() == v.treasury, VaultError::InvalidTreasuryAccount);
+            require!(treasury_acct.owner == v.treasury, VaultError::TreasuryOwnerMismatch);
         }
 
         // Transfer perf fee → treasury (required when fee > 0)
@@ -1807,6 +1815,7 @@ pub enum VaultError {
     #[msg("Deposit exceeds your tier cap")]   TierCapExceeded,
     #[msg("Gate account mint does not match vault gate mint")] InvalidGateAccount,
     #[msg("Treasury account mint does not match vault mint")]  InvalidTreasuryAccount,
+    #[msg("Treasury account is not owned by the vault's treasury wallet")] TreasuryOwnerMismatch,
     #[msg("Treasury account required when fee is non-zero")]   TreasuryRequired,
     #[msg("Allocation must sum to exactly 10000 bps")]         AllocationNotFull,
     #[msg("No pending admin transfer")]                        NoPendingAdmin,
