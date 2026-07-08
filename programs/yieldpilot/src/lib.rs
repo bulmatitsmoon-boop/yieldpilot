@@ -18,6 +18,16 @@ use adapters::{
     {AdapterError, ProtocolAdapter, ProtocolKind, assert_state_matches},
 };
 
+// LP vault — opt-in dual-asset liquidity provision (Orca Whirlpools). Separate
+// product from the main single-asset Vault above; see lp_vault.rs module docs.
+// Not yet exposed anywhere (no frontend, not part of the core routing promise)
+// — this is Phase 2 groundwork, deliberately unmerged/unannounced until ready.
+pub mod lp_vault;
+use lp_vault::{
+    InitLpVaultParams, InitializeLpVault, DepositLp, WithdrawLp,
+    initialize_lp_vault_handler, deposit_lp_handler, withdraw_lp_handler,
+};
+
 // Program ID differs by network — devnet and mainnet are separate deployments
 // with separate addresses (the devnet address was never usable on mainnet;
 // see project memory for why). PDA derivations implicitly use this ID, so it
@@ -1172,6 +1182,33 @@ pub mod yieldpilot {
         }
         emit!(FundsRecalled { vault: v.key(), protocol_index, collateral_amount });
         Ok(())
+    }
+
+    // ── LP vault (Orca Whirlpools) — Phase 2, opt-in, not yet public ────────
+    // Thin wrappers only; real logic lives in lp_vault.rs to keep this file
+    // from growing further. See lp_vault.rs module docs for design notes.
+
+    pub fn initialize_lp_vault(ctx: Context<InitializeLpVault>, params: InitLpVaultParams) -> Result<()> {
+        initialize_lp_vault_handler(ctx, params)
+    }
+
+    pub fn deposit_lp(
+        ctx: Context<DepositLp>,
+        liquidity_amount: u128,
+        token_max_a: u64,
+        token_max_b: u64,
+        acknowledge_impermanent_loss: bool,
+    ) -> Result<()> {
+        deposit_lp_handler(ctx, liquidity_amount, token_max_a, token_max_b, acknowledge_impermanent_loss)
+    }
+
+    pub fn withdraw_lp(
+        ctx: Context<WithdrawLp>,
+        shares: u64,
+        token_min_a: u64,
+        token_min_b: u64,
+    ) -> Result<()> {
+        withdraw_lp_handler(ctx, shares, token_min_a, token_min_b)
     }
 
 }
