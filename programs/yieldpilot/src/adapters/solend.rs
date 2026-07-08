@@ -180,7 +180,7 @@ pub fn solend_deposit<'info>(
         AccountMeta::new(ctx.accounts.reserve_collateral_mint.key(), false),
         AccountMeta::new_readonly(*ctx.accounts.lending_market.key, false),
         AccountMeta::new_readonly(*ctx.accounts.lending_market_authority.key, false),
-        AccountMeta::new(*ctx.accounts.vault_authority.key, true),           // user_transfer_authority (signer)
+        AccountMeta::new_readonly(*ctx.accounts.vault_authority.key, true),  // user_transfer_authority (signer, NOT writable per Solend spec)
         AccountMeta::new_readonly(*ctx.accounts.clock_sysvar.key, false),
         AccountMeta::new_readonly(*ctx.accounts.token_program.key, false),
     ];
@@ -250,7 +250,7 @@ pub fn solend_withdraw<'info>(
         AccountMeta::new(*ctx.accounts.reserve_liquidity_supply.key, false),
         AccountMeta::new_readonly(*ctx.accounts.lending_market.key, false),
         AccountMeta::new_readonly(*ctx.accounts.lending_market_authority.key, false),
-        AccountMeta::new(*ctx.accounts.vault_authority.key, true),            // user_transfer_authority (signer)
+        AccountMeta::new_readonly(*ctx.accounts.vault_authority.key, true),   // user_transfer_authority (signer, NOT writable per Solend spec)
         AccountMeta::new_readonly(*ctx.accounts.clock_sysvar.key, false),
         AccountMeta::new_readonly(*ctx.accounts.token_program.key, false),
     ];
