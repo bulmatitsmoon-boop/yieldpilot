@@ -70,7 +70,7 @@ async function main() {
 
   const sig = await program.methods
     .withdraw(shares, new anchor.BN(0)) // min_amount_out = 0, no slippage guard for this test
-    .accounts({
+    .accountsPartial({
       user: user.publicKey,
       vault: vaultPda,
       vaultAuthority,
