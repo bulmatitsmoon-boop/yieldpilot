@@ -113,6 +113,8 @@ pub enum LpVaultError {
     Unauthorized,
     #[msg("Name too long (max 32 chars)")]
     NameTooLong,
+    #[msg("Output below minimum — slippage exceeded")]
+    SlippageExceeded,
 }
 
 // ── Account contexts ──────────────────────────────────────────────────────────
@@ -485,6 +487,14 @@ pub fn withdraw_lp_handler(
         .and_then(|x| x.checked_div(v.total_shares as u128))
         .ok_or(LpVaultError::MathOverflow)?;
 
+    // Measure vault staging-account balances before the CPI so we know
+    // exactly how much of each token the pool actually returned — the real
+    // amounts depend on the pool's live price at execution time, not just
+    // the liquidity_amount we requested (same before/after pattern used by
+    // recall_from_kamino / recall_from_marinade in the main vault).
+    let vault_a_before = ctx.accounts.vault_token_a_account.amount;
+    let vault_b_before = ctx.accounts.vault_token_b_account.amount;
+
     orca_decrease_liquidity(
         CpiContext::new_with_signer(
             ctx.accounts.whirlpool_program.to_account_info(),
@@ -521,15 +531,37 @@ pub fn withdraw_lp_handler(
         shares,
     )?;
 
-    // Return both tokens from the vault's staging accounts to the user.
-    // NOTE: this is a placeholder amount (the actual amounts received depend
-    // on the pool's price at execution time and aren't known until after the
-    // decrease_liquidity CPI above completes) — a real implementation must
-    // measure vault_token_{a,b}_account balances before/after the CPI
-    // (same before/after-balance pattern used in recall_from_kamino /
-    // recall_from_marinade in the main vault) rather than transferring a
-    // fixed amount. Flagged as a follow-up, not yet implemented.
-    let _ = (token_min_a, token_min_b); // silence unused-param warning until real transfer-back logic lands
+    // Measure what the CPI actually deposited into the vault's staging
+    // accounts, then enforce the caller's slippage guard against the REAL
+    // amounts (not the requested liquidity_amount) before sending anything.
+    ctx.accounts.vault_token_a_account.reload()?;
+    ctx.accounts.vault_token_b_account.reload()?;
+    let received_a = ctx.accounts.vault_token_a_account.amount.saturating_sub(vault_a_before);
+    let received_b = ctx.accounts.vault_token_b_account.amount.saturating_sub(vault_b_before);
+    require!(received_a >= token_min_a, LpVaultError::SlippageExceeded);
+    require!(received_b >= token_min_b, LpVaultError::SlippageExceeded);
+
+    let seeds: &[&[u8]] = &[b"lp_vault_authority", lp_vault_key.as_ref(), &[authority_bump]];
+    if received_a > 0 {
+        anchor_spl::token::transfer(
+            CpiContext::new_with_signer(ctx.accounts.token_program.to_account_info(), Transfer {
+                from: ctx.accounts.vault_token_a_account.to_account_info(),
+                to: ctx.accounts.user_token_a_account.to_account_info(),
+                authority: ctx.accounts.vault_authority.to_account_info(),
+            }, &[seeds]),
+            received_a,
+        )?;
+    }
+    if received_b > 0 {
+        anchor_spl::token::transfer(
+            CpiContext::new_with_signer(ctx.accounts.token_program.to_account_info(), Transfer {
+                from: ctx.accounts.vault_token_b_account.to_account_info(),
+                to: ctx.accounts.user_token_b_account.to_account_info(),
+                authority: ctx.accounts.vault_authority.to_account_info(),
+            }, &[seeds]),
+            received_b,
+        )?;
+    }
 
     let v = &mut ctx.accounts.lp_vault;
     v.total_liquidity = v.total_liquidity.saturating_sub(liquidity_amount);
