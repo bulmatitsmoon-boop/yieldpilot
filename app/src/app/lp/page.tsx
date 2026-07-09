@@ -6,19 +6,23 @@
  * only by direct URL, and non-functional until the LP vault instructions
  * are actually deployed (see useLpVault.ts's top-of-file note).
  *
- * Amounts here are RAW BASE UNITS (the mint's smallest denomination), not
- * human decimal amounts — this preview page deliberately skips decimals
- * conversion (would need to fetch each mint's decimals) rather than risk a
- * silent scaling bug. A real production UI needs that conversion.
+ * Token A/B amounts are human decimal input (e.g. "12.5"), converted via
+ * parseDecimalToBaseUnits using each mint's REAL decimals (fetched from the
+ * mint account itself, never assumed) — see useLpVault.ts. LP shares use a
+ * fixed 9 decimals (the shares mint is always created with mint::decimals=9
+ * in initialize_lp_vault_handler).
  */
 import { useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import * as anchor from "@coral-xyz/anchor";
-import { useLpVault, LpVaultInfo } from "@/hooks/useLpVault";
+import { useLpVault, LpVaultInfo, parseDecimalToBaseUnits, formatBaseUnitsToDecimal } from "@/hooks/useLpVault";
 import type { IncreaseLiquidityQuote, DecreaseLiquidityQuote } from "@orca-so/whirlpools-core";
 
 const DEFAULT_SLIPPAGE_BPS = 100; // 1%
+// LP shares mint is always created with mint::decimals = 9 — see
+// initialize_lp_vault_handler in lp_vault.rs.
+const LP_SHARES_DECIMALS = 9;
 
 export default function LpVaultPage() {
   const { connected } = useWallet();
@@ -54,7 +58,8 @@ export default function LpVaultPage() {
     setQuoteError(null);
     setQuote(null);
     try {
-      const q = await getDepositQuote(vaultInfo.address, new anchor.BN(amountA), DEFAULT_SLIPPAGE_BPS);
+      const rawAmountA = parseDecimalToBaseUnits(amountA, vaultInfo.tokenADecimals);
+      const q = await getDepositQuote(vaultInfo.address, rawAmountA, DEFAULT_SLIPPAGE_BPS);
       setQuote(q);
     } catch (err: any) {
       setQuoteError(err.message ?? String(err));
@@ -73,7 +78,8 @@ export default function LpVaultPage() {
     setWithdrawQuoteError(null);
     setWithdrawQuote(null);
     try {
-      const q = await getWithdrawQuote(vaultInfo.address, new anchor.BN(withdrawShares), DEFAULT_SLIPPAGE_BPS);
+      const rawShares = parseDecimalToBaseUnits(withdrawShares, LP_SHARES_DECIMALS);
+      const q = await getWithdrawQuote(vaultInfo.address, rawShares, DEFAULT_SLIPPAGE_BPS);
       setWithdrawQuote(q);
     } catch (err: any) {
       setWithdrawQuoteError(err.message ?? String(err));
@@ -82,7 +88,8 @@ export default function LpVaultPage() {
 
   async function handleWithdraw() {
     if (!vaultInfo || !withdrawQuote || !withdrawShares) return;
-    await withdrawLp(vaultInfo.address, new anchor.BN(withdrawShares), withdrawQuote);
+    const rawShares = parseDecimalToBaseUnits(withdrawShares, LP_SHARES_DECIMALS);
+    await withdrawLp(vaultInfo.address, rawShares, withdrawQuote);
     setWithdrawQuote(null);
     setWithdrawShares("");
   }
@@ -147,13 +154,13 @@ export default function LpVaultPage() {
               </div>
 
               <label style={{ display: "block", fontSize: 13, color: "var(--text-mid)", marginTop: 20, marginBottom: 6 }}>
-                Token A amount (raw base units)
+                Token A amount ({vaultInfo.tokenADecimals} decimals)
               </label>
               <div style={{ display: "flex", gap: 8 }}>
                 <input
                   value={amountA}
                   onChange={e => { setAmountA(e.target.value); setQuote(null); }}
-                  placeholder="e.g. 1000000"
+                  placeholder="e.g. 12.5"
                   style={{ flex: 1, padding: "10px 14px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--ink-800)", color: "var(--text-hi)", fontSize: 13 }}
                 />
                 <button onClick={handleGetQuote} disabled={!amountA} style={{
@@ -167,8 +174,8 @@ export default function LpVaultPage() {
 
               {quote && (
                 <div style={{ marginTop: 16, padding: 14, borderRadius: 8, background: "var(--ink-800)", fontSize: 12, color: "var(--text-mid)", fontFamily: "var(--font-mono)" }}>
-                  <div>Token A (est / max): {quote.tokenEstA.toString()} / {quote.tokenMaxA.toString()}</div>
-                  <div>Token B (est / max): {quote.tokenEstB.toString()} / {quote.tokenMaxB.toString()}</div>
+                  <div>Token A (est / max): {formatBaseUnitsToDecimal(quote.tokenEstA, vaultInfo.tokenADecimals)} / {formatBaseUnitsToDecimal(quote.tokenMaxA, vaultInfo.tokenADecimals)}</div>
+                  <div>Token B (est / max): {formatBaseUnitsToDecimal(quote.tokenEstB, vaultInfo.tokenBDecimals)} / {formatBaseUnitsToDecimal(quote.tokenMaxB, vaultInfo.tokenBDecimals)}</div>
                   <div>Liquidity delta: {quote.liquidityDelta.toString()}</div>
                 </div>
               )}
@@ -195,13 +202,13 @@ export default function LpVaultPage() {
               <div style={{ marginTop: 32, paddingTop: 24, borderTop: "1px solid var(--line)" }}>
                 <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12, color: "var(--text-hi)" }}>Withdraw</div>
                 <label style={{ display: "block", fontSize: 13, color: "var(--text-mid)", marginBottom: 6 }}>
-                  Shares to withdraw
+                  Shares to withdraw ({LP_SHARES_DECIMALS} decimals)
                 </label>
                 <div style={{ display: "flex", gap: 8 }}>
                   <input
                     value={withdrawShares}
                     onChange={e => { setWithdrawShares(e.target.value); setWithdrawQuote(null); }}
-                    placeholder="e.g. 1000000"
+                    placeholder="e.g. 1.5"
                     style={{ flex: 1, padding: "10px 14px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--ink-800)", color: "var(--text-hi)", fontSize: 13 }}
                   />
                   <button onClick={handleGetWithdrawQuote} disabled={!withdrawShares} style={{
@@ -215,8 +222,8 @@ export default function LpVaultPage() {
 
                 {withdrawQuote && (
                   <div style={{ marginTop: 16, padding: 14, borderRadius: 8, background: "var(--ink-800)", fontSize: 12, color: "var(--text-mid)", fontFamily: "var(--font-mono)" }}>
-                    <div>Token A (est / min): {withdrawQuote.tokenEstA.toString()} / {withdrawQuote.tokenMinA.toString()}</div>
-                    <div>Token B (est / min): {withdrawQuote.tokenEstB.toString()} / {withdrawQuote.tokenMinB.toString()}</div>
+                    <div>Token A (est / min): {formatBaseUnitsToDecimal(withdrawQuote.tokenEstA, vaultInfo.tokenADecimals)} / {formatBaseUnitsToDecimal(withdrawQuote.tokenMinA, vaultInfo.tokenADecimals)}</div>
+                    <div>Token B (est / min): {formatBaseUnitsToDecimal(withdrawQuote.tokenEstB, vaultInfo.tokenBDecimals)} / {formatBaseUnitsToDecimal(withdrawQuote.tokenMinB, vaultInfo.tokenBDecimals)}</div>
                   </div>
                 )}
 
