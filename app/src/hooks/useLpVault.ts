@@ -18,7 +18,7 @@ import { useCallback, useState } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import * as anchor from "@coral-xyz/anchor";
 import { PublicKey } from "@solana/web3.js";
-import { getAssociatedTokenAddress, TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { getAssociatedTokenAddress, getMint, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import IDL from "@/idl/yieldpilot.mainnet.json";
 
 // Real Orca quote math (WASM) — NOT hand-rolled. Concentrated-liquidity
@@ -99,12 +99,45 @@ export interface LpVaultInfo {
   address: string;
   name: string;
   tokenAMint: string;
+  tokenADecimals: number;
   tokenBMint: string;
+  tokenBDecimals: number;
   whirlpool: string;
   totalLiquidity: string; // u128 — kept as string, too large for safe JS number
   totalShares: number;
   positionActive: boolean;
   paused: boolean;
+}
+
+// ── Decimal <-> base-unit conversion ────────────────────────────────────────
+// String-based (not floating-point multiplication) to avoid precision loss
+// on amounts near the edge of JS's safe-integer/float range — a decimals
+// bug here would silently over/under-scale a real deposit or withdrawal.
+
+/** Parse a human decimal string (e.g. "12.5") into raw base units. */
+export function parseDecimalToBaseUnits(input: string, decimals: number): anchor.BN {
+  const trimmed = input.trim();
+  if (!/^\d*\.?\d*$/.test(trimmed) || trimmed === "" || trimmed === ".") {
+    throw new Error(`Invalid decimal amount: "${input}"`);
+  }
+  const [wholePart, fracPart = ""] = trimmed.split(".");
+  if (fracPart.length > decimals) {
+    throw new Error(`Too many decimal places for this token (max ${decimals})`);
+  }
+  const paddedFrac = fracPart.padEnd(decimals, "0");
+  const combined = (wholePart || "0") + paddedFrac;
+  // Strip leading zeros (but keep at least one digit) before BN parsing.
+  const normalized = combined.replace(/^0+(?=\d)/, "");
+  return new anchor.BN(normalized);
+}
+
+/** Format raw base units into a human decimal string. */
+export function formatBaseUnitsToDecimal(raw: bigint | string, decimals: number): string {
+  const s = raw.toString().padStart(decimals + 1, "0");
+  const wholePart = s.slice(0, s.length - decimals) || "0";
+  const fracPart = decimals > 0 ? s.slice(s.length - decimals) : "";
+  const trimmedFrac = fracPart.replace(/0+$/, "");
+  return trimmedFrac ? `${wholePart}.${trimmedFrac}` : wholePart;
 }
 
 export interface LpUserPositionInfo {
@@ -158,11 +191,25 @@ export function useLpVault() {
       const program = getProgram();
       const pubkey = new PublicKey(lpVaultAddress);
       const raw = await (program.account as any)["lpVault"].fetch(pubkey);
+      const tokenAMint = raw.tokenAMint as PublicKey;
+      const tokenBMint = raw.tokenBMint as PublicKey;
+
+      // Real decimals from each mint's own account — never assume/guess a
+      // token's decimals (e.g. USDC=6, SOL=9 aren't universal; any new pair
+      // could differ), since that's exactly the kind of silent scaling bug
+      // that would over/under-value a user's deposit.
+      const [mintAInfo, mintBInfo] = await Promise.all([
+        getMint(connection, tokenAMint),
+        getMint(connection, tokenBMint),
+      ]);
+
       return {
         address: lpVaultAddress,
         name: raw.name,
-        tokenAMint: (raw.tokenAMint as PublicKey).toBase58(),
-        tokenBMint: (raw.tokenBMint as PublicKey).toBase58(),
+        tokenAMint: tokenAMint.toBase58(),
+        tokenADecimals: mintAInfo.decimals,
+        tokenBMint: tokenBMint.toBase58(),
+        tokenBDecimals: mintBInfo.decimals,
         whirlpool: (raw.whirlpool as PublicKey).toBase58(),
         totalLiquidity: (raw.totalLiquidity as anchor.BN).toString(),
         totalShares: (raw.totalShares as anchor.BN).toNumber(),
@@ -170,7 +217,7 @@ export function useLpVault() {
         paused: raw.paused as boolean,
       };
     },
-    [getProgram]
+    [connection, getProgram]
   );
 
   const fetchLpPosition = useCallback(
