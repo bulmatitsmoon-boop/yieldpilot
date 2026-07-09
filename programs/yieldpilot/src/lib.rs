@@ -1215,6 +1215,23 @@ pub mod yieldpilot {
         withdraw_lp_handler(ctx, shares, token_min_a, token_min_b)
     }
 
+    /// Fully exit the current Whirlpool position (decrease all liquidity,
+    /// close the position). See lp_vault.rs's reposition design notes.
+    pub fn exit_lp_position(ctx: Context<ExitLpPosition>) -> Result<()> {
+        exit_lp_position_handler(ctx)
+    }
+
+    /// Open a fresh Whirlpool position at a new price range, after
+    /// exit_lp_position. Vault's tokens remain idle until a future
+    /// "redeploy idle liquidity" instruction (not yet implemented).
+    pub fn open_new_lp_position(
+        ctx: Context<OpenNewLpPosition>,
+        tick_lower_index: i32,
+        tick_upper_index: i32,
+    ) -> Result<()> {
+        open_new_lp_position_handler(ctx, tick_lower_index, tick_upper_index)
+    }
+
 }
 
 // ── Vault state ───────────────────────────────────────────────────────────────
