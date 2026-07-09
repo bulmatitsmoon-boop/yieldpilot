@@ -21,6 +21,17 @@ import { PublicKey } from "@solana/web3.js";
 import { getAssociatedTokenAddress, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import IDL from "@/idl/yieldpilot.mainnet.json";
 
+// Real Orca quote math (WASM) — NOT hand-rolled. Concentrated-liquidity
+// (Uniswap-V3-style) math is exactly the kind of thing where a subtle
+// fixed-point rounding bug means real fund loss, not a loud failure, so we
+// use Orca's own official quote functions (same Rust core the on-chain
+// program is built from) rather than reimplementing sqrt-price math here.
+// NOT YET BUILD-TESTED — WASM bundling in Next.js/webpack has real failure
+// modes (wrong target build, missing experiments flag, SSR import issues)
+// that can only be caught by an actual `npm run build`. Flagged clearly as
+// the highest-risk, least-verified part of this whole groundwork PR.
+import { increaseLiquidityQuoteA, type IncreaseLiquidityQuote } from "@orca-so/whirlpools-core";
+
 const PROGRAM_ID = new PublicKey(
   process.env.NEXT_PUBLIC_PROGRAM_ID || "CVJrJGoKjseTJqiFGctssYde3pLAnPaRZtjAaKXd8pWk"
 );
@@ -33,15 +44,23 @@ const WHIRLPOOL_PROGRAM_ID = new PublicKey("whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff
 // (programs/whirlpool/src/state/whirlpool.rs), 2026-07-08.
 interface WhirlpoolInfo {
   tickSpacing: number;
+  sqrtPrice: bigint;
   tokenMintA: PublicKey;
   tokenVaultA: PublicKey;
   tokenMintB: PublicKey;
   tokenVaultB: PublicKey;
 }
 
+function readU128LE(data: Buffer, offset: number): bigint {
+  const low = data.readBigUInt64LE(offset);
+  const high = data.readBigUInt64LE(offset + 8);
+  return (high << 64n) | low;
+}
+
 function decodeWhirlpool(data: Buffer): WhirlpoolInfo {
   return {
     tickSpacing: data.readUInt16LE(41),
+    sqrtPrice: readU128LE(data, 65),
     tokenMintA: new PublicKey(data.subarray(101, 133)),
     tokenVaultA: new PublicKey(data.subarray(133, 165)),
     tokenMintB: new PublicKey(data.subarray(181, 213)),
@@ -172,28 +191,62 @@ export function useLpVault() {
   );
 
   /**
-   * Deposit both tokens into the LP vault.
-   *
-   * NOTE: `liquidityAmount` must be computed off-chain from the desired
-   * token amounts and the pool's current sqrt_price (real concentrated-
-   * liquidity math — needs the actual formula from Orca's SDK, not yet
-   * wired in here; a wrong liquidityAmount just fails the CPI's own
-   * slippage/max-token checks, it can't silently misprice a deposit).
-   * `tokenMaxA`/`tokenMaxB` are the on-chain slippage guard regardless of
-   * how liquidityAmount was computed.
+   * Shared context fetch for deposit/withdraw: pulls the LpVault account and
+   * decodes the real Whirlpool account it points to (tick spacing, sqrt
+   * price, token vaults — all live on Orca's account, not ours).
+   */
+  const fetchLpDepositContext = useCallback(
+    async (lpVaultAddress: string) => {
+      const program = getProgram();
+      const lpVaultPubkey = new PublicKey(lpVaultAddress);
+      const raw = await (program.account as any)["lpVault"].fetch(lpVaultPubkey);
+      const whirlpoolPubkey = raw.whirlpool as PublicKey;
+
+      const whirlpoolAccountInfo = await connection.getAccountInfo(whirlpoolPubkey);
+      if (!whirlpoolAccountInfo) throw new Error("Whirlpool account not found");
+      const whirlpoolInfo = decodeWhirlpool(whirlpoolAccountInfo.data);
+
+      return { program, lpVaultPubkey, raw, whirlpoolPubkey, whirlpoolInfo };
+    },
+    [connection, getProgram]
+  );
+
+  /**
+   * Compute a real deposit quote from a desired token A amount, using
+   * Orca's own official quote function (WASM) — see the import note above
+   * for why this isn't hand-rolled math.
+   */
+  const getDepositQuote = useCallback(
+    async (lpVaultAddress: string, tokenAAmount: anchor.BN, slippageToleranceBps: number): Promise<IncreaseLiquidityQuote> => {
+      const { raw, whirlpoolInfo } = await fetchLpDepositContext(lpVaultAddress);
+      const tickLowerIndex = raw.tickLowerIndex as number;
+      const tickUpperIndex = raw.tickUpperIndex as number;
+      return increaseLiquidityQuoteA(
+        BigInt(tokenAAmount.toString()),
+        slippageToleranceBps,
+        whirlpoolInfo.sqrtPrice,
+        tickLowerIndex,
+        tickUpperIndex
+      );
+    },
+    [fetchLpDepositContext]
+  );
+
+  /**
+   * Deposit both tokens into the LP vault. `quote` must come from
+   * getDepositQuote (or the symmetric increaseLiquidityQuoteB) — this
+   * function does not compute it itself, so a caller can show the quote to
+   * the user for review before submitting.
    */
   const depositLp = useCallback(
     async (
       lpVaultAddress: string,
-      liquidityAmount: anchor.BN,
-      tokenMaxA: anchor.BN,
-      tokenMaxB: anchor.BN,
+      quote: IncreaseLiquidityQuote,
       acknowledgeImpermanentLoss: boolean
     ) => {
       if (!publicKey) return;
       return wrapTx(async () => {
-        const program = getProgram();
-        const lpVaultPubkey = new PublicKey(lpVaultAddress);
+        const { program, lpVaultPubkey, raw, whirlpoolPubkey, whirlpoolInfo } = await fetchLpDepositContext(lpVaultAddress);
 
         const [vaultAuthorityPda] = PublicKey.findProgramAddressSync(
           [Buffer.from("lp_vault_authority"), lpVaultPubkey.toBuffer()],
@@ -204,10 +257,8 @@ export function useLpVault() {
           PROGRAM_ID
         );
 
-        const raw = await (program.account as any)["lpVault"].fetch(lpVaultPubkey);
         const tokenAMint = raw.tokenAMint as PublicKey;
         const tokenBMint = raw.tokenBMint as PublicKey;
-        const whirlpoolPubkey = raw.whirlpool as PublicKey;
         const sharesMint = raw.lpSharesMint as PublicKey;
         const vaultTokenAAccount = raw.vaultTokenAAccount as PublicKey;
         const vaultTokenBAccount = raw.vaultTokenBAccount as PublicKey;
@@ -216,18 +267,16 @@ export function useLpVault() {
         const tickLowerIndex = raw.tickLowerIndex as number;
         const tickUpperIndex = raw.tickUpperIndex as number;
 
-        // Fetch the real Whirlpool account to get tick spacing and its own
-        // token vault addresses — these live on Orca's account, not ours.
-        const whirlpoolAccountInfo = await connection.getAccountInfo(whirlpoolPubkey);
-        if (!whirlpoolAccountInfo) throw new Error("Whirlpool account not found");
-        const whirlpoolInfo = decodeWhirlpool(whirlpoolAccountInfo.data);
-
         const tickArrayLower = getTickArrayPda(whirlpoolPubkey, tickLowerIndex, whirlpoolInfo.tickSpacing);
         const tickArrayUpper = getTickArrayPda(whirlpoolPubkey, tickUpperIndex, whirlpoolInfo.tickSpacing);
 
         const userTokenAAccount = await getAssociatedTokenAddress(tokenAMint, publicKey);
         const userTokenBAccount = await getAssociatedTokenAddress(tokenBMint, publicKey);
         const userSharesAccount = await getAssociatedTokenAddress(sharesMint, publicKey);
+
+        const liquidityAmount = new anchor.BN(quote.liquidityDelta.toString());
+        const tokenMaxA = new anchor.BN(quote.tokenMaxA.toString());
+        const tokenMaxB = new anchor.BN(quote.tokenMaxB.toString());
 
         return program.methods
           .depositLp(liquidityAmount, tokenMaxA, tokenMaxB, acknowledgeImpermanentLoss)
@@ -255,7 +304,7 @@ export function useLpVault() {
           .rpc();
       });
     },
-    [publicKey, connection, getProgram, wrapTx]
+    [publicKey, wrapTx, fetchLpDepositContext]
   );
 
   return {
@@ -263,6 +312,7 @@ export function useLpVault() {
     txError,
     fetchLpVault,
     fetchLpPosition,
+    getDepositQuote,
     depositLp,
   };
 }
