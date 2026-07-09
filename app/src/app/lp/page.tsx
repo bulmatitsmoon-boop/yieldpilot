@@ -17,30 +17,53 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import * as anchor from "@coral-xyz/anchor";
 import { useLpVault, LpVaultInfo, parseDecimalToBaseUnits, formatBaseUnitsToDecimal } from "@/hooks/useLpVault";
-import type { IncreaseLiquidityQuote, DecreaseLiquidityQuote } from "@orca-so/whirlpools-core";
 
 const DEFAULT_SLIPPAGE_BPS = 100; // 1%
 // LP shares mint is always created with mint::decimals = 9 — see
-// initialize_orca_lp_vault_handler in lp_vault.rs.
+// initialize_orca_lp_vault_handler / initialize_raydium_lp_vault_handler in
+// lp_vault.rs.
 const LP_SHARES_DECIMALS = 9;
+
+// Normalized shape both protocols' quote functions are mapped into here —
+// Orca's real quote object has tokenEstA/B (a point estimate) in addition to
+// the slippage-adjusted tokenMaxA/B; Raydium's doesn't compute a separate
+// estimate, so those fields are left undefined and the UI just omits that
+// part of the display for Raydium vaults.
+interface DepositQuoteDisplay {
+  liquidityDelta: anchor.BN;
+  tokenEstA?: anchor.BN;
+  tokenEstB?: anchor.BN;
+  tokenMaxA: anchor.BN;
+  tokenMaxB: anchor.BN;
+}
+interface WithdrawQuoteDisplay {
+  tokenEstA?: anchor.BN;
+  tokenEstB?: anchor.BN;
+  tokenMinA: anchor.BN;
+  tokenMinB: anchor.BN;
+}
 
 export default function LpVaultPage() {
   const { connected } = useWallet();
   const { setVisible } = useWalletModal();
-  const { txStatus, txError, fetchLpVault, getDepositQuote, depositLp, getWithdrawQuote, withdrawLp } = useLpVault();
+  const {
+    txStatus, txError, fetchLpVault,
+    getDepositQuote, depositLp, getWithdrawQuote, withdrawLp,
+    getRaydiumDepositQuote, depositRaydiumLp, getRaydiumWithdrawQuote, withdrawRaydiumLp,
+  } = useLpVault();
 
   const [lpVaultAddress, setLpVaultAddress] = useState("");
   const [vaultInfo, setVaultInfo] = useState<LpVaultInfo | null>(null);
   const [loadingVault, setLoadingVault] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [amountA, setAmountA] = useState("");
-  const [quote, setQuote] = useState<IncreaseLiquidityQuote | null>(null);
+  const [quote, setQuote] = useState<DepositQuoteDisplay | null>(null);
   const [quoting, setQuoting] = useState(false);
   const [quoteError, setQuoteError] = useState<string | null>(null);
   const [acknowledgeIL, setAcknowledgeIL] = useState(false);
 
   const [withdrawShares, setWithdrawShares] = useState("");
-  const [withdrawQuote, setWithdrawQuote] = useState<DecreaseLiquidityQuote | null>(null);
+  const [withdrawQuote, setWithdrawQuote] = useState<WithdrawQuoteDisplay | null>(null);
   const [withdrawQuoting, setWithdrawQuoting] = useState(false);
   const [withdrawQuoteError, setWithdrawQuoteError] = useState<string | null>(null);
 
@@ -66,8 +89,19 @@ export default function LpVaultPage() {
     setQuoting(true);
     try {
       const rawAmountA = parseDecimalToBaseUnits(amountA, vaultInfo.tokenADecimals);
-      const q = await getDepositQuote(vaultInfo.address, rawAmountA, DEFAULT_SLIPPAGE_BPS);
-      setQuote(q);
+      if (vaultInfo.protocol === "raydium") {
+        const q = await getRaydiumDepositQuote(vaultInfo.address, rawAmountA, DEFAULT_SLIPPAGE_BPS);
+        setQuote({ liquidityDelta: q.liquidityDelta, tokenMaxA: q.tokenMaxA, tokenMaxB: q.tokenMaxB });
+      } else {
+        const q = await getDepositQuote(vaultInfo.address, rawAmountA, DEFAULT_SLIPPAGE_BPS);
+        setQuote({
+          liquidityDelta: new anchor.BN(q.liquidityDelta.toString()),
+          tokenEstA: new anchor.BN(q.tokenEstA.toString()),
+          tokenEstB: new anchor.BN(q.tokenEstB.toString()),
+          tokenMaxA: new anchor.BN(q.tokenMaxA.toString()),
+          tokenMaxB: new anchor.BN(q.tokenMaxB.toString()),
+        });
+      }
     } catch (err: any) {
       setQuoteError(err.message ?? String(err));
     } finally {
@@ -77,7 +111,11 @@ export default function LpVaultPage() {
 
   async function handleDeposit() {
     if (!vaultInfo || !quote || !acknowledgeIL) return;
-    await depositLp(vaultInfo.address, quote, acknowledgeIL);
+    if (vaultInfo.protocol === "raydium") {
+      await depositRaydiumLp(vaultInfo.address, quote, acknowledgeIL);
+    } else {
+      await depositLp(vaultInfo.address, quote as any, acknowledgeIL);
+    }
     setQuote(null);
     setAmountA("");
   }
@@ -89,8 +127,18 @@ export default function LpVaultPage() {
     setWithdrawQuoting(true);
     try {
       const rawShares = parseDecimalToBaseUnits(withdrawShares, LP_SHARES_DECIMALS);
-      const q = await getWithdrawQuote(vaultInfo.address, rawShares, DEFAULT_SLIPPAGE_BPS);
-      setWithdrawQuote(q);
+      if (vaultInfo.protocol === "raydium") {
+        const q = await getRaydiumWithdrawQuote(vaultInfo.address, rawShares, DEFAULT_SLIPPAGE_BPS);
+        setWithdrawQuote({ tokenMinA: q.tokenMinA, tokenMinB: q.tokenMinB });
+      } else {
+        const q = await getWithdrawQuote(vaultInfo.address, rawShares, DEFAULT_SLIPPAGE_BPS);
+        setWithdrawQuote({
+          tokenEstA: new anchor.BN(q.tokenEstA.toString()),
+          tokenEstB: new anchor.BN(q.tokenEstB.toString()),
+          tokenMinA: new anchor.BN(q.tokenMinA.toString()),
+          tokenMinB: new anchor.BN(q.tokenMinB.toString()),
+        });
+      }
     } catch (err: any) {
       setWithdrawQuoteError(err.message ?? String(err));
     } finally {
@@ -101,7 +149,11 @@ export default function LpVaultPage() {
   async function handleWithdraw() {
     if (!vaultInfo || !withdrawQuote || !withdrawShares) return;
     const rawShares = parseDecimalToBaseUnits(withdrawShares, LP_SHARES_DECIMALS);
-    await withdrawLp(vaultInfo.address, rawShares, withdrawQuote);
+    if (vaultInfo.protocol === "raydium") {
+      await withdrawRaydiumLp(vaultInfo.address, rawShares, withdrawQuote);
+    } else {
+      await withdrawLp(vaultInfo.address, rawShares, withdrawQuote as any);
+    }
     setWithdrawQuote(null);
     setWithdrawShares("");
   }
@@ -115,7 +167,7 @@ export default function LpVaultPage() {
         Phase 2 — Preview / Not Live
       </div>
       <h1 style={{ fontFamily: "var(--font-display)", fontSize: 28, fontWeight: 700, marginBottom: 12, color: "var(--text-hi)" }}>
-        LP Vault (Orca Whirlpools)
+        LP Vault{vaultInfo ? ` (${vaultInfo.protocol === "raydium" ? "Raydium CLMM" : "Orca Whirlpools"})` : ""}
       </h1>
       <p style={{ color: "var(--text-mid)", fontSize: 14, lineHeight: 1.7, marginBottom: 32 }}>
         Opt-in, dual-asset liquidity provision. Carries real impermanent loss
@@ -190,8 +242,12 @@ export default function LpVaultPage() {
 
               {quote && (
                 <div style={{ marginTop: 16, padding: 14, borderRadius: 8, background: "var(--ink-800)", fontSize: 12, color: "var(--text-mid)", fontFamily: "var(--font-mono)" }}>
-                  <div>Token A (est / max): {formatBaseUnitsToDecimal(quote.tokenEstA, vaultInfo.tokenADecimals)} / {formatBaseUnitsToDecimal(quote.tokenMaxA, vaultInfo.tokenADecimals)}</div>
-                  <div>Token B (est / max): {formatBaseUnitsToDecimal(quote.tokenEstB, vaultInfo.tokenBDecimals)} / {formatBaseUnitsToDecimal(quote.tokenMaxB, vaultInfo.tokenBDecimals)}</div>
+                  <div>
+                    Token A{quote.tokenEstA ? " (est / max)" : " (max)"}: {quote.tokenEstA ? `${formatBaseUnitsToDecimal(quote.tokenEstA, vaultInfo.tokenADecimals)} / ` : ""}{formatBaseUnitsToDecimal(quote.tokenMaxA, vaultInfo.tokenADecimals)}
+                  </div>
+                  <div>
+                    Token B{quote.tokenEstB ? " (est / max)" : " (max)"}: {quote.tokenEstB ? `${formatBaseUnitsToDecimal(quote.tokenEstB, vaultInfo.tokenBDecimals)} / ` : ""}{formatBaseUnitsToDecimal(quote.tokenMaxB, vaultInfo.tokenBDecimals)}
+                  </div>
                   <div>Liquidity delta: {quote.liquidityDelta.toString()}</div>
                 </div>
               )}
@@ -241,8 +297,12 @@ export default function LpVaultPage() {
 
                 {withdrawQuote && (
                   <div style={{ marginTop: 16, padding: 14, borderRadius: 8, background: "var(--ink-800)", fontSize: 12, color: "var(--text-mid)", fontFamily: "var(--font-mono)" }}>
-                    <div>Token A (est / min): {formatBaseUnitsToDecimal(withdrawQuote.tokenEstA, vaultInfo.tokenADecimals)} / {formatBaseUnitsToDecimal(withdrawQuote.tokenMinA, vaultInfo.tokenADecimals)}</div>
-                    <div>Token B (est / min): {formatBaseUnitsToDecimal(withdrawQuote.tokenEstB, vaultInfo.tokenBDecimals)} / {formatBaseUnitsToDecimal(withdrawQuote.tokenMinB, vaultInfo.tokenBDecimals)}</div>
+                    <div>
+                      Token A{withdrawQuote.tokenEstA ? " (est / min)" : " (min)"}: {withdrawQuote.tokenEstA ? `${formatBaseUnitsToDecimal(withdrawQuote.tokenEstA, vaultInfo.tokenADecimals)} / ` : ""}{formatBaseUnitsToDecimal(withdrawQuote.tokenMinA, vaultInfo.tokenADecimals)}
+                    </div>
+                    <div>
+                      Token B{withdrawQuote.tokenEstB ? " (est / min)" : " (min)"}: {withdrawQuote.tokenEstB ? `${formatBaseUnitsToDecimal(withdrawQuote.tokenEstB, vaultInfo.tokenBDecimals)} / ` : ""}{formatBaseUnitsToDecimal(withdrawQuote.tokenMinB, vaultInfo.tokenBDecimals)}
+                    </div>
                   </div>
                 )}
 
