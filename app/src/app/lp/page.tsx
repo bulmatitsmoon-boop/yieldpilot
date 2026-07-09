@@ -10,7 +10,7 @@
  * parseDecimalToBaseUnits using each mint's REAL decimals (fetched from the
  * mint account itself, never assumed) — see useLpVault.ts. LP shares use a
  * fixed 9 decimals (the shares mint is always created with mint::decimals=9
- * in initialize_lp_vault_handler).
+ * in initialize_orca_lp_vault_handler).
  */
 import { useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
@@ -21,7 +21,7 @@ import type { IncreaseLiquidityQuote, DecreaseLiquidityQuote } from "@orca-so/wh
 
 const DEFAULT_SLIPPAGE_BPS = 100; // 1%
 // LP shares mint is always created with mint::decimals = 9 — see
-// initialize_lp_vault_handler in lp_vault.rs.
+// initialize_orca_lp_vault_handler in lp_vault.rs.
 const LP_SHARES_DECIMALS = 9;
 
 export default function LpVaultPage() {
