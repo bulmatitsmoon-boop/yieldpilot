@@ -1079,6 +1079,7 @@ pub mod raydium_lp {
         pub token_vault_1: UncheckedAccount<'info>,
 
         pub token_program: Program<'info, Token>,
+        pub system_program: Program<'info, System>,
         /// CHECK: address verified in adapter
         #[account(address = RAYDIUM_CLMM_PROGRAM_ID)]
         pub raydium_program: UncheckedAccount<'info>,
