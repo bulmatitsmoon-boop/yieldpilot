@@ -1222,14 +1222,27 @@ pub mod yieldpilot {
     }
 
     /// Open a fresh Whirlpool position at a new price range, after
-    /// exit_lp_position. Vault's tokens remain idle until a future
-    /// "redeploy idle liquidity" instruction (not yet implemented).
+    /// exit_lp_position. Vault's tokens remain idle until redeploy_lp_liquidity
+    /// moves them into the new position.
     pub fn open_new_lp_position(
         ctx: Context<OpenNewLpPosition>,
         tick_lower_index: i32,
         tick_upper_index: i32,
     ) -> Result<()> {
         open_new_lp_position_handler(ctx, tick_lower_index, tick_upper_index)
+    }
+
+    /// Move the vault's own idle tokens into the currently active position
+    /// (e.g. after open_new_lp_position, or simply topping up an
+    /// under-deployed position). Distinct from deposit_lp, which pulls from
+    /// a user — this moves tokens the vault already owns.
+    pub fn redeploy_lp_liquidity(
+        ctx: Context<RedeployLpLiquidity>,
+        liquidity_amount: u128,
+        token_max_a: u64,
+        token_max_b: u64,
+    ) -> Result<()> {
+        redeploy_lp_liquidity_handler(ctx, liquidity_amount, token_max_a, token_max_b)
     }
 
 }
