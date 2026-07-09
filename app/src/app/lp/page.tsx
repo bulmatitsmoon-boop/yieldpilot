@@ -31,25 +31,31 @@ export default function LpVaultPage() {
 
   const [lpVaultAddress, setLpVaultAddress] = useState("");
   const [vaultInfo, setVaultInfo] = useState<LpVaultInfo | null>(null);
+  const [loadingVault, setLoadingVault] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [amountA, setAmountA] = useState("");
   const [quote, setQuote] = useState<IncreaseLiquidityQuote | null>(null);
+  const [quoting, setQuoting] = useState(false);
   const [quoteError, setQuoteError] = useState<string | null>(null);
   const [acknowledgeIL, setAcknowledgeIL] = useState(false);
 
   const [withdrawShares, setWithdrawShares] = useState("");
   const [withdrawQuote, setWithdrawQuote] = useState<DecreaseLiquidityQuote | null>(null);
+  const [withdrawQuoting, setWithdrawQuoting] = useState(false);
   const [withdrawQuoteError, setWithdrawQuoteError] = useState<string | null>(null);
 
   async function handleLoadVault() {
     setLoadError(null);
     setVaultInfo(null);
     setQuote(null);
+    setLoadingVault(true);
     try {
       const info = await fetchLpVault(lpVaultAddress.trim());
       setVaultInfo(info);
     } catch (err: any) {
       setLoadError(err.message ?? String(err));
+    } finally {
+      setLoadingVault(false);
     }
   }
 
@@ -57,12 +63,15 @@ export default function LpVaultPage() {
     if (!vaultInfo || !amountA) return;
     setQuoteError(null);
     setQuote(null);
+    setQuoting(true);
     try {
       const rawAmountA = parseDecimalToBaseUnits(amountA, vaultInfo.tokenADecimals);
       const q = await getDepositQuote(vaultInfo.address, rawAmountA, DEFAULT_SLIPPAGE_BPS);
       setQuote(q);
     } catch (err: any) {
       setQuoteError(err.message ?? String(err));
+    } finally {
+      setQuoting(false);
     }
   }
 
@@ -77,12 +86,15 @@ export default function LpVaultPage() {
     if (!vaultInfo || !withdrawShares) return;
     setWithdrawQuoteError(null);
     setWithdrawQuote(null);
+    setWithdrawQuoting(true);
     try {
       const rawShares = parseDecimalToBaseUnits(withdrawShares, LP_SHARES_DECIMALS);
       const q = await getWithdrawQuote(vaultInfo.address, rawShares, DEFAULT_SLIPPAGE_BPS);
       setWithdrawQuote(q);
     } catch (err: any) {
       setWithdrawQuoteError(err.message ?? String(err));
+    } finally {
+      setWithdrawQuoting(false);
     }
   }
 
@@ -134,11 +146,13 @@ export default function LpVaultPage() {
                   background: "var(--ink-800)", color: "var(--text-hi)", fontSize: 13, fontFamily: "var(--font-mono)",
                 }}
               />
-              <button onClick={handleLoadVault} style={{
+              <button onClick={handleLoadVault} disabled={!lpVaultAddress.trim() || loadingVault} style={{
                 padding: "10px 18px", borderRadius: 8, border: "1px solid var(--line)",
-                background: "var(--ink-700)", color: "var(--text-hi)", fontSize: 13, cursor: "pointer",
+                background: "var(--ink-700)", color: "var(--text-hi)", fontSize: 13,
+                cursor: !lpVaultAddress.trim() || loadingVault ? "not-allowed" : "pointer",
+                opacity: !lpVaultAddress.trim() || loadingVault ? 0.5 : 1,
               }}>
-                Load
+                {loadingVault ? "Loading…" : "Load"}
               </button>
             </div>
             {loadError && <div style={{ color: "var(--loss)", fontSize: 12, marginTop: 8 }}>{loadError}</div>}
@@ -163,11 +177,13 @@ export default function LpVaultPage() {
                   placeholder="e.g. 12.5"
                   style={{ flex: 1, padding: "10px 14px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--ink-800)", color: "var(--text-hi)", fontSize: 13 }}
                 />
-                <button onClick={handleGetQuote} disabled={!amountA} style={{
+                <button onClick={handleGetQuote} disabled={!amountA || quoting} style={{
                   padding: "10px 18px", borderRadius: 8, border: "1px solid var(--line)",
-                  background: "var(--ink-700)", color: "var(--text-hi)", fontSize: 13, cursor: amountA ? "pointer" : "not-allowed",
+                  background: "var(--ink-700)", color: "var(--text-hi)", fontSize: 13,
+                  cursor: !amountA || quoting ? "not-allowed" : "pointer",
+                  opacity: !amountA || quoting ? 0.5 : 1,
                 }}>
-                  Get Quote
+                  {quoting ? "Quoting…" : "Get Quote"}
                 </button>
               </div>
               {quoteError && <div style={{ color: "var(--loss)", fontSize: 12, marginTop: 8 }}>{quoteError}</div>}
@@ -198,6 +214,7 @@ export default function LpVaultPage() {
                 {txStatus === "signing" || txStatus === "confirming" ? "Confirming…" : "Deposit"}
               </button>
               {txError && <div style={{ color: "var(--loss)", fontSize: 12, marginTop: 8 }}>{txError}</div>}
+              {txStatus === "success" && <div style={{ color: "var(--signal)", fontSize: 12, marginTop: 8 }}>✓ Confirmed</div>}
 
               <div style={{ marginTop: 32, paddingTop: 24, borderTop: "1px solid var(--line)" }}>
                 <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12, color: "var(--text-hi)" }}>Withdraw</div>
@@ -211,11 +228,13 @@ export default function LpVaultPage() {
                     placeholder="e.g. 1.5"
                     style={{ flex: 1, padding: "10px 14px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--ink-800)", color: "var(--text-hi)", fontSize: 13 }}
                   />
-                  <button onClick={handleGetWithdrawQuote} disabled={!withdrawShares} style={{
+                  <button onClick={handleGetWithdrawQuote} disabled={!withdrawShares || withdrawQuoting} style={{
                     padding: "10px 18px", borderRadius: 8, border: "1px solid var(--line)",
-                    background: "var(--ink-700)", color: "var(--text-hi)", fontSize: 13, cursor: withdrawShares ? "pointer" : "not-allowed",
+                    background: "var(--ink-700)", color: "var(--text-hi)", fontSize: 13,
+                    cursor: !withdrawShares || withdrawQuoting ? "not-allowed" : "pointer",
+                    opacity: !withdrawShares || withdrawQuoting ? 0.5 : 1,
                   }}>
-                    Get Quote
+                    {withdrawQuoting ? "Quoting…" : "Get Quote"}
                   </button>
                 </div>
                 {withdrawQuoteError && <div style={{ color: "var(--loss)", fontSize: 12, marginTop: 8 }}>{withdrawQuoteError}</div>}
@@ -239,6 +258,7 @@ export default function LpVaultPage() {
                 >
                   {txStatus === "signing" || txStatus === "confirming" ? "Confirming…" : "Withdraw"}
                 </button>
+                {txStatus === "success" && <div style={{ color: "var(--signal)", fontSize: 12, marginTop: 8 }}>✓ Confirmed</div>}
               </div>
             </div>
           )}
