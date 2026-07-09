@@ -16,14 +16,14 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import * as anchor from "@coral-xyz/anchor";
 import { useLpVault, LpVaultInfo } from "@/hooks/useLpVault";
-import type { IncreaseLiquidityQuote } from "@orca-so/whirlpools-core";
+import type { IncreaseLiquidityQuote, DecreaseLiquidityQuote } from "@orca-so/whirlpools-core";
 
 const DEFAULT_SLIPPAGE_BPS = 100; // 1%
 
 export default function LpVaultPage() {
   const { connected } = useWallet();
   const { setVisible } = useWalletModal();
-  const { txStatus, txError, fetchLpVault, getDepositQuote, depositLp } = useLpVault();
+  const { txStatus, txError, fetchLpVault, getDepositQuote, depositLp, getWithdrawQuote, withdrawLp } = useLpVault();
 
   const [lpVaultAddress, setLpVaultAddress] = useState("");
   const [vaultInfo, setVaultInfo] = useState<LpVaultInfo | null>(null);
@@ -32,6 +32,10 @@ export default function LpVaultPage() {
   const [quote, setQuote] = useState<IncreaseLiquidityQuote | null>(null);
   const [quoteError, setQuoteError] = useState<string | null>(null);
   const [acknowledgeIL, setAcknowledgeIL] = useState(false);
+
+  const [withdrawShares, setWithdrawShares] = useState("");
+  const [withdrawQuote, setWithdrawQuote] = useState<DecreaseLiquidityQuote | null>(null);
+  const [withdrawQuoteError, setWithdrawQuoteError] = useState<string | null>(null);
 
   async function handleLoadVault() {
     setLoadError(null);
@@ -62,6 +66,25 @@ export default function LpVaultPage() {
     await depositLp(vaultInfo.address, quote, acknowledgeIL);
     setQuote(null);
     setAmountA("");
+  }
+
+  async function handleGetWithdrawQuote() {
+    if (!vaultInfo || !withdrawShares) return;
+    setWithdrawQuoteError(null);
+    setWithdrawQuote(null);
+    try {
+      const q = await getWithdrawQuote(vaultInfo.address, new anchor.BN(withdrawShares), DEFAULT_SLIPPAGE_BPS);
+      setWithdrawQuote(q);
+    } catch (err: any) {
+      setWithdrawQuoteError(err.message ?? String(err));
+    }
+  }
+
+  async function handleWithdraw() {
+    if (!vaultInfo || !withdrawQuote || !withdrawShares) return;
+    await withdrawLp(vaultInfo.address, new anchor.BN(withdrawShares), withdrawQuote);
+    setWithdrawQuote(null);
+    setWithdrawShares("");
   }
 
   return (
@@ -168,6 +191,48 @@ export default function LpVaultPage() {
                 {txStatus === "signing" || txStatus === "confirming" ? "Confirming…" : "Deposit"}
               </button>
               {txError && <div style={{ color: "var(--loss)", fontSize: 12, marginTop: 8 }}>{txError}</div>}
+
+              <div style={{ marginTop: 32, paddingTop: 24, borderTop: "1px solid var(--line)" }}>
+                <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12, color: "var(--text-hi)" }}>Withdraw</div>
+                <label style={{ display: "block", fontSize: 13, color: "var(--text-mid)", marginBottom: 6 }}>
+                  Shares to withdraw
+                </label>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input
+                    value={withdrawShares}
+                    onChange={e => { setWithdrawShares(e.target.value); setWithdrawQuote(null); }}
+                    placeholder="e.g. 1000000"
+                    style={{ flex: 1, padding: "10px 14px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--ink-800)", color: "var(--text-hi)", fontSize: 13 }}
+                  />
+                  <button onClick={handleGetWithdrawQuote} disabled={!withdrawShares} style={{
+                    padding: "10px 18px", borderRadius: 8, border: "1px solid var(--line)",
+                    background: "var(--ink-700)", color: "var(--text-hi)", fontSize: 13, cursor: withdrawShares ? "pointer" : "not-allowed",
+                  }}>
+                    Get Quote
+                  </button>
+                </div>
+                {withdrawQuoteError && <div style={{ color: "var(--loss)", fontSize: 12, marginTop: 8 }}>{withdrawQuoteError}</div>}
+
+                {withdrawQuote && (
+                  <div style={{ marginTop: 16, padding: 14, borderRadius: 8, background: "var(--ink-800)", fontSize: 12, color: "var(--text-mid)", fontFamily: "var(--font-mono)" }}>
+                    <div>Token A (est / min): {withdrawQuote.tokenEstA.toString()} / {withdrawQuote.tokenMinA.toString()}</div>
+                    <div>Token B (est / min): {withdrawQuote.tokenEstB.toString()} / {withdrawQuote.tokenMinB.toString()}</div>
+                  </div>
+                )}
+
+                <button
+                  onClick={handleWithdraw}
+                  disabled={!withdrawQuote}
+                  style={{
+                    marginTop: 16, width: "100%", padding: "12px", borderRadius: 8, border: "none",
+                    background: withdrawQuote ? "var(--signal)" : "var(--ink-700)",
+                    color: withdrawQuote ? "var(--ink-900)" : "var(--text-low)",
+                    fontWeight: 700, fontSize: 14, cursor: withdrawQuote ? "pointer" : "not-allowed",
+                  }}
+                >
+                  {txStatus === "signing" || txStatus === "confirming" ? "Confirming…" : "Withdraw"}
+                </button>
+              </div>
             </div>
           )}
         </>
