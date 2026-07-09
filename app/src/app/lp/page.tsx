@@ -5,28 +5,38 @@
  * nav (desktop or mobile menu) or anywhere else in the app yet. Reachable
  * only by direct URL, and non-functional until the LP vault instructions
  * are actually deployed (see useLpVault.ts's top-of-file note).
+ *
+ * Amounts here are RAW BASE UNITS (the mint's smallest denomination), not
+ * human decimal amounts — this preview page deliberately skips decimals
+ * conversion (would need to fetch each mint's decimals) rather than risk a
+ * silent scaling bug. A real production UI needs that conversion.
  */
 import { useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import * as anchor from "@coral-xyz/anchor";
 import { useLpVault, LpVaultInfo } from "@/hooks/useLpVault";
+import type { IncreaseLiquidityQuote } from "@orca-so/whirlpools-core";
+
+const DEFAULT_SLIPPAGE_BPS = 100; // 1%
 
 export default function LpVaultPage() {
   const { connected } = useWallet();
   const { setVisible } = useWalletModal();
-  const { txStatus, txError, fetchLpVault, depositLp } = useLpVault();
+  const { txStatus, txError, fetchLpVault, getDepositQuote, depositLp } = useLpVault();
 
   const [lpVaultAddress, setLpVaultAddress] = useState("");
   const [vaultInfo, setVaultInfo] = useState<LpVaultInfo | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [amountA, setAmountA] = useState("");
-  const [amountB, setAmountB] = useState("");
+  const [quote, setQuote] = useState<IncreaseLiquidityQuote | null>(null);
+  const [quoteError, setQuoteError] = useState<string | null>(null);
   const [acknowledgeIL, setAcknowledgeIL] = useState(false);
 
   async function handleLoadVault() {
     setLoadError(null);
     setVaultInfo(null);
+    setQuote(null);
     try {
       const info = await fetchLpVault(lpVaultAddress.trim());
       setVaultInfo(info);
@@ -35,12 +45,23 @@ export default function LpVaultPage() {
     }
   }
 
+  async function handleGetQuote() {
+    if (!vaultInfo || !amountA) return;
+    setQuoteError(null);
+    setQuote(null);
+    try {
+      const q = await getDepositQuote(vaultInfo.address, new anchor.BN(amountA), DEFAULT_SLIPPAGE_BPS);
+      setQuote(q);
+    } catch (err: any) {
+      setQuoteError(err.message ?? String(err));
+    }
+  }
+
   async function handleDeposit() {
-    if (!vaultInfo || !acknowledgeIL) return;
-    // NOTE: this passes raw amounts as a stand-in for a real liquidity_amount
-    // — see useLpVault.ts's depositLp doc comment. Not accurate until real
-    // Whirlpool quote math is wired in. Disabled below until that lands.
-    console.warn("LP deposit math not yet implemented — see useLpVault.ts");
+    if (!vaultInfo || !quote || !acknowledgeIL) return;
+    await depositLp(vaultInfo.address, quote, acknowledgeIL);
+    setQuote(null);
+    setAmountA("");
   }
 
   return (
@@ -102,20 +123,32 @@ export default function LpVaultPage() {
                 <div>Paused: {vaultInfo.paused ? "yes" : "no"}</div>
               </div>
 
-              <div style={{ marginTop: 20, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <label style={{ display: "block", fontSize: 13, color: "var(--text-mid)", marginTop: 20, marginBottom: 6 }}>
+                Token A amount (raw base units)
+              </label>
+              <div style={{ display: "flex", gap: 8 }}>
                 <input
                   value={amountA}
-                  onChange={e => setAmountA(e.target.value)}
-                  placeholder="Token A amount"
-                  style={{ padding: "10px 14px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--ink-800)", color: "var(--text-hi)", fontSize: 13 }}
+                  onChange={e => { setAmountA(e.target.value); setQuote(null); }}
+                  placeholder="e.g. 1000000"
+                  style={{ flex: 1, padding: "10px 14px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--ink-800)", color: "var(--text-hi)", fontSize: 13 }}
                 />
-                <input
-                  value={amountB}
-                  onChange={e => setAmountB(e.target.value)}
-                  placeholder="Token B amount"
-                  style={{ padding: "10px 14px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--ink-800)", color: "var(--text-hi)", fontSize: 13 }}
-                />
+                <button onClick={handleGetQuote} disabled={!amountA} style={{
+                  padding: "10px 18px", borderRadius: 8, border: "1px solid var(--line)",
+                  background: "var(--ink-700)", color: "var(--text-hi)", fontSize: 13, cursor: amountA ? "pointer" : "not-allowed",
+                }}>
+                  Get Quote
+                </button>
               </div>
+              {quoteError && <div style={{ color: "var(--loss)", fontSize: 12, marginTop: 8 }}>{quoteError}</div>}
+
+              {quote && (
+                <div style={{ marginTop: 16, padding: 14, borderRadius: 8, background: "var(--ink-800)", fontSize: 12, color: "var(--text-mid)", fontFamily: "var(--font-mono)" }}>
+                  <div>Token A (est / max): {quote.tokenEstA.toString()} / {quote.tokenMaxA.toString()}</div>
+                  <div>Token B (est / max): {quote.tokenEstB.toString()} / {quote.tokenMaxB.toString()}</div>
+                  <div>Liquidity delta: {quote.liquidityDelta.toString()}</div>
+                </div>
+              )}
 
               <label style={{ display: "flex", alignItems: "flex-start", gap: 8, marginTop: 16, fontSize: 13, color: "var(--text-mid)", cursor: "pointer" }}>
                 <input type="checkbox" checked={acknowledgeIL} onChange={e => setAcknowledgeIL(e.target.checked)} style={{ marginTop: 2 }} />
@@ -124,12 +157,12 @@ export default function LpVaultPage() {
 
               <button
                 onClick={handleDeposit}
-                disabled={!acknowledgeIL || !amountA || !amountB}
+                disabled={!acknowledgeIL || !quote}
                 style={{
                   marginTop: 16, width: "100%", padding: "12px", borderRadius: 8, border: "none",
-                  background: acknowledgeIL ? "var(--signal)" : "var(--ink-700)",
-                  color: acknowledgeIL ? "var(--ink-900)" : "var(--text-low)",
-                  fontWeight: 700, fontSize: 14, cursor: acknowledgeIL ? "pointer" : "not-allowed",
+                  background: acknowledgeIL && quote ? "var(--signal)" : "var(--ink-700)",
+                  color: acknowledgeIL && quote ? "var(--ink-900)" : "var(--text-low)",
+                  fontWeight: 700, fontSize: 14, cursor: acknowledgeIL && quote ? "pointer" : "not-allowed",
                 }}
               >
                 {txStatus === "signing" || txStatus === "confirming" ? "Confirming…" : "Deposit"}
