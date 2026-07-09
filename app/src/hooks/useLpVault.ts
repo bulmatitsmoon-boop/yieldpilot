@@ -168,6 +168,7 @@ function getRaydiumProtocolPositionPda(poolState: PublicKey, tickLowerIndex: num
 export interface LpVaultInfo {
   address: string;
   name: string;
+  protocol: "orca" | "raydium";
   tokenAMint: string;
   tokenADecimals: number;
   tokenBMint: string;
@@ -273,9 +274,14 @@ export function useLpVault() {
         getMint(connection, tokenBMint),
       ]);
 
+      // Anchor represents a fieldless Rust enum variant as an object keyed
+      // by the lowercased variant name, e.g. `{ orca: {} }` / `{ raydium: {} }`.
+      const protocol: "orca" | "raydium" = "raydium" in (raw.protocol as object) ? "raydium" : "orca";
+
       return {
         address: lpVaultAddress,
         name: raw.name,
+        protocol,
         tokenAMint: tokenAMint.toBase58(),
         tokenADecimals: mintAInfo.decimals,
         tokenBMint: tokenBMint.toBase58(),
