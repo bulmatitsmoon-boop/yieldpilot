@@ -4,8 +4,9 @@
  * useLpVault.ts — frontend hook for the opt-in, dual-asset Orca Whirlpool
  * LP vault (Phase 2 groundwork, not linked from any nav/page yet).
  *
- * IMPORTANT: this hook targets instructions (initialize_lp_vault, deposit_lp,
- * withdraw_lp, etc.) that exist in lp_vault.rs but are NOT YET DEPLOYED —
+ * IMPORTANT: this hook targets instructions (initialize_orca_lp_vault,
+ * deposit_orca_lp, withdraw_orca_lp, etc.) that exist in lp_vault.rs but are
+ * NOT YET DEPLOYED —
  * the committed mainnet IDL (@/idl/yieldpilot.mainnet.json) won't include
  * them until that program upgrade happens. This hook will not actually work
  * against the live program yet; it's written correctly against the PR's
@@ -335,7 +336,7 @@ export function useLpVault() {
         const tokenMaxB = new anchor.BN(quote.tokenMaxB.toString());
 
         return program.methods
-          .depositLp(liquidityAmount, tokenMaxA, tokenMaxB, acknowledgeImpermanentLoss)
+          .depositOrcaLp(liquidityAmount, tokenMaxA, tokenMaxB, acknowledgeImpermanentLoss)
           .accountsPartial({
             user: publicKey,
             lpVault: lpVaultPubkey,
@@ -432,7 +433,7 @@ export function useLpVault() {
         const tokenMinB = new anchor.BN(quote.tokenMinB.toString());
 
         return program.methods
-          .withdrawLp(shares, tokenMinA, tokenMinB)
+          .withdrawOrcaLp(shares, tokenMinA, tokenMinB)
           .accountsPartial({
             user: publicKey,
             lpVault: lpVaultPubkey,
