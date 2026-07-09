@@ -23,8 +23,8 @@ use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, Token, TokenAccount, Transfer};
 
 use crate::adapters::orca::{
-    OrcaModifyLiquidity, OrcaOpenPosition, WHIRLPOOL_PROGRAM_ID,
-    orca_decrease_liquidity, orca_increase_liquidity, orca_open_position,
+    OrcaClosePosition, OrcaModifyLiquidity, OrcaOpenPosition, WHIRLPOOL_PROGRAM_ID,
+    orca_close_position, orca_decrease_liquidity, orca_increase_liquidity, orca_open_position,
 };
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -50,6 +50,10 @@ pub struct LpVault {
     pub total_liquidity:          u128,
     pub total_shares:             u64,
     pub paused:                   bool,
+    /// False between exit_lp_position and open_new_lp_position — the vault
+    /// holds idle tokens but has no live Whirlpool position. deposit_lp and
+    /// withdraw_lp both require this to be true (see their constraints).
+    pub position_active:         bool,
     pub bump:                     u8,
     pub authority_bump:           u8,
     pub name:                     String,
@@ -61,7 +65,7 @@ impl LpVault {
         + 4 * 2     // tick indices (i32)
         + 16        // total_liquidity (u128)
         + 8         // total_shares
-        + 1         // paused
+        + 2         // paused + position_active
         + 2         // bumps
         + 4 + 32    // name
         + 64;       // padding for future fields
@@ -115,6 +119,10 @@ pub enum LpVaultError {
     NameTooLong,
     #[msg("Output below minimum — slippage exceeded")]
     SlippageExceeded,
+    #[msg("No active Whirlpool position — vault is mid-reposition")]
+    NoActivePosition,
+    #[msg("Position still has liquidity — exit it fully before reopening")]
+    PositionStillActive,
 }
 
 // ── Account contexts ──────────────────────────────────────────────────────────
@@ -351,6 +359,7 @@ pub fn initialize_lp_vault_handler(
     v.total_liquidity         = 0;
     v.total_shares            = 0;
     v.paused                  = false;
+    v.position_active         = true;
     v.bump                    = ctx.bumps.lp_vault;
     v.authority_bump          = authority_bump;
     v.name                    = params.name;
@@ -368,6 +377,7 @@ pub fn deposit_lp_handler(
 ) -> Result<()> {
     require!(liquidity_amount > 0, LpVaultError::ZeroAmount);
     require!(acknowledge_impermanent_loss, LpVaultError::MustAcknowledgeImpermanentLoss);
+    require!(ctx.accounts.lp_vault.position_active, LpVaultError::NoActivePosition);
 
     let lp_vault_key = ctx.accounts.lp_vault.key();
     let authority_bump = ctx.accounts.lp_vault.authority_bump;
@@ -476,6 +486,12 @@ pub fn withdraw_lp_handler(
 ) -> Result<()> {
     require!(shares > 0, LpVaultError::ZeroAmount);
     require!(ctx.accounts.user_position.shares >= shares, LpVaultError::InsufficientShares);
+    // NOTE: while a reposition is in progress (position_active == false),
+    // withdrawals are briefly blocked — there's no live Whirlpool position
+    // to decrease liquidity from. This is a deliberate, honest tradeoff for
+    // a rare, short-lived admin action, not silently swallowed as a
+    // different/confusing on-chain failure.
+    require!(ctx.accounts.lp_vault.position_active, LpVaultError::NoActivePosition);
 
     let lp_vault_key = ctx.accounts.lp_vault.key();
     let authority_bump = ctx.accounts.lp_vault.authority_bump;
@@ -575,8 +591,223 @@ pub fn withdraw_lp_handler(
     Ok(())
 }
 
+// ── Reposition: manual, keeper/admin-triggered price-range change ────────────
+//
+// v1 price-range strategy: fixed at init, no automated rebalancing (real
+// concentrated-liquidity market-making — deciding WHEN to move ranges based
+// on price action — is a much bigger, riskier undertaking involving price
+// oracles and timing heuristics; not something to guess at blind). Instead,
+// the range can be manually repositioned in two explicit steps, mirroring
+// how the main Vault already separates recall from deploy as distinct
+// keeper-callable actions rather than one risky all-in-one instruction:
+//
+//   1. exit_lp_position (keeper) — fully exits the current position
+//      (decrease ALL liquidity, close the position, reclaim its rent).
+//      Vault's tokens end up idle in vault_token_{a,b}_account.
+//      LP shares/user positions are untouched — they're a claim on the
+//      vault's total token value, not tied to a specific Whirlpool position.
+//   2. open_new_lp_position (admin) — opens a fresh position at a new tick
+//      range. Vault is left with idle tokens NOT yet redeployed.
+//
+// Redeploying the idle tokens into the new position reuses deposit_lp's own
+// increase_liquidity path is NOT correct (deposit_lp pulls from a user, not
+// from the vault's own idle balance) — a dedicated "redeploy idle liquidity"
+// instruction is a known follow-up, not yet implemented. Until then, exiting
+// a position intentionally leaves it idle (safe — no funds lost/at risk that
+// aren't already in vault-owned accounts) rather than risk an
+// under-specified implementation moving real money incorrectly.
+
+#[derive(Accounts)]
+pub struct ExitLpPosition<'info> {
+    #[account(mut, constraint = keeper.key() == lp_vault.keeper @ LpVaultError::Unauthorized)]
+    pub keeper: Signer<'info>,
+
+    #[account(mut, constraint = lp_vault.position_active @ LpVaultError::NoActivePosition)]
+    pub lp_vault: Box<Account<'info, LpVault>>,
+
+    /// CHECK: PDA, verified by seeds
+    #[account(mut, seeds = [b"lp_vault_authority", lp_vault.key().as_ref()], bump = lp_vault.authority_bump)]
+    pub vault_authority: UncheckedAccount<'info>,
+
+    #[account(mut, address = lp_vault.vault_token_a_account)]
+    pub vault_token_a_account: Box<Account<'info, TokenAccount>>,
+    #[account(mut, address = lp_vault.vault_token_b_account)]
+    pub vault_token_b_account: Box<Account<'info, TokenAccount>>,
+
+    /// CHECK: Whirlpool program validates
+    #[account(mut, address = lp_vault.whirlpool)]
+    pub whirlpool: UncheckedAccount<'info>,
+    /// CHECK: Whirlpool program validates (close = vault_authority)
+    #[account(mut, address = lp_vault.position)]
+    pub position: UncheckedAccount<'info>,
+    /// CHECK: Whirlpool program validates (address = position.position_mint)
+    #[account(mut, address = lp_vault.position_mint)]
+    pub position_mint: UncheckedAccount<'info>,
+    #[account(mut, address = lp_vault.position_token_account)]
+    pub position_token_account: Box<Account<'info, TokenAccount>>,
+    /// CHECK: Whirlpool program validates
+    #[account(mut)]
+    pub token_vault_a: UncheckedAccount<'info>,
+    /// CHECK: Whirlpool program validates
+    #[account(mut)]
+    pub token_vault_b: UncheckedAccount<'info>,
+    /// CHECK: Whirlpool program validates
+    #[account(mut)]
+    pub tick_array_lower: UncheckedAccount<'info>,
+    /// CHECK: Whirlpool program validates
+    #[account(mut)]
+    pub tick_array_upper: UncheckedAccount<'info>,
+
+    pub token_program: Program<'info, Token>,
+    /// CHECK: address verified in adapter
+    #[account(address = WHIRLPOOL_PROGRAM_ID)]
+    pub whirlpool_program: UncheckedAccount<'info>,
+}
+
+pub fn exit_lp_position_handler(ctx: Context<ExitLpPosition>) -> Result<()> {
+    let lp_vault_key = ctx.accounts.lp_vault.key();
+    let authority_bump = ctx.accounts.lp_vault.authority_bump;
+    let seeds: &[&[u8]] = &[b"lp_vault_authority", lp_vault_key.as_ref(), &[authority_bump]];
+    let total_liquidity = ctx.accounts.lp_vault.total_liquidity;
+
+    if total_liquidity > 0 {
+        orca_decrease_liquidity(
+            CpiContext::new_with_signer(
+                ctx.accounts.whirlpool_program.to_account_info(),
+                OrcaModifyLiquidity {
+                    vault_authority:      ctx.accounts.vault_authority.to_account_info(),
+                    whirlpool:            ctx.accounts.whirlpool.to_account_info(),
+                    token_program:        ctx.accounts.token_program.clone(),
+                    position_authority:   ctx.accounts.vault_authority.to_account_info(),
+                    position:             ctx.accounts.position.to_account_info(),
+                    position_token_account: (*ctx.accounts.position_token_account).clone(),
+                    token_owner_account_a: (*ctx.accounts.vault_token_a_account).clone(),
+                    token_owner_account_b: (*ctx.accounts.vault_token_b_account).clone(),
+                    token_vault_a:        ctx.accounts.token_vault_a.to_account_info(),
+                    token_vault_b:        ctx.accounts.token_vault_b.to_account_info(),
+                    tick_array_lower:     ctx.accounts.tick_array_lower.to_account_info(),
+                    tick_array_upper:     ctx.accounts.tick_array_upper.to_account_info(),
+                    whirlpool_program:    ctx.accounts.whirlpool_program.to_account_info(),
+                },
+                &[seeds],
+            ),
+            total_liquidity,
+            // No slippage guard here: this is a full, deliberate exit (not a
+            // user withdrawal), and blocking it on a min-output threshold
+            // would defeat the point of an emergency/administrative exit.
+            0,
+            0,
+            seeds,
+        )?;
+    }
+
+    orca_close_position(
+        CpiContext::new_with_signer(
+            ctx.accounts.whirlpool_program.to_account_info(),
+            OrcaClosePosition {
+                vault_authority:        ctx.accounts.vault_authority.to_account_info(),
+                receiver:               ctx.accounts.vault_authority.to_account_info(),
+                position:               ctx.accounts.position.to_account_info(),
+                position_mint:          ctx.accounts.position_mint.to_account_info(),
+                position_token_account: (*ctx.accounts.position_token_account).clone(),
+                token_program:          ctx.accounts.token_program.clone(),
+                whirlpool_program:      ctx.accounts.whirlpool_program.to_account_info(),
+            },
+            &[seeds],
+        ),
+        seeds,
+    )?;
+
+    let v = &mut ctx.accounts.lp_vault;
+    v.total_liquidity = 0;
+    v.position_active = false;
+
+    emit!(LpPositionExited { lp_vault: lp_vault_key, liquidity_removed: total_liquidity });
+    Ok(())
+}
+
+#[derive(Accounts)]
+pub struct OpenNewLpPosition<'info> {
+    #[account(constraint = admin.key() == lp_vault.admin @ LpVaultError::Unauthorized)]
+    pub admin: Signer<'info>,
+
+    #[account(mut, constraint = !lp_vault.position_active @ LpVaultError::PositionStillActive)]
+    pub lp_vault: Box<Account<'info, LpVault>>,
+
+    /// CHECK: PDA, verified by seeds
+    #[account(mut, seeds = [b"lp_vault_authority", lp_vault.key().as_ref()], bump = lp_vault.authority_bump)]
+    pub vault_authority: UncheckedAccount<'info>,
+
+    /// CHECK: Whirlpool program validates + initializes
+    #[account(mut)]
+    pub position: UncheckedAccount<'info>,
+    #[account(mut)]
+    pub position_mint: Box<Account<'info, Mint>>,
+    #[account(mut)]
+    pub position_token_account: Box<Account<'info, TokenAccount>>,
+    /// CHECK: Whirlpool program validates; must match lp_vault.whirlpool
+    #[account(address = lp_vault.whirlpool)]
+    pub whirlpool: UncheckedAccount<'info>,
+
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+    pub rent: Sysvar<'info, Rent>,
+    /// CHECK: associated token program
+    pub associated_token_program: UncheckedAccount<'info>,
+    /// CHECK: address verified in adapter
+    #[account(address = WHIRLPOOL_PROGRAM_ID)]
+    pub whirlpool_program: UncheckedAccount<'info>,
+}
+
+pub fn open_new_lp_position_handler(
+    ctx: Context<OpenNewLpPosition>,
+    tick_lower_index: i32,
+    tick_upper_index: i32,
+) -> Result<()> {
+    let lp_vault_key = ctx.accounts.lp_vault.key();
+    let authority_bump = ctx.accounts.lp_vault.authority_bump;
+    let seeds: &[&[u8]] = &[b"lp_vault_authority", lp_vault_key.as_ref(), &[authority_bump]];
+
+    orca_open_position(
+        CpiContext::new_with_signer(
+            ctx.accounts.whirlpool_program.to_account_info(),
+            OrcaOpenPosition {
+                vault_authority:          ctx.accounts.vault_authority.to_account_info(),
+                position:                 ctx.accounts.position.to_account_info(),
+                position_mint:            (*ctx.accounts.position_mint).clone(),
+                position_token_account:   (*ctx.accounts.position_token_account).clone(),
+                whirlpool:                ctx.accounts.whirlpool.to_account_info(),
+                token_program:            ctx.accounts.token_program.clone(),
+                system_program:           ctx.accounts.system_program.clone(),
+                rent:                     ctx.accounts.rent.clone(),
+                associated_token_program: ctx.accounts.associated_token_program.to_account_info(),
+                whirlpool_program:        ctx.accounts.whirlpool_program.to_account_info(),
+            },
+            &[seeds],
+        ),
+        tick_lower_index,
+        tick_upper_index,
+        seeds,
+    )?;
+
+    let v = &mut ctx.accounts.lp_vault;
+    v.position               = ctx.accounts.position.key();
+    v.position_mint          = ctx.accounts.position_mint.key();
+    v.position_token_account = ctx.accounts.position_token_account.key();
+    v.tick_lower_index       = tick_lower_index;
+    v.tick_upper_index       = tick_upper_index;
+    v.position_active        = true;
+    // total_liquidity stays 0 until a follow-up "redeploy idle liquidity"
+    // instruction (not yet implemented) moves the vault's idle tokens in.
+
+    emit!(LpPositionReopened { lp_vault: lp_vault_key, tick_lower_index, tick_upper_index });
+    Ok(())
+}
+
 // ── Events ────────────────────────────────────────────────────────────────────
 
 #[event] pub struct LpVaultInitialized { pub lp_vault: Pubkey, pub whirlpool: Pubkey }
 #[event] pub struct LpDeposited        { pub lp_vault: Pubkey, pub user: Pubkey, pub liquidity_amount: u128, pub shares_minted: u64 }
 #[event] pub struct LpWithdrawn        { pub lp_vault: Pubkey, pub user: Pubkey, pub shares_burned: u64, pub liquidity_amount: u128 }
+#[event] pub struct LpPositionExited   { pub lp_vault: Pubkey, pub liquidity_removed: u128 }
+#[event] pub struct LpPositionReopened { pub lp_vault: Pubkey, pub tick_lower_index: i32, pub tick_upper_index: i32 }
