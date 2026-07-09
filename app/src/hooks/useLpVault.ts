@@ -26,11 +26,17 @@ import IDL from "@/idl/yieldpilot.mainnet.json";
 // fixed-point rounding bug means real fund loss, not a loud failure, so we
 // use Orca's own official quote functions (same Rust core the on-chain
 // program is built from) rather than reimplementing sqrt-price math here.
-// NOT YET BUILD-TESTED — WASM bundling in Next.js/webpack has real failure
-// modes (wrong target build, missing experiments flag, SSR import issues)
-// that can only be caught by an actual `npm run build`. Flagged clearly as
-// the highest-risk, least-verified part of this whole groundwork PR.
-import { increaseLiquidityQuoteA, type IncreaseLiquidityQuote } from "@orca-so/whirlpools-core";
+//
+// BUILD-VERIFIED (2026-07-09, standalone Next.js 14.2.3 test project, same
+// versions/tsconfig as this repo): a STATIC top-level import of this
+// package broke `npm run build` — Next.js's app-router prerender step tries
+// to server-render "use client" components too, and the WASM binary isn't
+// resolvable in the server bundle's output path (ENOENT during static
+// generation). Fixed by dynamically importing it only inside the function
+// that uses it, so it never gets pulled into server-side prerendering — a
+// clean `npm run build` was confirmed after that fix. Type-only imports are
+// erased at compile time and stay static safely (see below).
+import type { IncreaseLiquidityQuote } from "@orca-so/whirlpools-core";
 
 const PROGRAM_ID = new PublicKey(
   process.env.NEXT_PUBLIC_PROGRAM_ID || "CVJrJGoKjseTJqiFGctssYde3pLAnPaRZtjAaKXd8pWk"
@@ -221,6 +227,9 @@ export function useLpVault() {
       const { raw, whirlpoolInfo } = await fetchLpDepositContext(lpVaultAddress);
       const tickLowerIndex = raw.tickLowerIndex as number;
       const tickUpperIndex = raw.tickUpperIndex as number;
+      // Dynamic import, browser-only — see the top-of-file build note for
+      // why this can't be a static top-level import.
+      const { increaseLiquidityQuoteA } = await import("@orca-so/whirlpools-core");
       return increaseLiquidityQuoteA(
         BigInt(tokenAAmount.toString()),
         slippageToleranceBps,
