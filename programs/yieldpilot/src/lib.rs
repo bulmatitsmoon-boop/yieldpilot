@@ -18,19 +18,23 @@ use adapters::{
     {AdapterError, ProtocolAdapter, ProtocolKind, assert_state_matches},
 };
 
-// LP vault — opt-in dual-asset liquidity provision (Orca Whirlpools). Separate
-// product from the main single-asset Vault above; see lp_vault.rs module docs.
+// LP vault — opt-in dual-asset liquidity provision (Orca Whirlpools or
+// Raydium CLMM, protocol-agnostic state/math shared, protocol-specific
+// instructions in the orca_lp/raydium_lp submodules). Separate product from
+// the main single-asset Vault above; see lp_vault.rs module docs.
 // Not yet exposed anywhere (no frontend, not part of the core routing promise)
 // — this is Phase 2 groundwork, deliberately unmerged/unannounced until ready.
 pub mod lp_vault;
 // Must be `pub use ... ::*` (not a plain `use` of named items): the
 // `#[program]` macro below expects each instruction's Accounts struct's
 // macro-generated `__client_accounts_*` module to be reachable at the crate
-// root (`crate::__client_accounts_initialize_lp_vault`, etc.) — since those
-// structs live inside the `lp_vault` module, not the crate root, a plain
-// `use` doesn't re-export their generated modules and `#[program]` fails to
-// resolve them. Glob re-exporting fixes it.
+// root (`crate::__client_accounts_initialize_orca_lp_vault`, etc.) — since
+// those structs live inside lp_vault's orca_lp/raydium_lp submodules, not the
+// crate root, a plain `use` doesn't re-export their generated modules and
+// `#[program]` fails to resolve them. Glob re-exporting each level fixes it.
 pub use lp_vault::*;
+pub use lp_vault::orca_lp::*;
+pub use lp_vault::raydium_lp::*;
 
 // Program ID differs by network — devnet and mainnet are separate deployments
 // with separate addresses (the devnet address was never usable on mainnet;
@@ -1188,61 +1192,121 @@ pub mod yieldpilot {
         Ok(())
     }
 
-    // ── LP vault (Orca Whirlpools) — Phase 2, opt-in, not yet public ────────
-    // Thin wrappers only; real logic lives in lp_vault.rs to keep this file
-    // from growing further. See lp_vault.rs module docs for design notes.
+    // ── LP vault (Orca Whirlpools + Raydium CLMM) — Phase 2, opt-in, not yet
+    // public ──────────────────────────────────────────────────────────────
+    // Thin wrappers only; real logic lives in lp_vault.rs (protocol-agnostic
+    // state/math in the top-level module, protocol-specific instructions in
+    // the orca_lp/raydium_lp submodules) to keep this file from growing
+    // further. See lp_vault.rs module docs for design notes.
 
-    pub fn initialize_lp_vault(ctx: Context<InitializeLpVault>, params: InitLpVaultParams) -> Result<()> {
-        initialize_lp_vault_handler(ctx, params)
+    pub fn initialize_orca_lp_vault(ctx: Context<InitializeOrcaLpVault>, params: InitLpVaultParams) -> Result<()> {
+        initialize_orca_lp_vault_handler(ctx, params)
     }
 
-    pub fn deposit_lp(
-        ctx: Context<DepositLp>,
+    pub fn deposit_orca_lp(
+        ctx: Context<DepositOrcaLp>,
         liquidity_amount: u128,
         token_max_a: u64,
         token_max_b: u64,
         acknowledge_impermanent_loss: bool,
     ) -> Result<()> {
-        deposit_lp_handler(ctx, liquidity_amount, token_max_a, token_max_b, acknowledge_impermanent_loss)
+        deposit_orca_lp_handler(ctx, liquidity_amount, token_max_a, token_max_b, acknowledge_impermanent_loss)
     }
 
-    pub fn withdraw_lp(
-        ctx: Context<WithdrawLp>,
+    pub fn withdraw_orca_lp(
+        ctx: Context<WithdrawOrcaLp>,
         shares: u64,
         token_min_a: u64,
         token_min_b: u64,
     ) -> Result<()> {
-        withdraw_lp_handler(ctx, shares, token_min_a, token_min_b)
+        withdraw_orca_lp_handler(ctx, shares, token_min_a, token_min_b)
     }
 
     /// Fully exit the current Whirlpool position (decrease all liquidity,
     /// close the position). See lp_vault.rs's reposition design notes.
-    pub fn exit_lp_position(ctx: Context<ExitLpPosition>) -> Result<()> {
-        exit_lp_position_handler(ctx)
+    pub fn exit_orca_lp_position(ctx: Context<ExitOrcaLpPosition>) -> Result<()> {
+        exit_orca_lp_position_handler(ctx)
     }
 
     /// Open a fresh Whirlpool position at a new price range, after
-    /// exit_lp_position. Vault's tokens remain idle until redeploy_lp_liquidity
-    /// moves them into the new position.
-    pub fn open_new_lp_position(
-        ctx: Context<OpenNewLpPosition>,
+    /// exit_orca_lp_position. Vault's tokens remain idle until
+    /// redeploy_orca_lp_liquidity moves them into the new position.
+    pub fn open_new_orca_lp_position(
+        ctx: Context<OpenNewOrcaLpPosition>,
         tick_lower_index: i32,
         tick_upper_index: i32,
     ) -> Result<()> {
-        open_new_lp_position_handler(ctx, tick_lower_index, tick_upper_index)
+        open_new_orca_lp_position_handler(ctx, tick_lower_index, tick_upper_index)
     }
 
     /// Move the vault's own idle tokens into the currently active position
-    /// (e.g. after open_new_lp_position, or simply topping up an
-    /// under-deployed position). Distinct from deposit_lp, which pulls from
-    /// a user — this moves tokens the vault already owns.
-    pub fn redeploy_lp_liquidity(
-        ctx: Context<RedeployLpLiquidity>,
+    /// (e.g. after open_new_orca_lp_position, or simply topping up an
+    /// under-deployed position). Distinct from deposit_orca_lp, which pulls
+    /// from a user — this moves tokens the vault already owns.
+    pub fn redeploy_orca_lp_liquidity(
+        ctx: Context<RedeployOrcaLpLiquidity>,
         liquidity_amount: u128,
         token_max_a: u64,
         token_max_b: u64,
     ) -> Result<()> {
-        redeploy_lp_liquidity_handler(ctx, liquidity_amount, token_max_a, token_max_b)
+        redeploy_orca_lp_liquidity_handler(ctx, liquidity_amount, token_max_a, token_max_b)
+    }
+
+    // ── LP vault (Raydium CLMM) — mirrors the Orca instructions above using
+    // Raydium's own accounts/CPI (see lp_vault.rs's raydium_lp submodule and
+    // adapters/raydium.rs for the protocol-specific differences). ──────────
+
+    pub fn initialize_raydium_lp_vault(ctx: Context<InitializeRaydiumLpVault>, params: InitLpVaultParams) -> Result<()> {
+        initialize_raydium_lp_vault_handler(ctx, params)
+    }
+
+    pub fn deposit_raydium_lp(
+        ctx: Context<DepositRaydiumLp>,
+        liquidity_amount: u128,
+        token_max_a: u64,
+        token_max_b: u64,
+        acknowledge_impermanent_loss: bool,
+    ) -> Result<()> {
+        deposit_raydium_lp_handler(ctx, liquidity_amount, token_max_a, token_max_b, acknowledge_impermanent_loss)
+    }
+
+    pub fn withdraw_raydium_lp(
+        ctx: Context<WithdrawRaydiumLp>,
+        shares: u64,
+        token_min_a: u64,
+        token_min_b: u64,
+    ) -> Result<()> {
+        withdraw_raydium_lp_handler(ctx, shares, token_min_a, token_min_b)
+    }
+
+    /// Fully exit the current Raydium position (decrease all liquidity,
+    /// close the position).
+    pub fn exit_raydium_lp_position(ctx: Context<ExitRaydiumLpPosition>) -> Result<()> {
+        exit_raydium_lp_position_handler(ctx)
+    }
+
+    /// Open a fresh Raydium position at a new price range, after
+    /// exit_raydium_lp_position. Vault's tokens remain idle until
+    /// redeploy_raydium_lp_liquidity moves them into the new position.
+    pub fn open_new_raydium_lp_position(
+        ctx: Context<OpenNewRaydiumLpPosition>,
+        tick_lower_index: i32,
+        tick_upper_index: i32,
+        tick_array_lower_start_index: i32,
+        tick_array_upper_start_index: i32,
+    ) -> Result<()> {
+        open_new_raydium_lp_position_handler(ctx, tick_lower_index, tick_upper_index, tick_array_lower_start_index, tick_array_upper_start_index)
+    }
+
+    /// Move the vault's own idle tokens into the currently active position.
+    /// Distinct from deposit_raydium_lp, which pulls from a user.
+    pub fn redeploy_raydium_lp_liquidity(
+        ctx: Context<RedeployRaydiumLpLiquidity>,
+        liquidity_amount: u128,
+        token_max_a: u64,
+        token_max_b: u64,
+    ) -> Result<()> {
+        redeploy_raydium_lp_liquidity_handler(ctx, liquidity_amount, token_max_a, token_max_b)
     }
 
 }
