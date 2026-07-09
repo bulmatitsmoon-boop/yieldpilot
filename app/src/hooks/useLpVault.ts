@@ -43,6 +43,7 @@ const PROGRAM_ID = new PublicKey(
   process.env.NEXT_PUBLIC_PROGRAM_ID || "CVJrJGoKjseTJqiFGctssYde3pLAnPaRZtjAaKXd8pWk"
 );
 const WHIRLPOOL_PROGRAM_ID = new PublicKey("whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc");
+const RAYDIUM_CLMM_PROGRAM_ID = new PublicKey("CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK");
 
 // ── Whirlpool account decoding ──────────────────────────────────────────────
 // Manual byte-offset decode (not a generic Anchor client for Orca's program,
@@ -92,6 +93,74 @@ function getTickArrayPda(whirlpool: PublicKey, tickIndex: number, tickSpacing: n
   const [address] = PublicKey.findProgramAddressSync(
     [Buffer.from(TICK_ARRAY_SEED), whirlpool.toBuffer(), Buffer.from(startTickIndex.toString())],
     WHIRLPOOL_PROGRAM_ID
+  );
+  return address;
+}
+
+// ── Raydium CLMM pool decoding ──────────────────────────────────────────────
+// Manual byte-offset decode, same rationale as decodeWhirlpool above (avoid
+// pulling in @raydium-io/raydium-sdk-v2's full PoolInfoLayout just to read
+// one account). Offsets extracted directly from that package's own compiled
+// layout.js (0.2.59-alpha) — PoolInfoLayout's field order is: 8-byte
+// discriminator, bump(1), configId(32), creator(32), mintA(32), mintB(32),
+// vaultA(32), vaultB(32), observationId(32), mintDecimalsA(1),
+// mintDecimalsB(1), tickSpacing(2), liquidity(16), sqrtPriceX64(16),
+// tickCurrent(4, signed) — matches the running total of offsets below.
+interface RaydiumPoolInfo {
+  tickSpacing: number;
+  sqrtPriceX64: bigint;
+  tickCurrent: number;
+  tokenMintA: PublicKey;
+  tokenVaultA: PublicKey;
+  tokenMintB: PublicKey;
+  tokenVaultB: PublicKey;
+}
+
+function decodeRaydiumPool(data: Buffer): RaydiumPoolInfo {
+  return {
+    tokenMintA: new PublicKey(data.subarray(73, 105)),
+    tokenMintB: new PublicKey(data.subarray(105, 137)),
+    tokenVaultA: new PublicKey(data.subarray(137, 169)),
+    tokenVaultB: new PublicKey(data.subarray(169, 201)),
+    tickSpacing: data.readUInt16LE(235),
+    sqrtPriceX64: readU128LE(data, 253),
+    tickCurrent: data.readInt32LE(269),
+  };
+}
+
+// ── Raydium PDA derivation ───────────────────────────────────────────────────
+// IMPORTANT: Raydium encodes tick indices as BIG-ENDIAN bytes, unlike Orca's
+// decimal-string encoding above — see adapters/raydium.rs's PDA seed notes
+// (verified against raydium-io/raydium-clmm source). Getting this backwards
+// silently derives the wrong address rather than failing loudly.
+const RAYDIUM_TICK_ARRAY_SEED = "tick_array";
+const RAYDIUM_POSITION_SEED = "position";
+const RAYDIUM_TICKS_PER_ARRAY = 60; // TICK_ARRAY_SIZE, verified against @raydium-io/raydium-sdk-v2's constants.js
+
+function i32ToBeBytes(n: number): Buffer {
+  const buf = Buffer.alloc(4);
+  buf.writeInt32BE(n, 0);
+  return buf;
+}
+
+function getRaydiumTickArrayStartIndex(tickIndex: number, tickSpacing: number): number {
+  const ticksInArray = tickSpacing * RAYDIUM_TICKS_PER_ARRAY;
+  return Math.floor(tickIndex / ticksInArray) * ticksInArray;
+}
+
+function getRaydiumTickArrayPda(poolState: PublicKey, tickIndex: number, tickSpacing: number): PublicKey {
+  const startTickIndex = getRaydiumTickArrayStartIndex(tickIndex, tickSpacing);
+  const [address] = PublicKey.findProgramAddressSync(
+    [Buffer.from(RAYDIUM_TICK_ARRAY_SEED), poolState.toBuffer(), i32ToBeBytes(startTickIndex)],
+    RAYDIUM_CLMM_PROGRAM_ID
+  );
+  return address;
+}
+
+function getRaydiumProtocolPositionPda(poolState: PublicKey, tickLowerIndex: number, tickUpperIndex: number): PublicKey {
+  const [address] = PublicKey.findProgramAddressSync(
+    [Buffer.from(RAYDIUM_POSITION_SEED), poolState.toBuffer(), i32ToBeBytes(tickLowerIndex), i32ToBeBytes(tickUpperIndex)],
+    RAYDIUM_CLMM_PROGRAM_ID
   );
   return address;
 }
@@ -211,7 +280,7 @@ export function useLpVault() {
         tokenADecimals: mintAInfo.decimals,
         tokenBMint: tokenBMint.toBase58(),
         tokenBDecimals: mintBInfo.decimals,
-        whirlpool: (raw.whirlpool as PublicKey).toBase58(),
+        whirlpool: (raw.pool as PublicKey).toBase58(),
         totalLiquidity: (raw.totalLiquidity as anchor.BN).toString(),
         totalShares: (raw.totalShares as anchor.BN).toNumber(),
         positionActive: raw.positionActive as boolean,
@@ -254,7 +323,7 @@ export function useLpVault() {
       const program = getProgram();
       const lpVaultPubkey = new PublicKey(lpVaultAddress);
       const raw = await (program.account as any)["lpVault"].fetch(lpVaultPubkey);
-      const whirlpoolPubkey = raw.whirlpool as PublicKey;
+      const whirlpoolPubkey = raw.pool as PublicKey;
 
       const whirlpoolAccountInfo = await connection.getAccountInfo(whirlpoolPubkey);
       if (!whirlpoolAccountInfo) throw new Error("Whirlpool account not found");
@@ -461,6 +530,227 @@ export function useLpVault() {
     [publicKey, wrapTx, fetchLpDepositContext]
   );
 
+  // ── Raydium CLMM side ────────────────────────────────────────────────────
+  // Mirrors the Orca functions above 1:1 in shape (same quote-then-submit
+  // pattern), but reads a Raydium pool_state instead of a Whirlpool and uses
+  // @raydium-io/raydium-sdk-v2's own verified Q64.64 liquidity math instead
+  // of hand-rolling it — same "don't reimplement concentrated-liquidity
+  // fixed-point math" reasoning as the Orca WASM import above. Uses the
+  // lower-level LiquidityMathUtil primitives (getLiquidityFromAmounts /
+  // getAmountsForLiquidity / getAmountsFromLiquidityWithSlippage) rather
+  // than the package's getLiquidityAndAmountsFromAmount convenience
+  // wrapper — that wrapper's compiled output re-derives amounts from the
+  // *input* amount instead of the *computed* liquidity, which looks like a
+  // real bug in the published build; the three primitives used here are
+  // each a single, individually-inspectable Q64.64 operation.
+
+  const fetchRaydiumLpDepositContext = useCallback(
+    async (lpVaultAddress: string) => {
+      const program = getProgram();
+      const lpVaultPubkey = new PublicKey(lpVaultAddress);
+      const raw = await (program.account as any)["lpVault"].fetch(lpVaultPubkey);
+      const poolStatePubkey = raw.pool as PublicKey;
+
+      const poolAccountInfo = await connection.getAccountInfo(poolStatePubkey);
+      if (!poolAccountInfo) throw new Error("Raydium pool_state account not found");
+      const poolInfo = decodeRaydiumPool(poolAccountInfo.data);
+
+      return { program, lpVaultPubkey, raw, poolStatePubkey, poolInfo };
+    },
+    [connection, getProgram]
+  );
+
+  const getRaydiumDepositQuote = useCallback(
+    async (lpVaultAddress: string, tokenAAmount: anchor.BN, slippageToleranceBps: number) => {
+      const { raw, poolInfo } = await fetchRaydiumLpDepositContext(lpVaultAddress);
+      const tickLowerIndex = raw.tickLowerIndex as number;
+      const tickUpperIndex = raw.tickUpperIndex as number;
+
+      const { LiquidityMathUtil, TickUtil } = await import("@raydium-io/raydium-sdk-v2");
+      const BN = anchor.BN;
+      const sqrtPriceCurrentX64 = new BN(poolInfo.sqrtPriceX64.toString());
+      const sqrtPriceLowerX64 = TickUtil.getSqrtPriceAtTick(tickLowerIndex);
+      const sqrtPriceUpperX64 = TickUtil.getSqrtPriceAtTick(tickUpperIndex);
+
+      // Cap by tokenAAmount alone (token B budget treated as unlimited) —
+      // mirrors Orca's increaseLiquidityQuoteA semantics: "given this much
+      // of token A, how much liquidity and token B does that require".
+      const hugeAmountB = new BN(2).pow(new BN(64)).subn(1);
+      const liquidityDelta = LiquidityMathUtil.getLiquidityFromAmounts(
+        sqrtPriceCurrentX64, sqrtPriceLowerX64, sqrtPriceUpperX64, tokenAAmount, hugeAmountB
+      );
+
+      const slippage = slippageToleranceBps / 10_000;
+      const { amountSlippageA, amountSlippageB } = LiquidityMathUtil.getAmountsFromLiquidityWithSlippage(
+        sqrtPriceCurrentX64, sqrtPriceLowerX64, sqrtPriceUpperX64, liquidityDelta, true, true, slippage
+      );
+
+      return { liquidityDelta, tokenMaxA: amountSlippageA as anchor.BN, tokenMaxB: amountSlippageB as anchor.BN };
+    },
+    [fetchRaydiumLpDepositContext]
+  );
+
+  const depositRaydiumLp = useCallback(
+    async (
+      lpVaultAddress: string,
+      quote: { liquidityDelta: anchor.BN; tokenMaxA: anchor.BN; tokenMaxB: anchor.BN },
+      acknowledgeImpermanentLoss: boolean
+    ) => {
+      if (!publicKey) return;
+      return wrapTx(async () => {
+        const { program, lpVaultPubkey, raw, poolStatePubkey, poolInfo } = await fetchRaydiumLpDepositContext(lpVaultAddress);
+
+        const [vaultAuthorityPda] = PublicKey.findProgramAddressSync(
+          [Buffer.from("lp_vault_authority"), lpVaultPubkey.toBuffer()],
+          PROGRAM_ID
+        );
+        const [positionPda] = PublicKey.findProgramAddressSync(
+          [Buffer.from("lp_position"), lpVaultPubkey.toBuffer(), publicKey.toBuffer()],
+          PROGRAM_ID
+        );
+
+        const tokenAMint = raw.tokenAMint as PublicKey;
+        const tokenBMint = raw.tokenBMint as PublicKey;
+        const sharesMint = raw.lpSharesMint as PublicKey;
+        const vaultTokenAAccount = raw.vaultTokenAAccount as PublicKey;
+        const vaultTokenBAccount = raw.vaultTokenBAccount as PublicKey;
+        const personalPosition = raw.position as PublicKey;
+        const protocolPosition = raw.protocolPosition as PublicKey;
+        const nftAccount = raw.positionTokenAccount as PublicKey;
+        const tickLowerIndex = raw.tickLowerIndex as number;
+        const tickUpperIndex = raw.tickUpperIndex as number;
+
+        const tickArrayLower = getRaydiumTickArrayPda(poolStatePubkey, tickLowerIndex, poolInfo.tickSpacing);
+        const tickArrayUpper = getRaydiumTickArrayPda(poolStatePubkey, tickUpperIndex, poolInfo.tickSpacing);
+
+        const userTokenAAccount = await getAssociatedTokenAddress(tokenAMint, publicKey);
+        const userTokenBAccount = await getAssociatedTokenAddress(tokenBMint, publicKey);
+        const userSharesAccount = await getAssociatedTokenAddress(sharesMint, publicKey);
+
+        return program.methods
+          .depositRaydiumLp(quote.liquidityDelta, quote.tokenMaxA, quote.tokenMaxB, acknowledgeImpermanentLoss)
+          .accountsPartial({
+            user: publicKey,
+            lpVault: lpVaultPubkey,
+            vaultAuthority: vaultAuthorityPda,
+            userPosition: positionPda,
+            userTokenAAccount,
+            userTokenBAccount,
+            userSharesAccount,
+            vaultTokenAAccount,
+            vaultTokenBAccount,
+            lpSharesMint: sharesMint,
+            nftAccount,
+            poolState: poolStatePubkey,
+            protocolPosition,
+            personalPosition,
+            tickArrayLower,
+            tickArrayUpper,
+            tokenVault0: poolInfo.tokenVaultA,
+            tokenVault1: poolInfo.tokenVaultB,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            systemProgram: anchor.web3.SystemProgram.programId,
+            raydiumProgram: RAYDIUM_CLMM_PROGRAM_ID,
+          })
+          .rpc();
+      });
+    },
+    [publicKey, wrapTx, fetchRaydiumLpDepositContext]
+  );
+
+  const getRaydiumWithdrawQuote = useCallback(
+    async (lpVaultAddress: string, shares: anchor.BN, slippageToleranceBps: number) => {
+      const { raw, poolInfo } = await fetchRaydiumLpDepositContext(lpVaultAddress);
+      const tickLowerIndex = raw.tickLowerIndex as number;
+      const tickUpperIndex = raw.tickUpperIndex as number;
+      const totalLiquidity = (raw.totalLiquidity as anchor.BN);
+      const totalShares = (raw.totalShares as anchor.BN);
+      if (totalShares.isZero()) throw new Error("Vault has no shares outstanding");
+      const liquidityDelta = shares.mul(totalLiquidity).div(totalShares);
+
+      const { LiquidityMathUtil, TickUtil } = await import("@raydium-io/raydium-sdk-v2");
+      const BN = anchor.BN;
+      const sqrtPriceCurrentX64 = new BN(poolInfo.sqrtPriceX64.toString());
+      const sqrtPriceLowerX64 = TickUtil.getSqrtPriceAtTick(tickLowerIndex);
+      const sqrtPriceUpperX64 = TickUtil.getSqrtPriceAtTick(tickUpperIndex);
+
+      const slippage = slippageToleranceBps / 10_000;
+      const { amountSlippageA, amountSlippageB } = LiquidityMathUtil.getAmountsFromLiquidityWithSlippage(
+        sqrtPriceCurrentX64, sqrtPriceLowerX64, sqrtPriceUpperX64, liquidityDelta, false, false, slippage
+      );
+
+      return { liquidityDelta, tokenMinA: amountSlippageA as anchor.BN, tokenMinB: amountSlippageB as anchor.BN };
+    },
+    [fetchRaydiumLpDepositContext]
+  );
+
+  const withdrawRaydiumLp = useCallback(
+    async (
+      lpVaultAddress: string,
+      shares: anchor.BN,
+      quote: { tokenMinA: anchor.BN; tokenMinB: anchor.BN }
+    ) => {
+      if (!publicKey) return;
+      return wrapTx(async () => {
+        const { program, lpVaultPubkey, raw, poolStatePubkey, poolInfo } = await fetchRaydiumLpDepositContext(lpVaultAddress);
+
+        const [vaultAuthorityPda] = PublicKey.findProgramAddressSync(
+          [Buffer.from("lp_vault_authority"), lpVaultPubkey.toBuffer()],
+          PROGRAM_ID
+        );
+        const [positionPda] = PublicKey.findProgramAddressSync(
+          [Buffer.from("lp_position"), lpVaultPubkey.toBuffer(), publicKey.toBuffer()],
+          PROGRAM_ID
+        );
+
+        const tokenAMint = raw.tokenAMint as PublicKey;
+        const tokenBMint = raw.tokenBMint as PublicKey;
+        const sharesMint = raw.lpSharesMint as PublicKey;
+        const vaultTokenAAccount = raw.vaultTokenAAccount as PublicKey;
+        const vaultTokenBAccount = raw.vaultTokenBAccount as PublicKey;
+        const personalPosition = raw.position as PublicKey;
+        const protocolPosition = raw.protocolPosition as PublicKey;
+        const nftAccount = raw.positionTokenAccount as PublicKey;
+        const tickLowerIndex = raw.tickLowerIndex as number;
+        const tickUpperIndex = raw.tickUpperIndex as number;
+
+        const tickArrayLower = getRaydiumTickArrayPda(poolStatePubkey, tickLowerIndex, poolInfo.tickSpacing);
+        const tickArrayUpper = getRaydiumTickArrayPda(poolStatePubkey, tickUpperIndex, poolInfo.tickSpacing);
+
+        const userTokenAAccount = await getAssociatedTokenAddress(tokenAMint, publicKey);
+        const userTokenBAccount = await getAssociatedTokenAddress(tokenBMint, publicKey);
+        const userSharesAccount = await getAssociatedTokenAddress(sharesMint, publicKey);
+
+        return program.methods
+          .withdrawRaydiumLp(shares, quote.tokenMinA, quote.tokenMinB)
+          .accountsPartial({
+            user: publicKey,
+            lpVault: lpVaultPubkey,
+            vaultAuthority: vaultAuthorityPda,
+            userPosition: positionPda,
+            userTokenAAccount,
+            userTokenBAccount,
+            userSharesAccount,
+            vaultTokenAAccount,
+            vaultTokenBAccount,
+            lpSharesMint: sharesMint,
+            nftAccount,
+            poolState: poolStatePubkey,
+            protocolPosition,
+            personalPosition,
+            tickArrayLower,
+            tickArrayUpper,
+            tokenVault0: poolInfo.tokenVaultA,
+            tokenVault1: poolInfo.tokenVaultB,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            raydiumProgram: RAYDIUM_CLMM_PROGRAM_ID,
+          })
+          .rpc();
+      });
+    },
+    [publicKey, wrapTx, fetchRaydiumLpDepositContext]
+  );
+
   return {
     txStatus,
     txError,
@@ -468,6 +758,10 @@ export function useLpVault() {
     fetchLpPosition,
     getDepositQuote,
     getWithdrawQuote,
+    getRaydiumDepositQuote,
+    getRaydiumWithdrawQuote,
+    depositRaydiumLp,
+    withdrawRaydiumLp,
     withdrawLp,
     depositLp,
   };
