@@ -36,7 +36,7 @@ import IDL from "@/idl/yieldpilot.mainnet.json";
 // that uses it, so it never gets pulled into server-side prerendering — a
 // clean `npm run build` was confirmed after that fix. Type-only imports are
 // erased at compile time and stay static safely (see below).
-import type { IncreaseLiquidityQuote } from "@orca-so/whirlpools-core";
+import type { IncreaseLiquidityQuote, DecreaseLiquidityQuote } from "@orca-so/whirlpools-core";
 
 const PROGRAM_ID = new PublicKey(
   process.env.NEXT_PUBLIC_PROGRAM_ID || "CVJrJGoKjseTJqiFGctssYde3pLAnPaRZtjAaKXd8pWk"
@@ -316,12 +316,111 @@ export function useLpVault() {
     [publicKey, wrapTx, fetchLpDepositContext]
   );
 
+  /**
+   * Compute a real withdraw quote for a given share amount, using Orca's
+   * own official decreaseLiquidityQuote (WASM) — symmetric to
+   * getDepositQuote, same "don't hand-roll fixed-point math" reasoning.
+   */
+  const getWithdrawQuote = useCallback(
+    async (lpVaultAddress: string, shares: anchor.BN, slippageToleranceBps: number): Promise<DecreaseLiquidityQuote> => {
+      const { raw, whirlpoolInfo } = await fetchLpDepositContext(lpVaultAddress);
+      const tickLowerIndex = raw.tickLowerIndex as number;
+      const tickUpperIndex = raw.tickUpperIndex as number;
+      const totalLiquidity = BigInt((raw.totalLiquidity as anchor.BN).toString());
+      const totalShares = BigInt((raw.totalShares as anchor.BN).toString());
+      if (totalShares === 0n) throw new Error("Vault has no shares outstanding");
+      const liquidityDelta = (BigInt(shares.toString()) * totalLiquidity) / totalShares;
+
+      // Dynamic import, browser-only — see the top-of-file build note.
+      const { decreaseLiquidityQuote } = await import("@orca-so/whirlpools-core");
+      return decreaseLiquidityQuote(
+        liquidityDelta,
+        slippageToleranceBps,
+        whirlpoolInfo.sqrtPrice,
+        tickLowerIndex,
+        tickUpperIndex
+      );
+    },
+    [fetchLpDepositContext]
+  );
+
+  /**
+   * Withdraw shares from the LP vault. `quote` must come from
+   * getWithdrawQuote — this function does not compute it itself, so a
+   * caller can show the quote to the user for review before submitting.
+   */
+  const withdrawLp = useCallback(
+    async (lpVaultAddress: string, shares: anchor.BN, quote: DecreaseLiquidityQuote) => {
+      if (!publicKey) return;
+      return wrapTx(async () => {
+        const { program, lpVaultPubkey, raw, whirlpoolPubkey, whirlpoolInfo } = await fetchLpDepositContext(lpVaultAddress);
+
+        const [vaultAuthorityPda] = PublicKey.findProgramAddressSync(
+          [Buffer.from("lp_vault_authority"), lpVaultPubkey.toBuffer()],
+          PROGRAM_ID
+        );
+        const [positionPda] = PublicKey.findProgramAddressSync(
+          [Buffer.from("lp_position"), lpVaultPubkey.toBuffer(), publicKey.toBuffer()],
+          PROGRAM_ID
+        );
+
+        const tokenAMint = raw.tokenAMint as PublicKey;
+        const tokenBMint = raw.tokenBMint as PublicKey;
+        const sharesMint = raw.lpSharesMint as PublicKey;
+        const vaultTokenAAccount = raw.vaultTokenAAccount as PublicKey;
+        const vaultTokenBAccount = raw.vaultTokenBAccount as PublicKey;
+        const position = raw.position as PublicKey;
+        const positionTokenAccount = raw.positionTokenAccount as PublicKey;
+        const tickLowerIndex = raw.tickLowerIndex as number;
+        const tickUpperIndex = raw.tickUpperIndex as number;
+
+        const tickArrayLower = getTickArrayPda(whirlpoolPubkey, tickLowerIndex, whirlpoolInfo.tickSpacing);
+        const tickArrayUpper = getTickArrayPda(whirlpoolPubkey, tickUpperIndex, whirlpoolInfo.tickSpacing);
+
+        const userTokenAAccount = await getAssociatedTokenAddress(tokenAMint, publicKey);
+        const userTokenBAccount = await getAssociatedTokenAddress(tokenBMint, publicKey);
+        const userSharesAccount = await getAssociatedTokenAddress(sharesMint, publicKey);
+
+        const tokenMinA = new anchor.BN(quote.tokenMinA.toString());
+        const tokenMinB = new anchor.BN(quote.tokenMinB.toString());
+
+        return program.methods
+          .withdrawLp(shares, tokenMinA, tokenMinB)
+          .accountsPartial({
+            user: publicKey,
+            lpVault: lpVaultPubkey,
+            vaultAuthority: vaultAuthorityPda,
+            userPosition: positionPda,
+            userTokenAAccount,
+            userTokenBAccount,
+            userSharesAccount,
+            vaultTokenAAccount,
+            vaultTokenBAccount,
+            lpSharesMint: sharesMint,
+            whirlpool: whirlpoolPubkey,
+            position,
+            positionTokenAccount,
+            tokenVaultA: whirlpoolInfo.tokenVaultA,
+            tokenVaultB: whirlpoolInfo.tokenVaultB,
+            tickArrayLower,
+            tickArrayUpper,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            whirlpoolProgram: WHIRLPOOL_PROGRAM_ID,
+          })
+          .rpc();
+      });
+    },
+    [publicKey, wrapTx, fetchLpDepositContext]
+  );
+
   return {
     txStatus,
     txError,
     fetchLpVault,
     fetchLpPosition,
     getDepositQuote,
+    getWithdrawQuote,
+    withdrawLp,
     depositLp,
   };
 }
