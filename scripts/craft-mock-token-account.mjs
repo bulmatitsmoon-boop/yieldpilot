@@ -52,17 +52,19 @@ if (decoded.amount !== amount) throw new Error(`round-trip check failed: amount 
 if (decoded.state !== AccountState.Initialized) throw new Error("round-trip check failed: state not Initialized");
 
 // solana-test-validator --account file format (same shape `solana account
-// <pubkey> --output json` produces).
+// <pubkey> --output json` produces). VERIFIED via web search against
+// Solana's own docs (2026-07-09) — fields are FLAT alongside "pubkey", not
+// nested under an "account" key (an earlier draft of this script got that
+// wrong; the account.rentEpoch example in Solana's own docs makes clear
+// there's no such nesting).
 const output = {
   pubkey: "REPLACE_WITH_THE_TOKEN_ACCOUNT_PUBKEY_YOU_WANT_THIS_LOADED_AT",
-  account: {
-    lamports: 2039280, // rent-exempt minimum for a 165-byte account (verify against `solana rent 165` if this drifts)
-    data: [buf.toString("base64"), "base64"],
-    owner: TOKEN_PROGRAM_ID.toBase58(),
-    executable: false,
-    rentEpoch: 0,
-    space: AccountLayout.span,
-  },
+  lamports: 2039280, // rent-exempt minimum for a 165-byte account (verify against `solana rent 165` if this drifts)
+  data: [buf.toString("base64"), "base64"],
+  owner: TOKEN_PROGRAM_ID.toBase58(),
+  executable: false,
+  rentEpoch: 0,
+  space: AccountLayout.span,
 };
 
 fs.writeFileSync(outFile, JSON.stringify(output, null, 2));
