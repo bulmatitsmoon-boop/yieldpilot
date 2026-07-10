@@ -57,7 +57,7 @@ const SOLEND_USDC_COLLATERAL_MINT = new PublicKey("993dVFL2uXWYeoXuEBFXR4BijeXdT
 
 interface ProtocolDef {
   label: string;
-  kind: number;           // 0=lending-style, 1=liquid-stake-style
+  kind: number;           // 0=Kamino, 1=Marinade, 2=Solend, 3=Jito — see ProtocolKind in adapters/mod.rs
   externalState: PublicKey;
   receiptMint: PublicKey;
   targetBps: number;
@@ -76,7 +76,7 @@ const USDC_PROTOCOLS: ProtocolDef[] = [
   },
   {
     label: "solend-usdc",
-    kind: 0,
+    kind: 2,
     externalState: SOLEND_USDC_RESERVE,
     receiptMint: SOLEND_USDC_COLLATERAL_MINT,
     targetBps: 2000,
@@ -87,7 +87,7 @@ const USDC_PROTOCOLS: ProtocolDef[] = [
 const SOL_PROTOCOLS: ProtocolDef[] = [
   {
     label: "jito-sol",
-    kind: 1,
+    kind: 3,
     externalState: JITO_POOL,
     receiptMint: JITOSOL_MINT,
     targetBps: 8000,
