@@ -125,6 +125,8 @@ pub mod yieldpilot {
         let kind = match kind {
             0 => ProtocolKind::Kamino,
             1 => ProtocolKind::Marinade,
+            2 => ProtocolKind::Solend,
+            3 => ProtocolKind::Jito,
             _ => return err!(AdapterError::UnsupportedProtocol),
         };
 
