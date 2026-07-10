@@ -5,6 +5,8 @@ use anchor_lang::prelude::*;
 pub enum ProtocolKind {
     Kamino   = 0,
     Marinade = 1,
+    Solend   = 2,
+    Jito     = 3,
 }
 
 impl Default for ProtocolKind {
@@ -15,7 +17,7 @@ impl Default for ProtocolKind {
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Default)]
 pub struct ProtocolAdapter {
     pub kind:                  ProtocolKind,
-    /// Kamino → reserve pubkey.  Marinade → state pubkey.
+    /// Kamino/Solend → reserve pubkey.  Marinade → state pubkey.  Jito → stake pool pubkey.
     pub external_state:        Pubkey,
     /// Vault's receipt-token ATA (kUSDC for Kamino, mSOL for Marinade).
     pub vault_receipt_account: Pubkey,
