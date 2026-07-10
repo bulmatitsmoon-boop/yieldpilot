@@ -2265,7 +2265,7 @@
           {
             "name": "external_state",
             "docs": [
-              "Kamino → reserve pubkey.  Marinade → state pubkey."
+              "Kamino/Solend → reserve pubkey.  Marinade → state pubkey.  Jito → stake pool pubkey."
             ],
             "type": "pubkey"
           },
@@ -2318,6 +2318,12 @@
           },
           {
             "name": "Marinade"
+          },
+          {
+            "name": "Solend"
+          },
+          {
+            "name": "Jito"
           }
         ]
       }
