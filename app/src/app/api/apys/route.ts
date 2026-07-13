@@ -15,13 +15,17 @@ import type { NextRequest } from "next/server";
 // against their current state. Re-add once we've verified against whatever
 // Project 0 actually exposes for integration.
 
+// All-green palette (2026-07-13, per Lloyd's request) — kamino-usdc/kamino-sol/
+// solend-usdc were previously distinct purple shades; replaced with green-family
+// shades so the whole site reads as one consistent green brand, not a leftover
+// purple accent from an earlier design pass.
 const COLORS: Record<string, string> = {
-  "kamino-usdc":      "#7C3AED",
-  "kamino-sol":       "#9F67F5",
+  "kamino-usdc":      "#3FE0A0",
+  "kamino-sol":       "#22B37E",
   "jito-sol":         "#10B981",
   "marinade-sol":     "#06B6D4",
   "drift-sol":        "#14B8A6",
-  "solend-usdc":      "#8B5CF6",
+  "solend-usdc":      "#34D399",
   "raydium-usdc-sol": "#EF4444",
   "orca-usdc-eth":    "#EF4444",
 };

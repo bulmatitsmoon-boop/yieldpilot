@@ -13,7 +13,14 @@
   --signal-dim:  #22B37E;
   --warn:     #F5B84B;
   --loss:     #FF6B6B;
-  --token:    #7C5CFF;
+  /* Was purple (#7C5CFF) — replaced with green per Lloyd's explicit request
+     (2026-07-13): the $YPILOT-token accent used to be a distinct purple,
+     but he wants the whole site reading as one consistent green brand now,
+     not just the primary --signal color. Kept as its own variable (not an
+     alias for --signal) so token-branded elements can still be told apart
+     from signal/yield elements if that's ever needed again — just a
+     different green rather than the same exact hex. */
+  --token:    #4FE0B8;
 
   /* Back-compat aliases so existing components (Header/Footer/etc still
      mid-migration) keep working while we reskin screen by screen. */
@@ -26,7 +33,7 @@
   --text-muted:   var(--text-mid);
   --text-dim:     var(--text-low);
   --purple:       var(--token);
-  --purple-light: #9B85FF;
+  --purple-light: #7BEFCF;
   --cyan:         var(--signal);
   --green:        var(--signal);
   --yellow:       var(--warn);
