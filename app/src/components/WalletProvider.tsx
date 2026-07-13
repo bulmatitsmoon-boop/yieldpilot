@@ -13,7 +13,15 @@ import { clusterApiUrl } from "@solana/web3.js";
 import "@solana/wallet-adapter-react-ui/styles.css";
 
 const NETWORK = (process.env.NEXT_PUBLIC_SOLANA_NETWORK as any) || "mainnet-beta";
-const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || "https://REDACTED-ROTATED-ENDPOINT/REDACTED-ROTATED-TOKEN/";
+// Fallback is the public Solana RPC (heavily rate-limited but has zero
+// embedded credentials) — NEVER hardcode a paid provider's URL here. This
+// file is a client component, so anything in it ships to every visitor's
+// browser and sits in git history regardless of what NEXT_PUBLIC_RPC_URL is
+// currently set to in Vercel. A real QuickNode URL with an embedded token
+// was previously hardcoded here; found during a security audit and removed
+// — rotate that QuickNode key if it's still live, same as the earlier
+// Helius key rotation (see project_yieldpilot_critical_keys.md).
+const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || clusterApiUrl(NETWORK);
 
 // Wallet adapter FC types lag behind @types/react@18 — cast to any
 const Conn = ConnectionProvider as any;
