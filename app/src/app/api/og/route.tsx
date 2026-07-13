@@ -62,8 +62,8 @@ export async function GET() {
         <div style={{ display: "flex", gap: 24 }}>
           {[
             { label: "Auto-Rebalance", value: "Every 15 min" },
-            { label: "Performance Fee", value: "5% of profit" },
-            { label: "Protocols", value: "Kamino · Marinade · Drift" },
+            { label: "Performance Fee", value: "0-9% of profit" },
+            { label: "Protocols", value: "Kamino · Marinade · Jito · Solend" },
           ].map(({ label, value }) => (
             <div key={label} style={{
               background: "rgba(255,255,255,0.04)",
