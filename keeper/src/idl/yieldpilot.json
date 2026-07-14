@@ -1126,6 +1126,13 @@
           "writable": true
         },
         {
+          "name": "tx_instructions_sysvar",
+          "docs": [
+            "sibling instructions in this same transaction for the pairing check."
+          ],
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        },
+        {
           "name": "vault_authority",
           "writable": true,
           "pda": {
@@ -1223,6 +1230,10 @@
         {
           "name": "vault",
           "writable": true
+        },
+        {
+          "name": "tx_instructions_sysvar",
+          "address": "Sysvar1nstructions1111111111111111111111111"
         },
         {
           "name": "vault_authority",
@@ -1327,6 +1338,10 @@
         {
           "name": "vault",
           "writable": true
+        },
+        {
+          "name": "tx_instructions_sysvar",
+          "address": "Sysvar1nstructions1111111111111111111111111"
         },
         {
           "name": "vault_token_account",
@@ -1451,6 +1466,10 @@
         {
           "name": "vault",
           "writable": true
+        },
+        {
+          "name": "tx_instructions_sysvar",
+          "address": "Sysvar1nstructions1111111111111111111111111"
         },
         {
           "name": "vault_authority",
@@ -2402,6 +2421,10 @@
           {
             "name": "tier_at_deposit",
             "type": "u8"
+          },
+          {
+            "name": "vault_created_at",
+            "type": "i64"
           }
         ]
       }
@@ -2515,6 +2538,10 @@
                 8
               ]
             }
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
           }
         ]
       }
