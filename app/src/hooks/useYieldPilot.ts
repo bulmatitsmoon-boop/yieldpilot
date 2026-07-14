@@ -7,6 +7,7 @@ import {
   PublicKey,
   SystemProgram,
   SYSVAR_RENT_PUBKEY,
+  SYSVAR_INSTRUCTIONS_PUBKEY,
 } from "@solana/web3.js";
 import {
   getAssociatedTokenAddress,
@@ -48,6 +49,7 @@ export interface VaultInfo {
     targetBps: number;
     currentBalance: number;
     enabled: boolean;
+    vaultReceiptAccount: string;
   }[];
 }
 
@@ -137,6 +139,7 @@ export function useYieldPilot(vaultAddresses: string[]) {
                 targetBps: p.targetBps.toNumber(),
                 currentBalance: p.deployedBalance.toNumber(),
                 enabled: p.targetBps > 0,
+                vaultReceiptAccount: (p.vaultReceiptAccount as PublicKey).toBase58(),
               })),
           } as VaultInfo;
         })
@@ -381,11 +384,93 @@ export function useYieldPilot(vaultAddresses: string[]) {
           postIxs.push(createCloseAccountInstruction(userTokenAccount, publicKey, publicKey));
         }
 
-        const totalShares = (vaultRaw.totalShares as anchor.BN).toNumber();
+        // Value the withdrawal against total vault value (idle + deployed) — must
+        // match the on-chain math in withdraw() exactly (idle + total_deployed()),
+        // since minAmountOut is what protects the user from being underpaid.
+        const totalSharesBN: anchor.BN = vaultRaw.totalShares;
         const vaultTokenAcct = await connection.getTokenAccountBalance(vaultTokenAccount);
-        const vaultBal = vaultTokenAcct.value.uiAmount || 0;
-        const estimatedOut = totalShares > 0 ? (shares.toNumber() / totalShares) * vaultBal : 0;
-        const minAmountOut = new anchor.BN(Math.floor(estimatedOut * 0.99 * Math.pow(10, vaultTokenAcct.value.decimals)));
+        const idleBN = new anchor.BN(vaultTokenAcct.value.amount);
+        const protocolCount: number = vaultRaw.protocolCount;
+        const protocols = (vaultRaw.protocols as any[]).slice(0, protocolCount);
+        const totalDeployedBN = protocols.reduce(
+          (sum: anchor.BN, p: any) => sum.add(p.deployedBalance as anchor.BN),
+          new anchor.BN(0)
+        );
+        const totalValueBN = idleBN.add(totalDeployedBN);
+        const amountOutBN = totalSharesBN.gtn(0) ? shares.mul(totalValueBN).div(totalSharesBN) : new anchor.BN(0);
+        const minAmountOut = amountOutBN.muln(99).divn(100); // 1% slippage buffer
+
+        // If idle can't cover the fair payout, bundle a recall instruction ahead
+        // of withdraw() in the same transaction — recalls the vault's ENTIRE
+        // position from whichever protocol currently holds the most (simplest
+        // safe choice: no exchange-rate math needed, guaranteed to free up at
+        // least that protocol's full deployed value; any excess just stays idle
+        // until the keeper's next cycle redeploys it). Relies on the on-chain
+        // recall_from_* change that allows any signer to call recall as long as
+        // a matching withdraw() for the same user is in the same transaction —
+        // see the "PERMISSIONLESS BY DESIGN" comments in lib.rs.
+        if (idleBN.lt(amountOutBN) && protocols.length > 0) {
+          const bestIdx = protocols.reduce(
+            (best: number, p: any, i: number) => (p.deployedBalance.gt(protocols[best].deployedBalance) ? i : best),
+            0
+          );
+          const bestProtocol = protocols[bestIdx];
+          if ((bestProtocol.deployedBalance as anchor.BN).gtn(0)) {
+            const label = Buffer.from(bestProtocol.label).toString("utf8").replace(/\0/g, "");
+            const receiptAccountPubkey = new PublicKey((bestProtocol.vaultReceiptAccount as PublicKey).toBase58());
+            const receiptBalance = await connection.getTokenAccountBalance(receiptAccountPubkey);
+            const recallAmount = new anchor.BN(receiptBalance.value.amount);
+
+            if (recallAmount.gtn(0)) {
+              const res = await fetch(`/api/recall-accounts?label=${encodeURIComponent(label)}`);
+              if (!res.ok) {
+                throw new Error(`Insufficient idle liquidity and could not fetch recall accounts for ${label}`);
+              }
+              const { instructionName, accounts: apiAccounts, remainingAccounts } = await res.json();
+
+              const receiptFieldByLabel: Record<string, string> = {
+                "kamino-usdc": "vaultCollateralAccount",
+                "kamino-sol": "vaultCollateralAccount",
+                "marinade-sol": "vaultMsolAccount",
+                "jito-sol": "vaultLstAccount",
+                "solend-usdc": "vaultCollateralAccount",
+              };
+              if (!(label in receiptFieldByLabel)) {
+                throw new Error(`No receipt-account mapping for protocol label "${label}" — add it to receiptFieldByLabel before this can recall from it.`);
+              }
+              const receiptFieldName = receiptFieldByLabel[label];
+
+              const recallAccounts: Record<string, PublicKey> = {
+                keeper: publicKey,
+                vault: vaultPubkey,
+                txInstructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
+                vaultAuthority: vaultAuthorityPda,
+                vaultTokenAccount,
+                [receiptFieldName]: receiptAccountPubkey,
+              };
+              for (const [key, val] of Object.entries(apiAccounts as Record<string, string | undefined>)) {
+                if (val) recallAccounts[key] = new PublicKey(val);
+              }
+
+              const recallMethod = (program.methods as any)[instructionName];
+              if (typeof recallMethod !== "function") {
+                throw new Error(`Program has no method "${instructionName}" — /api/recall-accounts returned an instruction name that doesn't match the IDL.`);
+              }
+              let builder = recallMethod(bestIdx, recallAmount).accounts(recallAccounts);
+              if (remainingAccounts) {
+                builder = builder.remainingAccounts(
+                  (remainingAccounts as string[]).map((pk) => ({
+                    pubkey: new PublicKey(pk),
+                    isSigner: false,
+                    isWritable: false,
+                  }))
+                );
+              }
+              const recallIx = await builder.instruction();
+              preIxs.unshift(recallIx); // must execute before withdraw() in the same tx
+            }
+          }
+        }
 
         return program.methods
           .withdraw(shares, minAmountOut)
