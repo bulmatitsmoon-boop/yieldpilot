@@ -435,7 +435,10 @@ export function useYieldPilot(vaultAddresses: string[]) {
                 "jito-sol": "vaultLstAccount",
                 "solend-usdc": "vaultCollateralAccount",
               };
-              const receiptFieldName = receiptFieldByLabel[label] ?? "vaultCollateralAccount";
+              if (!(label in receiptFieldByLabel)) {
+                throw new Error(`No receipt-account mapping for protocol label "${label}" — add it to receiptFieldByLabel before this can recall from it.`);
+              }
+              const receiptFieldName = receiptFieldByLabel[label];
 
               const recallAccounts: Record<string, PublicKey> = {
                 keeper: publicKey,
@@ -449,7 +452,11 @@ export function useYieldPilot(vaultAddresses: string[]) {
                 if (val) recallAccounts[key] = new PublicKey(val);
               }
 
-              let builder = (program.methods as any)[instructionName](bestIdx, recallAmount).accounts(recallAccounts);
+              const recallMethod = (program.methods as any)[instructionName];
+              if (typeof recallMethod !== "function") {
+                throw new Error(`Program has no method "${instructionName}" — /api/recall-accounts returned an instruction name that doesn't match the IDL.`);
+              }
+              let builder = recallMethod(bestIdx, recallAmount).accounts(recallAccounts);
               if (remainingAccounts) {
                 builder = builder.remainingAccounts(
                   (remainingAccounts as string[]).map((pk) => ({
