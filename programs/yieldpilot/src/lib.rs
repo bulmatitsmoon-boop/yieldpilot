@@ -100,6 +100,10 @@ pub mod yieldpilot {
         v.protocols           = [ProtocolAdapter::default(); MAX_PROTOCOLS];
         v.paused              = false;
         v.tvl_cap             = params.tvl_cap;
+        // Unique per-lifecycle stamp: lets deposit() tell apart a genuinely fresh
+        // position from a stale one left over by a prior vault at the same PDA
+        // (same mint+admin seeds can be reinitialized after close_vault).
+        v.created_at          = Clock::get()?.unix_timestamp;
 
         emit!(VaultInitialized { vault: v.key(), admin: v.admin, mint: v.mint });
         Ok(())
@@ -250,11 +254,17 @@ pub mod yieldpilot {
             pos.vault = v.key();
             pos.bump  = ctx.bumps.user_position;
         }
-        // If vault was reset (total_shares was 0 before this deposit), clear any
-        // phantom shares left over from a previous vault lifecycle.
-        if v.total_shares == shares_to_mint {
+        // Clear any phantom shares/deposited_amount left over from a previous vault
+        // lifecycle at this same PDA (close_vault only closes the Vault account,
+        // never the UserPosition PDAs — a reinitialized vault with the same
+        // mint+admin seeds would otherwise inherit every past depositor's stale
+        // balance, not just the very first one back). Compare against the vault's
+        // own creation stamp rather than "am I the first depositor", since that
+        // stale-detection only ever caught the first depositor after a reset.
+        if pos.vault_created_at != v.created_at {
             pos.shares           = 0;
             pos.deposited_amount = 0;
+            pos.vault_created_at = v.created_at;
         }
         pos.shares           = pos.shares.checked_add(shares_to_mint).ok_or(VaultError::MathOverflow)?;
         pos.deposited_amount = pos.deposited_amount.checked_add(amount).ok_or(VaultError::MathOverflow)?;
@@ -1260,6 +1270,10 @@ pub struct Vault {
     pub tvl_cap:             u64,
     pub name:                String,
     pub protocols:           [ProtocolAdapter; MAX_PROTOCOLS],
+    // Unix timestamp set once at initialize_vault — a per-lifecycle stamp so
+    // deposit() can detect a UserPosition left over from a prior vault at the
+    // same PDA. See deposit()'s reset check.
+    pub created_at:          i64,
 }
 
 impl Vault {
@@ -1298,6 +1312,9 @@ pub struct UserPosition {
     // Tier at time of most recent deposit. Fee is the HIGHER of current tier and snapshot tier,
     // preventing a flash loan of gate tokens to temporarily gain a better fee rate at withdrawal.
     pub tier_at_deposit:  u8, // 0=Gold, 1=Silver, 2=Bronze, 3=None/ungated
+    // Copy of Vault.created_at as of this position's last reset/deposit — lets
+    // deposit() detect a stale position from a prior vault lifecycle at the same PDA.
+    pub vault_created_at: i64,
 }
 
 impl UserPosition {
