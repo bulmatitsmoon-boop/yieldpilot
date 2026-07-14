@@ -1,9 +1,63 @@
 use anchor_lang::prelude::*;
 use anchor_lang::system_program::{self, Transfer as SystemTransfer};
+use anchor_lang::solana_program::sysvar::instructions::{
+    load_instruction_at_checked, ID as INSTRUCTIONS_SYSVAR_ID,
+};
 use anchor_spl::{
     associated_token::{self, AssociatedToken, Create},
     token::{self, Mint, MintTo, Token, TokenAccount, Transfer, Burn, CloseAccount, SyncNative},
 };
+
+// sha256("global:withdraw")[0..8] — the Anchor instruction discriminator for
+// `withdraw`, precomputed rather than pulled from the auto-generated
+// `crate::instruction` module so this doesn't depend on that module's exact
+// shape across Anchor versions. Used by verify_paired_withdraw below.
+const WITHDRAW_DISCRIMINATOR: [u8; 8] = [183, 18, 70, 156, 148, 109, 161, 34];
+
+/// Called by recall_from_* when the signer is NOT the vault's keeper: confirms
+/// a `withdraw` instruction for this exact (vault, user) pair exists elsewhere
+/// in the same transaction. This is what makes opening recall up to any signer
+/// safe — a non-keeper caller can only ever trigger a recall as an inseparable
+/// part of their own real, share-burning withdrawal in the same atomic
+/// transaction, never as a standalone free action (which would otherwise let
+/// anyone force-undeploy the vault's funds — see PR discussion). The keeper's
+/// own routine rebalancing recalls are unaffected: they're never paired with a
+/// withdraw, so this function is only reached when the caller isn't the keeper.
+fn verify_paired_withdraw<'info>(
+    instructions_sysvar: &AccountInfo<'info>,
+    expected_vault: &Pubkey,
+    expected_caller: &Pubkey,
+) -> Result<()> {
+    require_keys_eq!(
+        *instructions_sysvar.key,
+        INSTRUCTIONS_SYSVAR_ID,
+        VaultError::InvalidInstructionsSysvar
+    );
+
+    let mut i: u16 = 0;
+    loop {
+        // load_instruction_at_checked errors once i runs past the last
+        // instruction in this transaction — that's our loop terminator.
+        let ix = match load_instruction_at_checked(i as usize, instructions_sysvar) {
+            Ok(ix) => ix,
+            Err(_) => break,
+        };
+        // Withdraw's account order (see the Withdraw accounts struct):
+        // [0] = user (Signer), [1] = vault.
+        if ix.program_id == crate::ID
+            && ix.data.len() >= 8
+            && ix.data[0..8] == WITHDRAW_DISCRIMINATOR
+            && ix.accounts.len() >= 2
+            && ix.accounts[0].pubkey == *expected_caller
+            && ix.accounts[1].pubkey == *expected_vault
+        {
+            return Ok(());
+        }
+        i += 1;
+        if i > 32 { break; } // sane upper bound — no real transaction has this many instructions
+    }
+    err!(VaultError::RecallRequiresPairedWithdraw)
+}
 
 // WSOL mint — used to recreate the vault's SOL token account after a full
 // unwrap-for-Marinade cycle (see deploy_to_marinade).
@@ -641,6 +695,13 @@ pub mod yieldpilot {
         collateral_amount: u64,
     ) -> Result<()> {
         let v = &mut ctx.accounts.vault;
+        if v.keeper != ctx.accounts.keeper.key() {
+            verify_paired_withdraw(
+                &ctx.accounts.tx_instructions_sysvar.to_account_info(),
+                &v.key(),
+                &ctx.accounts.keeper.key(),
+            )?;
+        }
         let idx = protocol_index as usize;
         require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
         require!(v.protocols[idx].kind == ProtocolKind::Kamino, AdapterError::UnsupportedProtocol);
@@ -834,6 +895,13 @@ pub mod yieldpilot {
         msol_amount: u64,
     ) -> Result<()> {
         let v = &mut ctx.accounts.vault;
+        if v.keeper != ctx.accounts.keeper.key() {
+            verify_paired_withdraw(
+                &ctx.accounts.tx_instructions_sysvar.to_account_info(),
+                &v.key(),
+                &ctx.accounts.keeper.key(),
+            )?;
+        }
         let idx = protocol_index as usize;
         require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
         require!(v.protocols[idx].kind == ProtocolKind::Marinade, AdapterError::UnsupportedProtocol);
@@ -1042,6 +1110,13 @@ pub mod yieldpilot {
     ) -> Result<()> {
         require!(lst_amount > 0, VaultError::ZeroAmount);
         let v = &mut ctx.accounts.vault;
+        if v.keeper != ctx.accounts.keeper.key() {
+            verify_paired_withdraw(
+                &ctx.accounts.tx_instructions_sysvar.to_account_info(),
+                &v.key(),
+                &ctx.accounts.keeper.key(),
+            )?;
+        }
         let idx = protocol_index as usize;
         require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
         require!(v.protocols[idx].kind == ProtocolKind::Jito, AdapterError::UnsupportedProtocol);
@@ -1194,6 +1269,13 @@ pub mod yieldpilot {
     ) -> Result<()> {
         require!(collateral_amount > 0, VaultError::ZeroAmount);
         let v = &mut ctx.accounts.vault;
+        if v.keeper != ctx.accounts.keeper.key() {
+            verify_paired_withdraw(
+                &ctx.accounts.tx_instructions_sysvar.to_account_info(),
+                &v.key(),
+                &ctx.accounts.keeper.key(),
+            )?;
+        }
         let idx = protocol_index as usize;
         require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
         require!(v.protocols[idx].kind == ProtocolKind::Solend, AdapterError::UnsupportedProtocol);
@@ -1605,10 +1687,19 @@ pub struct DeployToKamino<'info> {
 
 #[derive(Accounts)]
 pub struct RecallFromKamino<'info> {
+    // Callable by the vault's keeper (routine rebalancing, unrestricted) OR by
+    // any other signer PAIRED with a `withdraw` instruction for this exact
+    // (vault, this signer) in the same transaction — see verify_paired_withdraw.
+    // Recall only ever moves funds into the vault's own fixed, registry-
+    // validated accounts, so this can never be used to redirect funds.
     #[account(mut)]
     pub keeper: Signer<'info>,
-    #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
+    #[account(mut)]
     pub vault: Account<'info, Vault>,
+    /// CHECK: address-constrained to the real sysvar; used only to look up
+    /// sibling instructions in this same transaction for the pairing check.
+    #[account(address = INSTRUCTIONS_SYSVAR_ID)]
+    pub tx_instructions_sysvar: UncheckedAccount<'info>,
     /// CHECK: PDA
     #[account(mut, seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
     pub vault_authority: UncheckedAccount<'info>,
@@ -1681,10 +1772,15 @@ pub struct DeployToMarinade<'info> {
 
 #[derive(Accounts)]
 pub struct RecallFromMarinade<'info> {
+    // Callable by the vault's keeper OR any signer paired with a matching
+    // `withdraw` instruction in the same transaction — see RecallFromKamino.
     #[account(mut)]
     pub keeper: Signer<'info>,
-    #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
+    #[account(mut)]
     pub vault: Box<Account<'info, Vault>>,
+    /// CHECK: address-constrained to the real sysvar; see RecallFromKamino.
+    #[account(address = INSTRUCTIONS_SYSVAR_ID)]
+    pub tx_instructions_sysvar: UncheckedAccount<'info>,
     /// CHECK: PDA
     #[account(mut, seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
     pub vault_authority: UncheckedAccount<'info>,
@@ -1753,10 +1849,15 @@ pub struct DeployToSolLst<'info> {
 
 #[derive(Accounts)]
 pub struct RecallFromSolLst<'info> {
+    // Callable by the vault's keeper OR any signer paired with a matching
+    // `withdraw` instruction in the same transaction — see RecallFromKamino.
     #[account(mut)]
     pub keeper: Signer<'info>,
-    #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
+    #[account(mut)]
     pub vault: Box<Account<'info, Vault>>,
+    /// CHECK: address-constrained to the real sysvar; see RecallFromKamino.
+    #[account(address = INSTRUCTIONS_SYSVAR_ID)]
+    pub tx_instructions_sysvar: UncheckedAccount<'info>,
     /// Vault's wrapped-SOL account — native SOL received from the stake pool
     /// gets wrapped back in here (transfer + sync_native), no close/recreate
     /// needed since we're topping up an already-open account.
@@ -1829,9 +1930,14 @@ pub struct DeployToSolend<'info> {
 
 #[derive(Accounts)]
 pub struct RecallFromSolend<'info> {
+    // Callable by the vault's keeper OR any signer paired with a matching
+    // `withdraw` instruction in the same transaction — see RecallFromKamino.
     #[account(mut)] pub keeper: Signer<'info>,
-    #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
+    #[account(mut)]
     pub vault: Box<Account<'info, Vault>>,
+    /// CHECK: address-constrained to the real sysvar; see RecallFromKamino.
+    #[account(address = INSTRUCTIONS_SYSVAR_ID)]
+    pub tx_instructions_sysvar: UncheckedAccount<'info>,
     /// CHECK: PDA
     #[account(mut, seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
     pub vault_authority: UncheckedAccount<'info>,
@@ -1906,4 +2012,6 @@ pub enum VaultError {
     #[msg("Gate mint already set and cannot be changed")]     GateMintAlreadySet,
     #[msg("Vault still has deposits — withdraw all before closing")] VaultNotEmpty,
     #[msg("Deploy would breach minimum idle buffer (10%)")]    IdleBufferBreach,
+    #[msg("Non-keeper recall must be paired with a withdraw instruction for the same user and vault in the same transaction")] RecallRequiresPairedWithdraw,
+    #[msg("Invalid instructions sysvar account")] InvalidInstructionsSysvar,
 }
