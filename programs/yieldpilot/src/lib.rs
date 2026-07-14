@@ -285,22 +285,30 @@ pub mod yieldpilot {
         require!(v.total_shares > 0, VaultError::ZeroShares);
 
         // How many base tokens does this share represent?
-        // Use actual vault token balance so accrued yield is included in share price.
-        // IMPORTANT: if funds are currently deployed to Kamino/Marinade, vault_balance
-        // will be lower than total value. Users must wait for the keeper to recall funds
-        // before withdrawing, or the keeper must recall first. We enforce this explicitly.
-        let vault_balance = ctx.accounts.vault_token_account.amount;
+        // A share is a claim on the vault's TOTAL value, not just the idle portion.
+        // Value it against idle balance + funds currently deployed to protocols —
+        // otherwise, whenever the keeper has funds deployed (up to 90% of TVL), a
+        // withdrawer would be paid only their fraction of the ~10% idle balance and
+        // silently lose the rest to the remaining holders. deployed_balance tracks
+        // deployed principal (accrued yield is realized into total_deposits on
+        // recall), so idle + total_deployed is a conservative floor on true value:
+        // it never over-values a share, so it can never drain the vault.
+        let idle_balance = ctx.accounts.vault_token_account.amount;
+        let total_value = idle_balance
+            .checked_add(v.total_deployed())
+            .ok_or(VaultError::MathOverflow)?;
         let amount_out = (shares as u128)
-            .checked_mul(vault_balance as u128)
+            .checked_mul(total_value as u128)
             .and_then(|x| x.checked_div(v.total_shares as u128))
             .ok_or(VaultError::MathOverflow)? as u64;
         require!(amount_out > 0, VaultError::ZeroAmount);
         // Slippage guard: caller specifies the minimum they will accept.
         // Protects against vault balance dropping between simulation and execution.
         require!(amount_out >= min_amount_out, VaultError::SlippageExceeded);
-        // SECURITY: ensure vault has sufficient idle liquidity to cover this withdrawal.
-        // Prevents a user from burning shares and receiving 0 tokens when funds are deployed.
-        require!(vault_balance >= amount_out, VaultError::InsufficientIdle);
+        // SECURITY: the payout is drawn from the idle balance only. If funds are
+        // deployed and idle can't cover the fair amount, revert so the keeper
+        // recalls first — never underpay the user by valuing against idle alone.
+        require!(idle_balance >= amount_out, VaultError::InsufficientIdle);
 
         // Cost basis for this share tranche (for fee calculation)
         let cost_basis = (shares as u128)
