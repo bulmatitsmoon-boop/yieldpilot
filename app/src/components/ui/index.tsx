@@ -126,6 +126,9 @@ export function TxBanner({ status, error, sig }: { status: string; error: string
   const c = configs[status];
   if (!c) return null;
 
+  const isMainnet = process.env.NEXT_PUBLIC_SOLANA_NETWORK === "mainnet-beta";
+  const solscanCluster = isMainnet ? "" : "?cluster=devnet";
+
   return (
     <div style={{
       position: "fixed", bottom: 24, right: 24, zIndex: 1000,
@@ -146,7 +149,7 @@ export function TxBanner({ status, error, sig }: { status: string; error: string
           <div style={{ color: "var(--text-muted)", fontSize: 11, fontFamily: "var(--mono)", wordBreak: "break-all" }}>
             {sig.slice(0, 20)}...{sig.slice(-8)}
           </div>
-          <a href={`https://solscan.io/tx/${sig}?`} target="_blank" rel="noopener noreferrer"
+          <a href={`https://solscan.io/tx/${sig}${solscanCluster}`} target="_blank" rel="noopener noreferrer"
             style={{ color: "var(--purple-light)", fontSize: 12, textDecoration: "none", fontWeight: 600 }}>
             View on Solscan ↗
           </a>
