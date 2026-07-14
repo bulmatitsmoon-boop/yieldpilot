@@ -14,6 +14,8 @@ export function RecentTransactions() {
   const { connection } = useConnection();
   const [txs, setTxs] = useState<TxEntry[]>([]);
   const [loading, setLoading] = useState(false);
+  const isMainnet = process.env.NEXT_PUBLIC_SOLANA_NETWORK === "mainnet-beta";
+  const solscanCluster = isMainnet ? "" : "?cluster=devnet";
 
   useEffect(() => {
     if (!publicKey) return;
@@ -40,7 +42,7 @@ export function RecentTransactions() {
         txs.map((tx, i) => (
           <a
             key={tx.signature}
-            href={`https://solscan.io/tx/${tx.signature}?cluster=devnet`}
+            href={`https://solscan.io/tx/${tx.signature}${solscanCluster}`}
             target="_blank"
             rel="noopener noreferrer"
             style={{
