@@ -699,6 +699,17 @@ pub mod yieldpilot {
         require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
         require!(v.protocols[idx].kind == ProtocolKind::Marinade, AdapterError::UnsupportedProtocol);
         assert_state_matches(&v.protocols[idx], ctx.accounts.marinade_state.key)?;
+        // SECURITY: validate the mSOL receipt account matches the one registered for
+        // this protocol index. Without this, a compromised keeper could redirect the
+        // mSOL minted by this deposit to an account they control — the real SOL still
+        // leaves the vault, but the vault's actual claim on it (the mSOL) never lands
+        // in vault_msol_account, silently draining value while deployed_balance still
+        // looks correct. Same protection deploy_to_kamino already has; this and the
+        // other two protocol adapters (Solend, SPL Stake Pool) were missing it.
+        require!(
+            ctx.accounts.vault_msol_account.key() == v.protocols[idx].vault_receipt_account,
+            VaultError::InvalidTokenAccount
+        );
 
         // SECURITY: enforce the same minimum idle liquidity buffer as deploy_to_kamino,
         // so this protocol can't be used to deploy 100% of funds and block withdrawals.
@@ -809,6 +820,12 @@ pub mod yieldpilot {
         require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
         require!(v.protocols[idx].kind == ProtocolKind::Marinade, AdapterError::UnsupportedProtocol);
         assert_state_matches(&v.protocols[idx], ctx.accounts.marinade_state.key)?;
+        // SECURITY: same registry check as deploy_to_marinade — burn mSOL from the
+        // registered account, not an arbitrary one the keeper supplies.
+        require!(
+            ctx.accounts.vault_msol_account.key() == v.protocols[idx].vault_receipt_account,
+            VaultError::InvalidTokenAccount
+        );
 
         let vault_key = v.key();
         let seeds: &[&[u8]] = &[b"vault", vault_key.as_ref(), &[v.authority_bump]];
@@ -894,9 +911,18 @@ pub mod yieldpilot {
         require!(!v.paused, AdapterError::VaultPaused);
         let idx = protocol_index as usize;
         require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
+        require!(v.protocols[idx].kind == ProtocolKind::Jito, AdapterError::UnsupportedProtocol);
         // SECURITY: validate the stake pool passed matches what's registered for this
         // index — same check every other protocol (Kamino/Marinade/Solend) already has.
         assert_state_matches(&v.protocols[idx], ctx.accounts.stake_pool.key)?;
+        // SECURITY: validate the LST receipt account matches the one registered for
+        // this protocol index — same reasoning as deploy_to_marinade's equivalent
+        // check (without it, a compromised keeper could redirect the jitoSOL minted
+        // by this deposit to an account they control).
+        require!(
+            ctx.accounts.vault_lst_account.key() == v.protocols[idx].vault_receipt_account,
+            VaultError::InvalidTokenAccount
+        );
 
         // SECURITY: enforce the same minimum idle liquidity buffer as deploy_to_kamino,
         // so this protocol can't be used to deploy 100% of funds and block withdrawals.
@@ -1000,9 +1026,16 @@ pub mod yieldpilot {
         let v = &mut ctx.accounts.vault;
         let idx = protocol_index as usize;
         require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
+        require!(v.protocols[idx].kind == ProtocolKind::Jito, AdapterError::UnsupportedProtocol);
         // SECURITY: validate the stake pool passed matches what's registered for this
         // index — same check every other protocol (Kamino/Marinade/Solend) already has.
         assert_state_matches(&v.protocols[idx], ctx.accounts.stake_pool.key)?;
+        // SECURITY: same registry check as deploy_to_sol_lst — burn LST from the
+        // registered account, not an arbitrary one the keeper supplies.
+        require!(
+            ctx.accounts.vault_lst_account.key() == v.protocols[idx].vault_receipt_account,
+            VaultError::InvalidTokenAccount
+        );
 
         let vault_key = v.key();
         let seeds: &[&[u8]] = &[b"vault", vault_key.as_ref(), &[v.authority_bump]];
@@ -1078,6 +1111,20 @@ pub mod yieldpilot {
         require!(!v.paused, AdapterError::VaultPaused);
         let idx = protocol_index as usize;
         require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
+        require!(v.protocols[idx].kind == ProtocolKind::Solend, AdapterError::UnsupportedProtocol);
+        // SECURITY: deploy_to_solend was missing BOTH checks every other protocol has —
+        // the reserve wasn't validated against the registry at all, and neither was the
+        // cToken receipt destination. Without the first, a compromised keeper could
+        // deposit into an arbitrary Solend reserve instead of the registered one
+        // (deployed_balance would then track the wrong market). Without the second,
+        // same fund-diversion risk as deploy_to_marinade/deploy_to_sol_lst above — the
+        // minted cTokens could be redirected to an account the keeper controls while
+        // the real USDC still leaves the vault.
+        assert_state_matches(&v.protocols[idx], ctx.accounts.reserve.key)?;
+        require!(
+            ctx.accounts.vault_collateral_account.key() == v.protocols[idx].vault_receipt_account,
+            VaultError::InvalidTokenAccount
+        );
 
         // SECURITY: enforce the same minimum idle liquidity buffer as deploy_to_kamino,
         // so this protocol can't be used to deploy 100% of funds and block withdrawals.
@@ -1131,6 +1178,13 @@ pub mod yieldpilot {
         let v = &mut ctx.accounts.vault;
         let idx = protocol_index as usize;
         require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
+        require!(v.protocols[idx].kind == ProtocolKind::Solend, AdapterError::UnsupportedProtocol);
+        // SECURITY: same two checks added to deploy_to_solend — see its comment.
+        assert_state_matches(&v.protocols[idx], ctx.accounts.reserve.key)?;
+        require!(
+            ctx.accounts.vault_collateral_account.key() == v.protocols[idx].vault_receipt_account,
+            VaultError::InvalidTokenAccount
+        );
 
         let vault_key = v.key();
         let seeds: &[&[u8]] = &[b"vault", vault_key.as_ref(), &[v.authority_bump]];
