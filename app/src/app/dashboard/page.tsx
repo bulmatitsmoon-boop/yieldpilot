@@ -306,7 +306,7 @@ export default function Dashboard() {
       )}
 
       {/* Tabs */}
-      <div style={{ display: "flex", gap: 4, marginBottom: 20, background: "var(--ink-800)", padding: 4, borderRadius: 10, border: "1px solid var(--line)", width: "fit-content" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 20, background: "var(--ink-800)", padding: 4, borderRadius: 10, border: "1px solid var(--line)", width: "fit-content", maxWidth: "100%" }}>
         {(["overview", "protocols", "deposit", "withdraw"] as Tab[]).map((t) => (
           <button key={t} onClick={() => setActiveTab(t)} style={tabStyle(t)}>
             {t.charAt(0).toUpperCase() + t.slice(1)}
