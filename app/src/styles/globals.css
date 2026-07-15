@@ -156,6 +156,11 @@ html, body {
   .header-mobile-menu { display: flex !important; }
   .header-root { padding: 0 16px !important; }
   .header-logo-sub { display: none !important; }
+  /* The standalone Disconnect button plus the address badge overflowed the
+     header on narrow viewports and pushed the hamburger button off-screen
+     (not hidden by any rule — just squeezed out by unwrapped flex content).
+     Disconnect moves into the mobile dropdown menu instead; see Header.tsx. */
+  .header-disconnect-btn { display: none !important; }
 
   main { padding: 0 !important; }
 
