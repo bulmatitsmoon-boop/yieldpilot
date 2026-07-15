@@ -1,3 +1,4 @@
+import axios from "axios";
 import { logger } from "./logger";
 
 // Alerts-only Telegram channel — compound events, rebalance events. Not a
@@ -10,22 +11,20 @@ const CHANNEL_ID = process.env.TELEGRAM_ALERTS_CHANNEL_ID;
 export async function notifyTelegram(message: string): Promise<void> {
   if (!BOT_TOKEN || !CHANNEL_ID) return;
   try {
-    const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    await axios.post(
+      `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
+      {
         chat_id: CHANNEL_ID,
         text: message,
         parse_mode: "HTML",
         disable_web_page_preview: true,
-      }),
-    });
-    if (!res.ok) {
-      const body = await res.text();
-      logger.warn("Telegram notify failed (non-fatal)", { status: res.status, body: body.slice(0, 200) });
-    }
+      },
+      { timeout: 8000 }
+    );
   } catch (err: any) {
     // Never let a Telegram outage break the actual keeper cycle.
-    logger.warn("Telegram notify error (non-fatal)", { error: err.message });
+    logger.warn("Telegram notify error (non-fatal)", {
+      error: err.response?.data ? JSON.stringify(err.response.data).slice(0, 200) : err.message,
+    });
   }
 }
