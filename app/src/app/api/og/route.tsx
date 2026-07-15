@@ -61,7 +61,7 @@ export async function GET() {
         {/* Stats row */}
         <div style={{ display: "flex", gap: 24 }}>
           {[
-            { label: "Auto-Rebalance", value: "Every 15 min" },
+            { label: "Auto-Rebalance", value: "Every 45 min" },
             { label: "Performance Fee", value: "0-9% of profit" },
             { label: "Protocols", value: "Kamino · Marinade · Jito · Solend" },
           ].map(({ label, value }) => (
