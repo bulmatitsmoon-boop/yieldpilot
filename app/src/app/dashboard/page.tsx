@@ -20,7 +20,7 @@ const VAULT_ADDRESSES = (process.env.NEXT_PUBLIC_VAULT_ADDRESSES || "F1r513ZZdof
 type Tab = "overview" | "protocols" | "deposit" | "withdraw";
 
 const ADMIN_PUBKEY = "8i7kydJHwi3Cdp46Xugyux2vWJmTScYDvnJrBiBihBnP";
-const REBALANCE_INTERVAL_SEC = 15 * 60;
+const REBALANCE_INTERVAL_SEC = 45 * 60;
 
 function Countdown({ lastCompoundTs }: { lastCompoundTs: number | null }) {
   const [now, setNow] = useState(() => Date.now());
@@ -28,7 +28,7 @@ function Countdown({ lastCompoundTs }: { lastCompoundTs: number | null }) {
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
-  // Approximate: countdown to the next 15-min boundary since we don't expose the
+  // Approximate: countdown to the next 45-min boundary since we don't expose the
   // keeper's exact next-poll timestamp. Good enough for the "alive" feel.
   const elapsed = Math.floor(now / 1000) % REBALANCE_INTERVAL_SEC;
   const remaining = REBALANCE_INTERVAL_SEC - elapsed;
@@ -106,6 +106,21 @@ export default function Dashboard() {
     : userGateBalance >= (primaryVault?.bronzeThreshold ?? 10_000) ? "Bronze"
     : "Standard";
   const tierColor = tierLabel === "Gold" ? "var(--token)" : tierLabel === "Silver" ? "var(--text-mid)" : tierLabel === "Bronze" ? "#CD7F32" : "var(--text-low)";
+
+  // Tier-nudge: how many more $YPILOT to reach the next tier up, and how much
+  // fee that saves. Every tier step saves 3pp (9/6/3/0), but computed via the
+  // real fee map rather than hardcoded, so this stays correct if the fee
+  // ladder itself ever changes (thresholds already can, via update_tier_thresholds).
+  const FEE_BPS_BY_TIER: Record<string, number> = { Gold: 0, Silver: 3, Bronze: 6, Standard: 9 };
+  const NEXT_TIER: Record<string, string> = { Standard: "Bronze", Bronze: "Silver", Silver: "Gold" };
+  const THRESHOLD_BY_TIER: Record<string, number> = {
+    Bronze: primaryVault?.bronzeThreshold ?? 10_000,
+    Silver: primaryVault?.silverThreshold ?? 100_000,
+    Gold: primaryVault?.goldThreshold ?? 1_000_000,
+  };
+  const nextTier = NEXT_TIER[tierLabel];
+  const tokensToNextTier = nextTier ? Math.max(0, THRESHOLD_BY_TIER[nextTier] - userGateBalance) : 0;
+  const nextTierFeeSavingsPct = nextTier ? FEE_BPS_BY_TIER[tierLabel] - FEE_BPS_BY_TIER[nextTier] : 0;
 
   const tabStyle = (t: Tab): React.CSSProperties => ({
     padding: "8px 16px", borderRadius: 7, border: "none", cursor: "pointer",
@@ -280,8 +295,10 @@ export default function Dashboard() {
 
           <div style={{ marginTop: 8, paddingTop: 16, borderTop: "1px solid var(--line)", fontSize: 12, color: "var(--text-mid)", lineHeight: 1.7 }}>
             <div>Perf fee: <span className="mono-num" style={{ color: "var(--text-hi)" }}>{tierLabel === "Gold" ? "0%" : tierLabel === "Silver" ? "3%" : tierLabel === "Bronze" ? "6%" : "9%"}</span> on profit</div>
-            {tierLabel !== "Gold" && (
-              <div style={{ marginTop: 4 }}>Hold 1,000,000 $YPILOT → Gold (0% fee)</div>
+            {nextTier && tokensToNextTier > 0 && (
+              <div style={{ marginTop: 4 }}>
+                You're <span className="mono-num" style={{ color: "var(--text-hi)" }}>{tokensToNextTier.toLocaleString()}</span> $YPILOT away from {nextTier} — save {nextTierFeeSavingsPct}% in fees
+              </div>
             )}
           </div>
         </div>
