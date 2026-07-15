@@ -3,6 +3,7 @@ import { logger } from "./logger";
 import { fetchAllApys } from "./apyFetcher";
 import { SolanaClient } from "./solanaClient";
 import { computeRebalanceDecision, shouldCompound } from "./rebalancer";
+import { notifyTelegram } from "./telegramNotify";
 
 /**
  * run_once.ts — single-cycle keeper run for GitHub Actions scheduled workflow.
@@ -44,7 +45,14 @@ async function runApyPollAndRebalance(client: SolanaClient) {
     if (decision.shouldRebalance) {
       logger.info("  Sending rebalance transaction...");
       const sig = await client.rebalance(address, decision.newAllocations);
-      if (sig) logger.info("  ✓ Target allocations updated", { signature: sig });
+      if (sig) {
+        logger.info("  ✓ Target allocations updated", { signature: sig });
+        await notifyTelegram(
+          `⚡ <b>Rebalanced</b> — ${state.name}\n` +
+          `${decision.reason}\n` +
+          `<a href="https://solscan.io/tx/${sig}">View transaction</a>`
+        );
+      }
     }
     logger.info("  Syncing fund deployment to current targets...");
     await client.executeRebalance(address, state);
@@ -60,7 +68,13 @@ async function runCompound(client: SolanaClient) {
     if (compound) {
       logger.info("  Sending compound transaction...");
       const sig = await client.compound(address);
-      if (sig) logger.info("  ✓ Compounded", { signature: sig });
+      if (sig) {
+        logger.info("  ✓ Compounded", { signature: sig });
+        await notifyTelegram(
+          `🔄 <b>Compounded</b> — ${state.name}\n` +
+          `<a href="https://solscan.io/tx/${sig}">View transaction</a>`
+        );
+      }
     }
   }
 }
