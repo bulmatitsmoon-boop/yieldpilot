@@ -201,11 +201,11 @@ export default function ApysPage() {
             Protocol rates.
           </h1>
           <h1 style={{ fontFamily: "var(--font-display)", fontSize: 28, fontWeight: 700, letterSpacing: "-0.015em", color: "var(--signal)", marginBottom: 20 }}>
-            Updated every 15 minutes.
+            Updated every 45 minutes.
           </h1>
           <p style={{ color: "var(--text-mid)", fontSize: 14, lineHeight: 1.7, maxWidth: 520 }}>
             YieldPilot monitors these protocols continuously. 80% of vault assets route to the top rate,
-            20% stays in the runner-up. Rates update every 15 minutes; display refreshes every 60 seconds.
+            20% stays in the runner-up. Rates update every 45 minutes; display refreshes every 60 seconds.
           </p>
         </div>
 
@@ -218,7 +218,7 @@ export default function ApysPage() {
             { label: "Primary allocation", value: "80%" },
             { label: "Runner-up allocation", value: "20%" },
             { label: "Rebalance threshold", value: "0.5%" },
-            { label: "Rebalance cycle", value: "15 min" },
+            { label: "Rebalance cycle", value: "45 min" },
           ].map(({ label, value }) => (
             <div key={label} style={{ background: "var(--ink-800)", padding: "20px 24px" }}>
               <div className="mono-num" style={{ fontSize: 22, fontWeight: 500, color: "var(--text-hi)", marginBottom: 4 }}>
