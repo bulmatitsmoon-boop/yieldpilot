@@ -98,6 +98,7 @@ export function Header() {
               {fmtAddr(publicKey.toBase58())}
             </div>
             <button
+              className="header-disconnect-btn"
               onClick={disconnect}
               style={{
                 background: "var(--ink-700)", border: "1px solid var(--line)",
@@ -169,6 +170,18 @@ export function Header() {
               >{label}</Link>
             );
           })}
+          {connected && publicKey && (
+            <button
+              onClick={() => { disconnect(); setMobileMenuOpen(false); }}
+              style={{
+                marginTop: 8, padding: "12px 8px", borderRadius: 7, fontSize: 15, fontWeight: 500,
+                color: "var(--text-muted)", background: "transparent", border: "none",
+                textAlign: "left", cursor: "pointer", fontFamily: "var(--font-body)",
+              }}
+            >
+              Disconnect {fmtAddr(publicKey.toBase58())}
+            </button>
+          )}
         </div>
       )}
     </header>
