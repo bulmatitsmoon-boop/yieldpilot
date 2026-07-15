@@ -39,6 +39,8 @@ jobs:
           IDL_PATH: idl/yieldpilot.mainnet.json
           KAMINO_API_URL: https://api.kamino.finance
           MARINADE_API_URL: https://api.marinade.finance
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ALERTS_CHANNEL_ID: -1004486893356
 
       - name: Clean up keeper keypair
         if: always()
