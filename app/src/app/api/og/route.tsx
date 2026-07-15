@@ -83,7 +83,7 @@ export async function GET() {
           color: "#374151", fontSize: 18, letterSpacing: "0.5px",
           display: "flex",
         }}>
-          yieldpilot-chi.vercel.app
+          yieldpilot.fund
         </div>
       </div>
     ),
