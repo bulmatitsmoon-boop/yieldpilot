@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 
 const STEPS = [
   { n: "01", title: "Deposit", tag: "You fund the vault", detail: "Add USDC or SOL and receive vault shares priced to the vault's current value. One transaction, non-custodial — the shares are your claim on the pool." },
-  { n: "02", title: "Monitor", tag: "The keeper scans", detail: "A keeper bot fetches live APY data from every supported protocol on a 15-minute cycle, watching for a meaningfully better rate." },
+  { n: "02", title: "Monitor", tag: "The keeper scans", detail: "A keeper bot fetches live APY data from every supported protocol on a 45-minute cycle, watching for a meaningfully better rate." },
   { n: "03", title: "Route", tag: "Capital gets directed", detail: "80% of the vault moves to the highest-yielding protocol, 20% stays in the runner-up — rebalancing only when the spread beats a 0.5% threshold." },
   { n: "04", title: "Compound", tag: "Earnings reinvest", detail: "Every hour, accrued yield is harvested and reinvested automatically. Your position grows without any action from you." },
 ];

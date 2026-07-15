@@ -173,7 +173,7 @@ export default function Dashboard() {
               <div style={{ fontSize: 12, color: "var(--text-low)", marginTop: 4 }}>Last Compounded</div>
             </div>
             <div style={{ textAlign: "left" }}>
-              <div className="mono-num" style={{ fontSize: 22, fontWeight: 500, color: "var(--warn)" }}>15 min</div>
+              <div className="mono-num" style={{ fontSize: 22, fontWeight: 500, color: "var(--warn)" }}>45 min</div>
               <div style={{ fontSize: 12, color: "var(--text-low)", marginTop: 4 }}>Rebalance Interval</div>
             </div>
           </div>
@@ -416,7 +416,7 @@ export default function Dashboard() {
               <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 16 }}>
                 {[
                   ["1. Deposit", "You deposit tokens into the vault. You receive shares representing your ownership."],
-                  ["2. Auto-optimize", "The keeper bot moves funds to highest-yield protocols every 15 minutes."],
+                  ["2. Auto-optimize", "The keeper bot moves funds to highest-yield protocols every 45 minutes."],
                   ["3. Auto-compound", "Rewards are harvested and reinvested every hour, growing your position."],
                   ["4. Withdraw anytime", "Burn your shares to receive your tokens plus earned yield, minus a small performance fee."],
                 ].map(([title, desc]) => (
