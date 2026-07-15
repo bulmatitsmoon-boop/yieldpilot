@@ -10,7 +10,7 @@ export const metadata: Metadata = {
   keywords: ["Solana", "DeFi", "yield", "APY", "Kamino", "Marinade", "USDC", "auto-compound"],
   openGraph: {
     title: "YieldPilot — Earn the best yield on Solana, automatically",
-    description: "Deposit once. YieldPilot routes your funds to the highest-yielding protocol every 15 minutes. Non-custodial.",
+    description: "Deposit once. YieldPilot routes your funds to the highest-yielding protocol every 45 minutes. Non-custodial.",
     url: "https://yieldpilot-chi.vercel.app",
     siteName: "YieldPilot",
     type: "website",
@@ -26,7 +26,7 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     title: "YieldPilot — Earn the best yield on Solana, automatically",
-    description: "Deposit once. YieldPilot routes your funds to the highest-yielding protocol every 15 minutes.",
+    description: "Deposit once. YieldPilot routes your funds to the highest-yielding protocol every 45 minutes.",
     images: ["https://yieldpilot-chi.vercel.app/api/og?v=2"],
   },
 };
