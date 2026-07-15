@@ -157,7 +157,7 @@ export default function Whitepaper() {
             <p style={{ color: "var(--text-mid)", fontSize: 16, lineHeight: 1.7 }}>
               A non-custodial protocol that automatically routes deposits across Solana&apos;s
               highest-yielding lending and liquid staking protocols, compounding returns and
-              rebalancing every 15 minutes.
+              rebalancing every 45 minutes.
             </p>
             {!IS_MAINNET && (
               <div style={{
@@ -180,7 +180,7 @@ export default function Whitepaper() {
             <P>Most users either leave money idle in a single protocol, or spend hours manually chasing rates. YieldPilot solves this by automating the entire process.</P>
             <Table rows={[
               ["", "Manual Yield Farming", "YieldPilot"],
-              ["Rate monitoring", "Manual, time-consuming", "Automated every 15 min"],
+              ["Rate monitoring", "Manual, time-consuming", "Automated every 45 min"],
               ["Rebalancing", "Manual transactions", "Automated keeper bot"],
               ["Compounding", "Manual harvest required", "Hourly auto-compound"],
               ["Custody", "Protocol-held funds", "Non-custodial vault shares"],
