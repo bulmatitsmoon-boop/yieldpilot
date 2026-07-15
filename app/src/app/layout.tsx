@@ -11,12 +11,12 @@ export const metadata: Metadata = {
   openGraph: {
     title: "YieldPilot — Earn the best yield on Solana, automatically",
     description: "Deposit once. YieldPilot routes your funds to the highest-yielding protocol every 45 minutes. Non-custodial.",
-    url: "https://yieldpilot-chi.vercel.app",
+    url: "https://yieldpilot.fund",
     siteName: "YieldPilot",
     type: "website",
     images: [
       {
-        url: "https://yieldpilot-chi.vercel.app/api/og?v=2",
+        url: "https://yieldpilot.fund/api/og?v=2",
         width: 1200,
         height: 630,
         alt: "YieldPilot — Solana Yield Optimizer",
@@ -27,7 +27,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "YieldPilot — Earn the best yield on Solana, automatically",
     description: "Deposit once. YieldPilot routes your funds to the highest-yielding protocol every 45 minutes.",
-    images: ["https://yieldpilot-chi.vercel.app/api/og?v=2"],
+    images: ["https://yieldpilot.fund/api/og?v=2"],
   },
 };
 
