@@ -3,6 +3,7 @@ import { logger } from "./logger";
 import { fetchAllApys } from "./apyFetcher";
 import { SolanaClient } from "./solanaClient";
 import { computeRebalanceDecision, shouldCompound } from "./rebalancer";
+import { computeLpRepositionDecision, LpVaultRangeState } from "./lpVaultRebalancer";
 
 /**
  * run_once.ts — single-cycle keeper run for GitHub Actions scheduled workflow.
@@ -65,6 +66,86 @@ async function runCompound(client: SolanaClient) {
   }
 }
 
+/**
+ * Phase 2, not yet public — see lp_vault.rs's module docs. Checks every vault
+ * in LP_VAULT_ADDRESSES (unset/empty is fine, just skips this job — distinct
+ * from the main VAULT_ADDRESSES, which stays required) for whether its active
+ * position has drifted out of range or near the edge, and pulls it out via
+ * exitOrcaLpPosition/exitRaydiumLpPosition if so.
+ *
+ * Deliberately does NOT attempt to reopen a position — open_new_*_lp_position
+ * is admin-gated on-chain (choosing a new price range is a judgment call, not
+ * something to automate), so this job surfaces that as a loud warning log
+ * instead of silently failing a transaction the keeper key can't sign.
+ *
+ * Ported from index.ts (the old always-on droplet daemon) — this run_once.ts
+ * script is what actually executes in production (GitHub Actions cron); the
+ * LP check was originally wired only into index.ts, which stopped running
+ * entirely once the droplet was destroyed 2026-07-14, silently orphaning this
+ * job before it ever shipped.
+ */
+async function runLpVaultCheck(client: SolanaClient) {
+  logger.info("── LP vault reposition check ──");
+  const lpVaults = await client.fetchAllLpVaults();
+  if (lpVaults.length === 0) {
+    logger.debug("No LP vaults configured (LP_VAULT_ADDRESSES) — skipping");
+    return;
+  }
+
+  for (const { address, state } of lpVaults) {
+    logger.info(`Checking LP vault: ${address.slice(0, 8)}... (${state.name})`);
+
+    if (state.paused) {
+      logger.info("  Paused — skipping");
+      continue;
+    }
+
+    let tickCurrent: number;
+    let tickSpacing: number;
+    try {
+      ({ tickCurrent, tickSpacing } = await client.readPoolTickCurrent(state));
+    } catch (err: any) {
+      logger.error("  Failed to read pool tick — skipping this vault", { error: err.message });
+      continue;
+    }
+
+    const rangeState: LpVaultRangeState = {
+      tickLowerIndex: state.tickLowerIndex,
+      tickUpperIndex: state.tickUpperIndex,
+      tickSpacing,
+      positionActive: state.positionActive,
+    };
+
+    let decision;
+    try {
+      decision = computeLpRepositionDecision(rangeState, tickCurrent);
+    } catch (err: any) {
+      logger.error("  Reposition decision failed — skipping this vault", { error: err.message });
+      continue;
+    }
+
+    logger.info(`  Reposition decision: ${decision.reason}`, {
+      tickCurrent,
+      currentRange: [state.tickLowerIndex, state.tickUpperIndex],
+      suggestedRange: [decision.newTickLowerIndex, decision.newTickUpperIndex],
+    });
+
+    if (!decision.shouldReposition) continue;
+
+    logger.info("  Exiting position...");
+    const sig = await client.exitLpPosition(address);
+    if (sig) {
+      logger.info(`  ✓ Position exited`, { signature: sig });
+      logger.warn(
+        `  ⚠️  ADMIN ACTION NEEDED: open a new position for LP vault ${address} ` +
+        `at suggested range [${decision.newTickLowerIndex}, ${decision.newTickUpperIndex}] — ` +
+        `open_new_orca_lp_position / open_new_raydium_lp_position is admin-gated, ` +
+        `the keeper cannot do this step.`
+      );
+    }
+  }
+}
+
 async function runHealthCheck(client: SolanaClient) {
   const balanceSol = await client.getKeeperBalance();
   if (balanceSol < 0.05) {
@@ -94,6 +175,7 @@ async function main() {
 
   await runApyPollAndRebalance(client);
   await runCompound(client);
+  await runLpVaultCheck(client);
   await runHealthCheck(client);
 
   logger.info("✓ Single run complete.");
