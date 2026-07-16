@@ -256,7 +256,7 @@ export default function ApysPage() {
                     fontSize: 12, fontWeight: 600, fontFamily: "var(--font-body)",
                   }}
                 >
-                  {p.name} <span className="mono-num" style={{ marginLeft: 6 }}>{fmt(p.apyPercent)}%</span>
+                  {p.name} <span className="mono-num" style={{ marginLeft: 6 }}>{p.stale ? "—" : `${fmt(p.apyPercent)}%`}</span>
                 </button>
               ))}
             </div>
@@ -397,7 +397,7 @@ export default function ApysPage() {
                   textAlign: "right", fontWeight: 500, fontSize: 15,
                   color: isLP ? "var(--loss)" : (routableRank === 0 ? "var(--signal)" : "var(--text-hi)"),
                 }}>
-                  {fmt(p.apyPercent)}%
+                  {p.stale ? "—" : `${fmt(p.apyPercent)}%`}
                 </span>
                 <span className="mono-num" style={{ textAlign: "right", color: "var(--text-mid)", fontSize: 12 }}>
                   {fmtTvl(p.tvlUsd)}
