@@ -330,7 +330,7 @@ export default function Home() {
                     textAlign: "right", fontWeight: 500, fontSize: 15,
                     color: i === 0 ? "var(--signal)" : "var(--text-hi)",
                   }}>
-                    {fmt(p.apyPercent)}%
+                    {p.stale ? "—" : `${fmt(p.apyPercent)}%`}
                   </span>
                 </div>
               ))}
@@ -356,7 +356,7 @@ export default function Home() {
                     {p.asset}
                   </span>
                   <span className="mono-num" style={{ textAlign: "right", fontWeight: 500, fontSize: 15, color: "var(--text-mid)" }}>
-                    {fmt(p.apyPercent)}%
+                    {p.stale ? "—" : `${fmt(p.apyPercent)}%`}
                   </span>
                 </div>
               ))}
