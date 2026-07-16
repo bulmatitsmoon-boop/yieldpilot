@@ -848,19 +848,28 @@ export class SolanaClient {
         const receiptBalance = await this.getTokenBalance(d.receiptAccount);
         if (receiptBalance === 0) { logger.warn("No receipt balance, skipping", { label: d.label }); continue; }
         const receiptToWithdraw = new anchor.BN(Math.max(1, Math.floor(receiptBalance * d.excess / d.deployed)));
+        let sig: string | null = null;
         if (d.label === "kamino-usdc") {
-          await this.recallFromKamino(vaultAddress, d.index, receiptToWithdraw);
+          sig = await this.recallFromKamino(vaultAddress, d.index, receiptToWithdraw);
         } else if (d.label === "kamino-sol") {
-          await this.recallFromKaminoSol(vaultAddress, d.index, receiptToWithdraw);
+          sig = await this.recallFromKaminoSol(vaultAddress, d.index, receiptToWithdraw);
         } else if (d.label === "marinade-sol") {
-          await this.recallFromMarinade(vaultAddress, d.index, receiptToWithdraw);
+          sig = await this.recallFromMarinade(vaultAddress, d.index, receiptToWithdraw);
         } else if (d.label === "jito-sol") {
           const cfg = await this.getJitoPoolConfig();
-          await this.recallFromSolLst(vaultAddress, d.index, receiptToWithdraw, cfg);
+          sig = await this.recallFromSolLst(vaultAddress, d.index, receiptToWithdraw, cfg);
         } else if (d.label === "solend-usdc") {
-          await this.recallFromSolend(vaultAddress, d.index, receiptToWithdraw);
+          sig = await this.recallFromSolend(vaultAddress, d.index, receiptToWithdraw);
         } else {
           logger.warn("No recall handler for protocol", { label: d.label });
+        }
+        // Recalls move real funds back out of a protocol — alert like deploys do.
+        if (sig) {
+          await notifyTelegram(
+            `↩️ <b>Recalled</b> — ${d.label} → vault
+` +
+            `<a href="https://solscan.io/tx/${sig}">View transaction</a>`
+          );
         }
       } catch (err: any) {
         logger.error("Recall failed", { label: d.label, error: err.message });
