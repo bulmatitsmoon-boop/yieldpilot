@@ -6,7 +6,7 @@ import { PublicKey } from "@solana/web3.js";
 import { getAssociatedTokenAddress } from "@solana/spl-token";
 
 const PROGRAM_ID = new PublicKey(
-  process.env.NEXT_PUBLIC_PROGRAM_ID || "CVJrJGoKjseTJqiFGctssYde3pLAnPaRZtjAaKXd8pWk"
+  process.env.NEXT_PUBLIC_PROGRAM_ID || "3tAEmHXZ51YVLe9ts8b9cMcgQPgaSamLxLtxR31VpREi"
 );
 import { Button, fmt } from "@/components/ui";
 import type { VaultInfo } from "@/hooks/useYieldPilot";
