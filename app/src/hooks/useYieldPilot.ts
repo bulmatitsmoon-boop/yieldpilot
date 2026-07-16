@@ -22,7 +22,7 @@ import { Transaction, SystemProgram as SP } from "@solana/web3.js";
 import IDL from "@/idl/yieldpilot.mainnet.json";
 
 const PROGRAM_ID = new PublicKey(
-  process.env.NEXT_PUBLIC_PROGRAM_ID || "CVJrJGoKjseTJqiFGctssYde3pLAnPaRZtjAaKXd8pWk"
+  process.env.NEXT_PUBLIC_PROGRAM_ID || "3tAEmHXZ51YVLe9ts8b9cMcgQPgaSamLxLtxR31VpREi"
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
