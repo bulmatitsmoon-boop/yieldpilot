@@ -35,7 +35,6 @@ export interface VaultInfo {
   mint: string;
   totalDeposits: number;
   totalShares: number;
-  perfFeeBps: number;
   autoCompound: boolean;
   autoRebalance: boolean;
   lastCompoundTs: number;
@@ -123,7 +122,6 @@ export function useYieldPilot(vaultAddresses: string[]) {
             mint: (raw.mint as PublicKey).toBase58(),
             totalDeposits: (raw.totalDeposits as anchor.BN).toNumber(),
             totalShares: (raw.totalShares as anchor.BN).toNumber(),
-            perfFeeBps: (raw.perfFeeBps as anchor.BN).toNumber(),
             autoCompound: raw.autoCompound as boolean,
             autoRebalance: raw.autoRebalance as boolean,
             lastCompoundTs: (raw.lastCompoundTs as anchor.BN).toNumber(),
