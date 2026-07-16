@@ -13,9 +13,9 @@ import { useApys } from "@/hooks/useApys";
 import IDL from "@/idl/yieldpilot.mainnet.json";
 
 const PROGRAM_ID = new PublicKey(
-  process.env.NEXT_PUBLIC_PROGRAM_ID || "CVJrJGoKjseTJqiFGctssYde3pLAnPaRZtjAaKXd8pWk"
+  process.env.NEXT_PUBLIC_PROGRAM_ID || "3tAEmHXZ51YVLe9ts8b9cMcgQPgaSamLxLtxR31VpREi"
 );
-const VAULT_ADDRESSES = (process.env.NEXT_PUBLIC_VAULT_ADDRESSES || "F1r513ZZdofz4tjhRfhNAYDK5hsmc8uCZbMmg2tkPJ6e,8KcoRt5DcCbXBaqDVDorEbW2J6GofTrRyy9Afzb8wwaE")
+const VAULT_ADDRESSES = (process.env.NEXT_PUBLIC_VAULT_ADDRESSES || "5XpzWiE8jb53CShYv19UoXcY2AywjeXpfwCff8mgrNYn,7MJGAiZmTre6VmVQXgYRK6vqoQeoMW1jwEL9jEXZgRy3")
   .split(",").map(s => s.trim()).filter(Boolean);
 const ADMIN_WALLET = process.env.NEXT_PUBLIC_ADMIN_WALLET || "8i7kydJHwi3Cdp46Xugyux2vWJmTScYDvnJrBiBihBnP";
 
