@@ -212,7 +212,7 @@ export default function Home() {
                   <span style={{ fontSize: 12, color: "var(--text-mid)", fontFamily: "var(--font-mono)" }}>{best.asset}</span>
                 </div>
                 <div className="mono-num" style={{ fontSize: 40, fontWeight: 500, color: "var(--signal)", lineHeight: 1, marginBottom: 16 }}>
-                  {fmt(best.apyPercent)}%
+                  {best.stale ? "—" : `${fmt(best.apyPercent)}%`}
                   <span style={{ fontSize: 14, color: "var(--text-low)", marginLeft: 6 }}>APY</span>
                 </div>
               </>
@@ -330,7 +330,7 @@ export default function Home() {
                     textAlign: "right", fontWeight: 500, fontSize: 15,
                     color: i === 0 ? "var(--signal)" : "var(--text-hi)",
                   }}>
-                    {fmt(p.apyPercent)}%
+                    {p.stale ? "—" : `${fmt(p.apyPercent)}%`}
                   </span>
                 </div>
               ))}
@@ -356,7 +356,7 @@ export default function Home() {
                     {p.asset}
                   </span>
                   <span className="mono-num" style={{ textAlign: "right", fontWeight: 500, fontSize: 15, color: "var(--text-mid)" }}>
-                    {fmt(p.apyPercent)}%
+                    {p.stale ? "—" : `${fmt(p.apyPercent)}%`}
                   </span>
                 </div>
               ))}
