@@ -59,6 +59,10 @@ const JITO_POOL = new PublicKey("Jito4APyf642JPZPx3hGc6WWJ8zPKtRbRs4P815Awbb"); 
 // ─────────────────────────────────────────────────────────────────────────────
 // Solend mainnet constants
 // ─────────────────────────────────────────────────────────────────────────────
+// Must match MIN_IDLE_BPS in programs/yieldpilot/src/lib.rs — the vault always keeps
+// this share of total_deposits idle so users can withdraw without waiting for a recall.
+const MIN_IDLE_BPS = 1000; // 10%
+
 const SOLEND_PROGRAM = new PublicKey("So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo");
 const SOLEND_MAIN_MARKET = new PublicKey("4UpD2fh7xH3VP9QQaXtsS1YY3bxzWhtfpks7FatyKvdY");
 const SOLEND_USDC_RESERVE = new PublicKey("BgxfHJDzm44T7XG68MYKx7YisTjZu73tVovyZSjJMpmw");
@@ -861,8 +865,20 @@ export class SolanaClient {
       .filter(d => d.deficit > 0)
       .sort((a, b) => b.deficit - a.deficit);
 
-    let available = await this.getTokenBalance(vault.vaultTokenAccount);
-    logger.info("Idle vault balance after recalls", { available });
+    // The on-chain program reserves a MIN_IDLE_BPS (10%) withdrawal buffer:
+    //   require!(idle - amount >= total_deposits * MIN_IDLE_BPS / BPS_DENOM)
+    // Target allocations must sum to EXACTLY 100% (AllocationNotFull), so deploying
+    // naively to targets always asks for 100% and is rejected with InsufficientIdle
+    // (6012) — i.e. funds could never deploy at all. Cap deployable at idle - min_idle.
+    // Found 2026-07-16: 5 real USDC at kamino target 100% failed 3/3 attempts.
+    const minIdle = Math.floor(totalDeposits * MIN_IDLE_BPS / 10_000);
+    const idleBalance = await this.getTokenBalance(vault.vaultTokenAccount);
+    let available = idleBalance - minIdle;
+    logger.info("Idle vault balance after recalls", { idleBalance, minIdle, deployable: available });
+    if (available <= 0) {
+      logger.info("executeRebalance: all idle funds reserved for the withdrawal buffer, nothing to deploy");
+      return;
+    }
 
     for (const d of toDeposit) {
       if (available <= 0) break;
