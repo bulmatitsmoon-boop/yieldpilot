@@ -1950,6 +1950,7 @@ pub struct RecallFromSolend<'info> {
     /// CHECK: Solend validates
     #[account(mut)] pub reserve_liquidity_supply: UncheckedAccount<'info>,
     /// CHECK: Solend validates
+    #[account(mut)] // Solend writes rate_limiter here on redeem (outflow)
     pub lending_market: UncheckedAccount<'info>,
     /// CHECK: Solend validates
     pub lending_market_authority: UncheckedAccount<'info>,
