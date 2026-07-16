@@ -209,7 +209,7 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
           <div style={{ color: "var(--text-muted)", fontSize: 12, marginBottom: 4 }}>Auto-routed to best APY</div>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
             <span>{bestApy.name} · {bestApy.asset}</span>
-            <span style={{ color: "var(--green)", fontWeight: 700 }}>{fmt(bestApy.apyPercent)}% APY</span>
+            <span style={{ color: "var(--green)", fontWeight: 700 }}>{bestApy.stale ? "— APY" : `${fmt(bestApy.apyPercent)}% APY`}</span>
           </div>
         </div>
       )}
