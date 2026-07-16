@@ -44,11 +44,11 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
   // Tier-based fee: compare raw gate token balance against vault thresholds
   const effectiveFeeBps = (() => {
     if (isWhitelisted) return 0;
-    if (!gatingActive) return vault.perfFeeBps;
+    if (!gatingActive) return 900; // STANDARD_FEE_BPS — ungated vault = 9%
     if (userGateBalance >= (vault.goldThreshold ?? 1_000_000)) return 0;
     if (userGateBalance >= (vault.silverThreshold ?? 100_000)) return 300;
     if (userGateBalance >= (vault.bronzeThreshold ?? 10_000)) return 600;
-    return vault.perfFeeBps;
+    return 900; // STANDARD_FEE_BPS (below Bronze) = 9%
   })();
   const tierLabel = (() => {
     if (isWhitelisted) return "Whitelisted";
