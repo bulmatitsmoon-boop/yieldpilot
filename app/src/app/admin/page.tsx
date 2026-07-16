@@ -308,7 +308,7 @@ export default function AdminPage() {
                 <span style={{ fontWeight: 600, fontSize: 13 }}>{p.name}</span>
                 <span style={{ color: "var(--text-muted)", fontSize: 12, marginLeft: 8 }}>{p.asset}</span>
               </div>
-              <span style={{ fontFamily: "var(--mono)", color: "var(--green)", fontWeight: 700 }}>{fmt(p.apyPercent)}%</span>
+              <span style={{ fontFamily: "var(--mono)", color: "var(--green)", fontWeight: 700 }}>{p.stale ? "—" : `${fmt(p.apyPercent)}%`}</span>
             </div>
           ))}
         </div>
