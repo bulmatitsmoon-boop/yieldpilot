@@ -212,7 +212,7 @@ export default function Home() {
                   <span style={{ fontSize: 12, color: "var(--text-mid)", fontFamily: "var(--font-mono)" }}>{best.asset}</span>
                 </div>
                 <div className="mono-num" style={{ fontSize: 40, fontWeight: 500, color: "var(--signal)", lineHeight: 1, marginBottom: 16 }}>
-                  {fmt(best.apyPercent)}%
+                  {best.stale ? "—" : `${fmt(best.apyPercent)}%`}
                   <span style={{ fontSize: 14, color: "var(--text-low)", marginLeft: 6 }}>APY</span>
                 </div>
               </>
