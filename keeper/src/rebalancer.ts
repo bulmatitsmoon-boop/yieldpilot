@@ -200,6 +200,14 @@ export function shouldCompound(vault: VaultState): { compound: boolean; reason: 
     return { compound: false, reason: "Auto-compound is disabled" };
   }
 
+  // Compounding an empty vault is a guaranteed no-op: it burns a keeper tx fee every
+  // cycle AND fires a "🔄 Compounded" Telegram alert, which reads to a user as
+  // "your money is earning" when the vault holds nothing. Found 2026-07-16: the empty
+  // SOL vault was alerting on every 45-min cycle alongside the funded USDC vault.
+  if (vault.totalDeposits.isZero()) {
+    return { compound: false, reason: "Vault is empty — nothing to compound" };
+  }
+
   const nowSec = Math.floor(Date.now() / 1000);
   const lastCompound = vault.lastCompoundTs.toNumber();
   const elapsed = nowSec - lastCompound;
