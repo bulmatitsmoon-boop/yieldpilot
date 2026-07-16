@@ -181,7 +181,6 @@ pub fn solend_deposit<'info>(
         AccountMeta::new_readonly(*ctx.accounts.lending_market.key, false),
         AccountMeta::new_readonly(*ctx.accounts.lending_market_authority.key, false),
         AccountMeta::new_readonly(*ctx.accounts.vault_authority.key, true),  // user_transfer_authority (signer, NOT writable per Solend spec)
-        AccountMeta::new_readonly(*ctx.accounts.clock_sysvar.key, false),
         AccountMeta::new_readonly(*ctx.accounts.token_program.key, false),
     ];
 
@@ -200,7 +199,6 @@ pub fn solend_deposit<'info>(
             ctx.accounts.lending_market.clone(),
             ctx.accounts.lending_market_authority.clone(),
             ctx.accounts.vault_authority.clone(),
-            ctx.accounts.clock_sysvar.clone(),
             ctx.accounts.token_program.to_account_info(),
         ],
         &[authority_seeds],
@@ -251,7 +249,6 @@ pub fn solend_withdraw<'info>(
         AccountMeta::new_readonly(*ctx.accounts.lending_market.key, false),
         AccountMeta::new_readonly(*ctx.accounts.lending_market_authority.key, false),
         AccountMeta::new_readonly(*ctx.accounts.vault_authority.key, true),   // user_transfer_authority (signer, NOT writable per Solend spec)
-        AccountMeta::new_readonly(*ctx.accounts.clock_sysvar.key, false),
         AccountMeta::new_readonly(*ctx.accounts.token_program.key, false),
     ];
 
@@ -270,7 +267,6 @@ pub fn solend_withdraw<'info>(
             ctx.accounts.lending_market.clone(),
             ctx.accounts.lending_market_authority.clone(),
             ctx.accounts.vault_authority.clone(),
-            ctx.accounts.clock_sysvar.clone(),
             ctx.accounts.token_program.to_account_info(),
         ],
         &[authority_seeds],
