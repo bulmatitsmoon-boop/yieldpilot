@@ -84,7 +84,7 @@ declare_id!("CVJrJGoKjseTJqiFGctssYde3pLAnPaRZtjAaKXd8pWk");
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const BPS_DENOM: u64          = 10_000;
-const MAX_PROTOCOLS: usize    = 8;
+const MAX_PROTOCOLS: usize    = 6; // trimmed from 8 (2026-07-16): Vault.protocols array was pushing BorshDeserialize::deserialize_reader 64 bytes over the 4096 BPF stack frame limit (flagged by cargo-build-sbf as a real undefined-behavior risk). Only 2 protocols are registered per vault today; 6 leaves 4x headroom.
 const COMPOUND_INTERVAL: i64  = 3_600;        // 1 hour
 const MIN_FIRST_DEPOSIT: u64  = 1_000_000;    // $1 minimum first deposit (anti-donation-attack)
 // Keeper must leave at least 10% of total deposits idle at all times.
