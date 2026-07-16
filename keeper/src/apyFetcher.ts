@@ -178,12 +178,16 @@ async function fetchDriftApy(): Promise<ProtocolApy[]> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const FALLBACK_APYS: Record<string, Omit<ProtocolApy, "fetchedAt">> = {
-  "jito-sol":       { protocolId: "jito-sol",       name: "Jito",       asset: "SOL",  apyBps:  890, apyPercent: 8.90,  tvlUsd: 2_100_000_000, riskScore: 1 },
-  "kamino-usdc":    { protocolId: "kamino-usdc",    name: "Kamino",     asset: "USDC", apyBps:  842, apyPercent: 8.42,  tvlUsd: 412_000_000,   riskScore: 1 },
-  "marinade-sol":   { protocolId: "marinade-sol",   name: "Marinade",   asset: "SOL",  apyBps:  721, apyPercent: 7.21,  tvlUsd: 1_230_000_000, riskScore: 1 },
-  "kamino-sol":     { protocolId: "kamino-sol",     name: "Kamino",     asset: "SOL",  apyBps:  620, apyPercent: 6.20,  tvlUsd: 280_000_000,   riskScore: 1 },
-  "drift-sol":      { protocolId: "drift-sol",      name: "Drift",      asset: "SOL",  apyBps:  588, apyPercent: 5.88,  tvlUsd: 220_000_000,   riskScore: 1 },
-  "solend-usdc":    { protocolId: "solend-usdc",    name: "Solend",     asset: "USDC", apyBps:  510, apyPercent: 5.10,  tvlUsd: 95_000_000,    riskScore: 1 },
+  // Last-resort ONLY (live fetch failed). Refreshed 2026-07-16 against real DeFiLlama
+  // rates — the previous values were badly stale (jito 8.90 vs real 4.89, kamino-usdc
+  // 8.42 vs real 3.39, solend 5.10 vs real 2.25) and fed real allocation decisions.
+  // If these drift again they will silently skew routing: re-check periodically.
+  "kamino-sol":     { protocolId: "kamino-sol",     name: "Kamino",     asset: "SOL",  apyBps:  584, apyPercent: 5.84,  tvlUsd:  17_698_922, riskScore: 1 },
+  "jito-sol":       { protocolId: "jito-sol",       name: "Jito",       asset: "SOL",  apyBps:  489, apyPercent: 4.89,  tvlUsd: 762_417_675, riskScore: 1 },
+  "marinade-sol":   { protocolId: "marinade-sol",   name: "Marinade",   asset: "SOL",  apyBps:  473, apyPercent: 4.73,  tvlUsd: 181_896_238, riskScore: 1 },
+  "kamino-usdc":    { protocolId: "kamino-usdc",    name: "Kamino",     asset: "USDC", apyBps:  339, apyPercent: 3.39,  tvlUsd:  23_525_228, riskScore: 1 },
+  "drift-sol":      { protocolId: "drift-sol",      name: "Drift",      asset: "SOL",  apyBps:  588, apyPercent: 5.88,  tvlUsd: 220_000_000, riskScore: 1 },
+  "solend-usdc":    { protocolId: "solend-usdc",    name: "Solend",     asset: "USDC", apyBps:  225, apyPercent: 2.25,  tvlUsd:   7_143_891, riskScore: 1 },
 };
 
 function getFallbackApys(ids: string[]): ProtocolApy[] {
