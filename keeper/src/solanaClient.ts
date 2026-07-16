@@ -7,6 +7,7 @@ import {
 } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { Transaction, SystemProgram } from "@solana/web3.js";
+import { notifyTelegram } from "./telegramNotify";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -59,6 +60,13 @@ const JITO_POOL = new PublicKey("Jito4APyf642JPZPx3hGc6WWJ8zPKtRbRs4P815Awbb"); 
 // ─────────────────────────────────────────────────────────────────────────────
 // Solend mainnet constants
 // ─────────────────────────────────────────────────────────────────────────────
+/** Format a raw token amount for user-facing alerts. SOL vaults are 9dp, USDC 6dp. */
+function fmtAmount(raw: number, vaultName: string): string {
+  const isSol = vaultName.toUpperCase().includes("SOL");
+  const dec = isSol ? 9 : 6;
+  return (raw / 10 ** dec).toFixed(isSol ? 4 : 2) + " " + (isSol ? "SOL" : "USDC");
+}
+
 // Must match MIN_IDLE_BPS in programs/yieldpilot/src/lib.rs — the vault always keeps
 // this share of total_deposits idle so users can withdraw without waiting for a recall.
 const MIN_IDLE_BPS = 1000; // 10%
@@ -887,20 +895,31 @@ export class SolanaClient {
 
       logger.info("Deploy to protocol", { label: d.label, amount: amount.toString(), deficit: d.deficit });
       try {
+        let sig: string | null = null;
         if (d.label === "kamino-usdc") {
-          await this.deployToKamino(vaultAddress, d.index, amount);
+          sig = await this.deployToKamino(vaultAddress, d.index, amount);
         } else if (d.label === "kamino-sol") {
-          await this.deployToKaminoSol(vaultAddress, d.index, amount);
+          sig = await this.deployToKaminoSol(vaultAddress, d.index, amount);
         } else if (d.label === "marinade-sol") {
-          await this.deployToMarinade(vaultAddress, d.index, amount);
+          sig = await this.deployToMarinade(vaultAddress, d.index, amount);
         } else if (d.label === "jito-sol") {
           const cfg = await this.getJitoPoolConfig();
-          await this.deployToSolLst(vaultAddress, d.index, amount, cfg);
+          sig = await this.deployToSolLst(vaultAddress, d.index, amount, cfg);
         } else if (d.label === "solend-usdc") {
-          await this.deployToSolend(vaultAddress, d.index, amount);
+          sig = await this.deployToSolend(vaultAddress, d.index, amount);
         } else {
           logger.warn("No deploy handler for protocol", { label: d.label });
           continue;
+        }
+        // Fund movements are the most user-visible thing the keeper does, but they were
+        // the ONLY action with no alert — notifyTelegram was wired to rebalance+compound
+        // only. Found 2026-07-16: 4.5 USDC deployed to Kamino and the channel said nothing.
+        if (sig) {
+          await notifyTelegram(
+            `⚡ <b>Deployed</b> — ${fmtAmount(amount.toNumber(), vault.name)} → ${d.label}
+` +
+            `<a href="https://solscan.io/tx/${sig}">View transaction</a>`
+          );
         }
         available -= amount.toNumber();
       } catch (err: any) {
