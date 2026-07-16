@@ -1514,7 +1514,8 @@
           "writable": true
         },
         {
-          "name": "lending_market"
+          "name": "lending_market",
+          "writable": true
         },
         {
           "name": "lending_market_authority"
