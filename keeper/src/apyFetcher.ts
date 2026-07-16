@@ -42,6 +42,9 @@ const DEFILLAMA_POOL_IDS: Record<string, string> = {
   "kamino-sol":  "525b2dab-ea6a-4cbc-a07f-84ce561d1f83", // Kamino main market SOL, highest TVL
   "marinade-sol":"b3f93865-5ec8-4662-90a0-11808e0aa2bd", // Marinade mSOL
   "jito-sol":    "0e7d0722-9054-4907-8593-567b353c0900", // Jito jitoSOL
+  // Solend rebranded to "Save". Main Pool USDC (underlyingTokens == [USDC mint]),
+  // matching SOLEND_USDC_RESERVE used on-chain.
+  "solend-usdc": "dde4c16c-504d-470b-9404-006287ce0906",
 };
 
 async function fetchKaminoApy(): Promise<ProtocolApy[]> {
@@ -126,6 +129,33 @@ async function fetchJitoApy(): Promise<ProtocolApy[]> {
 // failure for something feeding real rebalancing decisions. Removed until
 // verified against whatever Project 0 actually exposes for integration.
 
+// Solend had NO live fetcher until 2026-07-16 — it always fell through to the
+// hardcoded FALLBACK_APYS value of 5.10%. That fake number beat Kamino USDC live
+// (~3.3%), so the rebalancer "rationally" pushed 80% of the USDC vault into Solend,
+// whose real rate is ~2.25% (i.e. WORSE than Kamino). A fabricated input produced a
+// genuinely wrong allocation. Always source a live rate for anything routable.
+async function fetchSolendApy(): Promise<ProtocolApy[]> {
+  try {
+    const { data } = await axios.get(
+      `https://yields.llama.fi/chart/${DEFILLAMA_POOL_IDS["solend-usdc"]}`,
+      { timeout: 8000 }
+    );
+    const history: any[] = data?.data ?? [];
+    if (!history.length) return getFallbackApys(["solend-usdc"]);
+    const latest = history[history.length - 1];
+    const apyPercent = sanitizeApy(parseFloat(latest.apy ?? "0"), "solend-usdc");
+    if (!(apyPercent > 0)) return getFallbackApys(["solend-usdc"]);
+    return [{
+      protocolId: "solend-usdc", name: "Solend", asset: "USDC",
+      apyBps: Math.round(apyPercent * 100), apyPercent,
+      tvlUsd: latest.tvlUsd ?? 7_143_891, riskScore: 1, fetchedAt: new Date(),
+    }];
+  } catch (err: any) {
+    logger.warn("Failed to fetch Solend APY", { error: err.message });
+    return getFallbackApys(["solend-usdc"]);
+  }
+}
+
 async function fetchDriftApy(): Promise<ProtocolApy[]> {
   try {
     const { data } = await axios.get(
@@ -171,6 +201,7 @@ export async function fetchAllApys(): Promise<ProtocolApy[]> {
     fetchKaminoApy(),
     fetchMarinadeApy(),
     fetchJitoApy(),
+    fetchSolendApy(),
     fetchDriftApy(),
   ]);
 
