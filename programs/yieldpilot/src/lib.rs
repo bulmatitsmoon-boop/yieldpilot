@@ -77,9 +77,9 @@ use adapters::{
 // see project memory for why). PDA derivations implicitly use this ID, so it
 // must match whichever address the binary is actually deployed to.
 #[cfg(not(feature = "mainnet"))]
-declare_id!("739ac1r8Xba3JfRVZi7h5CN97bpEYoo2VCAE6cu5HcKq");
+declare_id!("8WbK7X1xquwaZMqstEgt8NaJKmsjzywZqLwey6L7ZYnE");
 #[cfg(feature = "mainnet")]
-declare_id!("739ac1r8Xba3JfRVZi7h5CN97bpEYoo2VCAE6cu5HcKq");
+declare_id!("8WbK7X1xquwaZMqstEgt8NaJKmsjzywZqLwey6L7ZYnE");
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 

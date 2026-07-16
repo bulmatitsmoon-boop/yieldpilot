@@ -9,7 +9,7 @@ skip-lint = false
 yieldpilot = "8c7Boyk91MWkn5jabf5CnYD8DrG6p4hYm9eDdAAWXEKH"
 
 [programs.mainnet]
-yieldpilot = "739ac1r8Xba3JfRVZi7h5CN97bpEYoo2VCAE6cu5HcKq"
+yieldpilot = "8WbK7X1xquwaZMqstEgt8NaJKmsjzywZqLwey6L7ZYnE"
 
 [registry]
 url = "https://api.apr.dev"
