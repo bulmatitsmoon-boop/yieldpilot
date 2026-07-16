@@ -209,7 +209,7 @@ export function ProtocolTable({ apys, loading }: Props) {
                 </div>
                 <div><Pill label={isLP ? "LP" : p.name === "Marinade" || p.name === "Jito" ? "Liquid Stake" : "Lending"} /></div>
                 <div style={{ color: isLP ? "var(--red)" : isBest ? "var(--purple-light)" : "var(--green)", fontWeight: 700, fontFamily: "var(--mono)", fontSize: 14 }}>
-                  {fmt(p.apyPercent)}%
+                  {p.stale ? "—" : `${fmt(p.apyPercent)}%`}
                 </div>
                 <div style={{ color: "var(--text-muted)", fontFamily: "var(--mono)", fontSize: 13 }}>{fmtTvl(p.tvlUsd)}</div>
                 <div><Pill label={RISK_LABEL[p.riskScore] || "Low"} /></div>
