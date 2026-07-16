@@ -32,28 +32,40 @@ async function runApyPollAndRebalance(client: SolanaClient) {
 
   for (const { address, state } of vaults) {
     logger.info(`Checking vault: ${address.slice(0, 8)}... (${state.name})`);
-    if (!state.autoRebalance) {
-      logger.info("  Auto-rebalance off — skipping");
-      continue;
-    }
-    const decision = computeRebalanceDecision(state, apys);
-    logger.info(`  Rebalance decision: ${decision.reason}`, {
-      current: decision.currentAllocations,
-      proposed: decision.newAllocations,
-      apyImprovementBps: decision.expectedApyImprovement,
-    });
-    if (decision.shouldRebalance) {
-      logger.info("  Sending rebalance transaction...");
-      const sig = await client.rebalance(address, decision.newAllocations);
-      if (sig) {
-        logger.info("  ✓ Target allocations updated", { signature: sig });
-        await notifyTelegram(
-          `⚡ <b>Rebalanced</b> — ${state.name}\n` +
-          `${decision.reason}\n` +
-          `<a href="https://solscan.io/tx/${sig}">View transaction</a>`
-        );
+
+    // auto_rebalance gates whether we CHANGE target allocations — it must NOT gate
+    // deploying idle funds to the targets already set. This previously did `continue`,
+    // so turning auto-rebalance off (e.g. to pin allocations while a protocol is known
+    // broken) silently meant deposits were NEVER deployed and sat idle forever.
+    // Found 2026-07-16 with 5 real USDC stuck idle at kamino target 100%.
+    if (state.autoRebalance) {
+      const decision = computeRebalanceDecision(state, apys);
+      logger.info(`  Rebalance decision: ${decision.reason}`, {
+        current: decision.currentAllocations,
+        proposed: decision.newAllocations,
+        apyImprovementBps: decision.expectedApyImprovement,
+      });
+      if (decision.shouldRebalance) {
+        logger.info("  Sending rebalance transaction...");
+        const sig = await client.rebalance(address, decision.newAllocations);
+        if (sig) {
+          logger.info("  ✓ Target allocations updated", { signature: sig });
+          await notifyTelegram(
+            `⚡ <b>Rebalanced</b> — ${state.name}
+` +
+            `${decision.reason}
+` +
+            `<a href="https://solscan.io/tx/${sig}">View transaction</a>`
+          );
+        }
       }
+    } else {
+      logger.info("  Auto-rebalance off — target allocations left unchanged");
     }
+
+    // ALWAYS sync deployment to whatever the current targets are, regardless of
+    // auto_rebalance. With targets pinned (e.g. kamino 100% / solend 0%) this deploys
+    // only to the healthy protocol and sends nothing to the disabled one.
     logger.info("  Syncing fund deployment to current targets...");
     await client.executeRebalance(address, state);
   }
