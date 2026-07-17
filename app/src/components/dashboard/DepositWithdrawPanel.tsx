@@ -262,6 +262,23 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
         </div>
       )}
 
+      {/* Withdraw: explain why MAX is below the user's position.
+          Without this, MAX fills 0.0997 against a position that reads 0.1 and the
+          user reasonably assumes the app is short-changing them. It isn't — the
+          remainder is unreachable until the protocol exit fees stop being left
+          behind as phantom deployed_balance (a program-side fix). Say so plainly
+          rather than letting them guess. */}
+      {withdrawCappedByFees && (
+        <div style={{ background: "var(--bg)", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }}>
+          Max withdrawable is{" "}
+          <span style={{ fontFamily: "var(--mono)", color: "var(--text)" }}>
+            {fmt(maxWithdrawTokens, decimals === 9 ? 4 : 2)} {asset}
+          </span>{" "}
+          of your {fmt(positionTokens, decimals === 9 ? 4 : 2)} {asset} position — the difference covers
+          the exit fees charged by the protocols your funds are staked in.
+        </div>
+      )}
+
       {/* Withdraw: estimated receive */}
       {tab === "withdraw" && parsedAmount > 0 && estimatedReceive !== null && (
         <div style={{ background: "var(--bg)", borderRadius: 8, padding: "12px 14px", marginBottom: 20, fontSize: 13 }}>
