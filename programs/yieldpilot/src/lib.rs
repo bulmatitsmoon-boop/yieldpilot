@@ -529,10 +529,42 @@ pub mod yieldpilot {
         )?;
 
         // Update state.
-        // total_deposits tracks cost-basis (not vault balance), so subtract cost_basis not amount_out.
-        // amount_out >= cost_basis when there is profit; subtracting cost_basis avoids saturating
-        // to zero while other users still hold shares backed by real funds.
-        v.total_deposits = v.total_deposits.saturating_sub(cost_basis);
+        //
+        // Subtract amount_out (the value that actually LEFT the vault), not cost_basis.
+        //
+        // The old comment here claimed "total_deposits tracks cost-basis (not vault balance)",
+        // but nothing else in the program agrees with that:
+        //   * recall's settle_recall ADDS realized yield to total_deposits, so it is not a
+        //     cost basis the moment any yield is realized;
+        //   * every deploy guard computes idle as `total_deposits - total_deployed()`, which
+        //     is only meaningful if total_deposits is vault VALUE;
+        //   * min_idle, the TVL cap, and the UI's share price all read it as value.
+        // So value went IN via recall but only cost-basis came OUT here, and the difference was
+        // stranded permanently.
+        //
+        // Observed live 2026-07-17: after withdrawing 100% of shares the USDC vault read
+        // total_shares = 0 but total_deposits = 148 — precisely the realized yield, owned by
+        // nobody. With shares at 0 the UI's `shares * total_deposits / total_shares` then
+        // misprices the next depositor's position.
+        //
+        // The old comment's fear was backwards. Take A and B each depositing 5 (total_deposits
+        // 10, shares 10) and 2 of yield realized (total_deposits 12). A withdraws 5 shares, so
+        // amount_out = 5*12/10 = 6 and cost_basis = 5:
+        //   subtract cost_basis -> total_deposits 7, shares 5 -> price 1.4, but the vault holds
+        //                          only 6. B's position OVER-states, which is the actual hazard.
+        //   subtract amount_out -> total_deposits 6, shares 5 -> price 1.2. Correct.
+        // Subtracting amount_out cannot strand value and cannot over-credit the remaining holders.
+        //
+        // amount_out (gross), not amount_after_fee: perf_fee is transferred to the treasury just
+        // above, so BOTH legs leave the vault and the vault's value drops by the full amount_out.
+        //
+        // Fees are unaffected: they are computed from pos.deposited_amount (the per-user basis),
+        // never from total_deposits. cost_basis is still used for pos.deposited_amount below.
+        //
+        // saturating_sub is kept: a donation directly into vault_token_account can push real
+        // value above the accounted total, making amount_out exceed total_deposits. Saturating is
+        // the safe direction (MIN_FIRST_DEPOSIT is the actual donation-attack guard).
+        v.total_deposits = v.total_deposits.saturating_sub(amount_out);
         v.total_shares   = v.total_shares.saturating_sub(shares);
         pos.shares           = pos.shares.saturating_sub(shares);
         pos.deposited_amount = pos.deposited_amount.saturating_sub(cost_basis);
