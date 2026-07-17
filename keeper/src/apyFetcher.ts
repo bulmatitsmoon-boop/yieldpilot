@@ -10,6 +10,12 @@ export interface ProtocolApy {
   tvlUsd: number;
   riskScore: number;    // 1 (low) – 3 (high)
   fetchedAt: Date;
+  /**
+   * True when this figure came from FALLBACK_APYS because the live fetch failed —
+   * i.e. it is a HARDCODED NUMBER, not a measurement. Anything that moves real money
+   * MUST refuse to act on a stale figure (see rebalancer.computeRebalanceDecision).
+   */
+  stale?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -187,7 +193,14 @@ const FALLBACK_APYS: Record<string, Omit<ProtocolApy, "fetchedAt">> = {
 };
 
 function getFallbackApys(ids: string[]): ProtocolApy[] {
-  return ids.map(id => FALLBACK_APYS[id] ? { ...FALLBACK_APYS[id], fetchedAt: new Date() } : null).filter(Boolean) as ProtocolApy[];
+  // stale:true is load-bearing, not cosmetic. These are hand-typed constants; a constant
+  // cannot go up or down when the real rate does, so routing on one is how the Solend
+  // "5.10%" incident happened (a fabricated rate beat every real one and captured 80% of
+  // the USDC vault). Anything downstream that moves funds must treat stale as "unpriceable"
+  // and abstain — NOT as a number to compare against live rates.
+  return ids
+    .map(id => (FALLBACK_APYS[id] ? { ...FALLBACK_APYS[id], fetchedAt: new Date(), stale: true } : null))
+    .filter(Boolean) as ProtocolApy[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
