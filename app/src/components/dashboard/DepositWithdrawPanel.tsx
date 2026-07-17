@@ -64,6 +64,49 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
   const positionTokens = (userShares * sharePrice) / 10 ** decimals; // ui amount
   const positionRaw = userShares * sharePrice; // in raw units (same decimals as totalDeposits)
 
+  // ── Withdrawal ceiling ─────────────────────────────────────────────────────
+  // A withdrawal is paid from the vault's IDLE balance. When idle can't cover it,
+  // useYieldPilot bundles recall_from_* ahead of withdraw() in the same transaction —
+  // but a recall returns slightly LESS than it withdrew, because the protocol charges
+  // an exit fee. recall_from_* decrements deployed_balance by the SOL actually
+  // RECEIVED, so that fee is left behind as PHANTOM deployed_balance.
+  //
+  // withdraw() values a share against `idle + total_deployed`, so the phantom inflates
+  // total_value above the real recoverable amount, and `require!(idle >= amount_out)`
+  // rejects any withdrawal within a fee's width of 100%. MAX previously filled in the
+  // user's FULL position — an amount that CANNOT settle — so the most common action in
+  // the app always failed. Measured live on the round-8 SOL vault: 99.8% succeeds,
+  // 99.9% and 100% revert with InsufficientIdle.
+  //
+  // The ceiling is therefore total_value minus the exit fees a full recall would incur.
+  // Basis points below mirror the keeper's EXIT_COST_BPS (rebalancer.ts) — keep in sync.
+  // These are empirically confirmed, not guesses: the local harness measured jito 0.1%
+  // and marinade 0.17%, and a real mainnet recall on 2026-07-17 returned 7,986,399 of
+  // 8,000,000 requested — 0.17% to the basis point.
+  //
+  // Lending protocols are 0: no exit fee, so no phantom, so 100% genuinely works and
+  // this cap correctly collapses to the full position (e.g. the Kamino-only USDC vault).
+  //
+  // The real fix is program-side (zero deployed_balance on a full recall and book the
+  // fee as a realized loss); until that upgrade ships, promise only what can settle.
+  const EXIT_COST_BPS: Record<string, number> = {
+    "kamino-usdc": 0,
+    "kamino-sol": 0,
+    "solend-usdc": 0,
+    "marinade-sol": 30, // ~0.3% liquid-unstake fee (max; measured 0.17%)
+    "jito-sol": 10,     // ~0.1% to exit jitoSOL
+  };
+  const phantomRaw = vault.protocols.reduce(
+    (sum, p) => sum + (p.currentBalance * (EXIT_COST_BPS[p.name] ?? 0)) / 10000,
+    0
+  );
+  // Cap the PAYOUT (not the share count): amount_out must be <= idle after recalls,
+  // and idle-after-recalls == total_value - fees.
+  const vaultCeilingTokens = Math.max(0, vault.totalDeposits - phantomRaw) / 10 ** decimals;
+  const maxWithdrawTokens = Math.min(positionTokens, vaultCeilingTokens);
+  // True when the phantom actually binds — i.e. the user cannot take their whole position.
+  const withdrawCappedByFees = tab === "withdraw" && maxWithdrawTokens < positionTokens - 1e-12;
+
   // Convert a token ui-amount to shares to burn
   const tokenAmountToShares = (uiAmount: number): anchor.BN => {
     if (vault.totalDeposits === 0 || vault.totalShares === 0) return new anchor.BN(0);
@@ -127,7 +170,12 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
     if (tab === "deposit" && walletBalance !== null) {
       setAmount(String(walletBalance));
     } else if (tab === "withdraw") {
-      setAmount(positionTokens.toFixed(decimals === 9 ? 4 : 2));
+      // FLOOR, never toFixed: toFixed ROUNDS, and rounding up by one ulp puts the
+      // amount back above the ceiling and reverts the transaction. Flooring 0.0998596
+      // to 4dp gives 0.0998 — the exact value proven to settle on mainnet.
+      const dp = decimals === 9 ? 4 : 2;
+      const floored = Math.floor(maxWithdrawTokens * 10 ** dp) / 10 ** dp;
+      setAmount(floored.toFixed(dp));
     }
   };
 
@@ -211,6 +259,23 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
             <span>{bestApy.name} · {bestApy.asset}</span>
             <span style={{ color: "var(--green)", fontWeight: 700 }}>{bestApy.stale ? "— APY" : `${fmt(bestApy.apyPercent)}% APY`}</span>
           </div>
+        </div>
+      )}
+
+      {/* Withdraw: explain why MAX is below the user's position.
+          Without this, MAX fills 0.0997 against a position that reads 0.1 and the
+          user reasonably assumes the app is short-changing them. It isn't — the
+          remainder is unreachable until the protocol exit fees stop being left
+          behind as phantom deployed_balance (a program-side fix). Say so plainly
+          rather than letting them guess. */}
+      {withdrawCappedByFees && (
+        <div style={{ background: "var(--bg)", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }}>
+          Max withdrawable is{" "}
+          <span style={{ fontFamily: "var(--mono)", color: "var(--text)" }}>
+            {fmt(maxWithdrawTokens, decimals === 9 ? 4 : 2)} {asset}
+          </span>{" "}
+          of your {fmt(positionTokens, decimals === 9 ? 4 : 2)} {asset} position — the difference covers
+          the exit fees charged by the protocols your funds are staked in.
         </div>
       )}
 
