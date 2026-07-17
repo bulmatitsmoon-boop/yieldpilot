@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { useWallet } from "@solana/wallet-adapter-react";
@@ -28,20 +27,6 @@ const VAULT_ADDRESSES = (process.env.NEXT_PUBLIC_VAULT_ADDRESSES || "F1r513ZZdof
 
 const IS_MAINNET = process.env.NEXT_PUBLIC_SOLANA_NETWORK === "mainnet-beta";
 
-function Countdown({ seconds }: { seconds: number }) {
-  const [remaining, setRemaining] = useState(seconds);
-  useEffect(() => {
-    const id = setInterval(() => setRemaining(r => (r <= 0 ? seconds : r - 1)), 1000);
-    return () => clearInterval(id);
-  }, [seconds]);
-  const mm = String(Math.floor(remaining / 60)).padStart(2, "0");
-  const ss = String(remaining % 60).padStart(2, "0");
-  return (
-    <span className="mono-num" style={{ color: remaining <= 10 ? "var(--warn)" : "var(--text-hi)" }}>
-      {mm}:{ss}
-    </span>
-  );
-}
 
 function Reveal({ children, delay = 0 }: { children: React.ReactNode; delay?: number }) {
   return (
@@ -223,8 +208,15 @@ export default function Home() {
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 18, fontSize: 12, color: "var(--signal)" }}>
               <div className="live-dot" style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--signal)" }} />
               <span style={{ fontFamily: "var(--font-mono)" }}>LIVE</span>
-              <span style={{ color: "var(--text-low)" }}>· Next rebalance</span>
-              <Countdown seconds={15 * 60} />
+              {/* A "Next rebalance MM:SS" countdown used to sit here, driven by a Countdown
+                  component fed a hardcoded 15-minute constant — a pure 15:00 loop that reset
+                  forever and was tied to NOTHING, on the public landing page. The keeper's real
+                  observed gaps are 60-98 minutes (it runs on a GitHub Actions cron: the every-45 cron form
+                  actually means :00 and :45, and Actions cron drifts heavily on top), so the
+                  number was fabricated AND wrong by ~4x. Removed rather than "corrected" — we
+                  cannot know when the keeper next runs, and inventing a figure a visitor can't
+                  check is exactly how the APY display ended up advertising ~2x reality. */}
+              <span style={{ color: "var(--text-low)" }}>· Rebalances automatically</span>
             </div>
 
             {/* Flight-path routing visual */}
