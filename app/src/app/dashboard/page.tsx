@@ -251,7 +251,7 @@ export default function Dashboard() {
                 predicting when it next will. The old "Next rebalance MM:SS" countdown ignored its
                 own prop and rendered Date.now() % 45min — pure theatre. It can't be made accurate:
                 the keeper runs on a GitHub Actions cron whose OBSERVED gaps are 60-98 minutes
-                (`*/45` actually means :00 and :45, and Actions cron drifts heavily on top). A
+                (the every-45 cron form actually means :00 and :45, and Actions cron drifts heavily on top). A
                 verifiable "last acted" beats a confident, wrong prediction. */}
             {minutesSinceCompound !== null && (
               <span style={{ color: "var(--text-low)" }}>
