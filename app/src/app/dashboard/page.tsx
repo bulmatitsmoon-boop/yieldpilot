@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { StatCard, Card, CardHeader, Toggle, TxBanner, fmt, fmtAddr } from "@/components/ui";
@@ -20,26 +20,7 @@ const VAULT_ADDRESSES = (process.env.NEXT_PUBLIC_VAULT_ADDRESSES || "F1r513ZZdof
 type Tab = "overview" | "protocols" | "deposit" | "withdraw";
 
 const ADMIN_PUBKEY = "8i7kydJHwi3Cdp46Xugyux2vWJmTScYDvnJrBiBihBnP";
-const REBALANCE_INTERVAL_SEC = 45 * 60;
 
-function Countdown({ lastCompoundTs }: { lastCompoundTs: number | null }) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, []);
-  // Approximate: countdown to the next 45-min boundary since we don't expose the
-  // keeper's exact next-poll timestamp. Good enough for the "alive" feel.
-  const elapsed = Math.floor(now / 1000) % REBALANCE_INTERVAL_SEC;
-  const remaining = REBALANCE_INTERVAL_SEC - elapsed;
-  const mm = String(Math.floor(remaining / 60)).padStart(2, "0");
-  const ss = String(remaining % 60).padStart(2, "0");
-  return (
-    <span className="mono-num" style={{ color: remaining <= 10 ? "var(--warn)" : "var(--text-hi)" }}>
-      {mm}:{ss}
-    </span>
-  );
-}
 
 export default function Dashboard() {
   const { publicKey, connected } = useWallet();
@@ -83,6 +64,12 @@ export default function Dashboard() {
   const isProjected = positions.length > 0 && positions.every(p => p.earnedValue === 0);
 
   const primaryVault = vaults[0];
+  // "AUTOPILOT ENGAGED" was a HARDCODED string — it never read autoRebalance, so it claimed
+  // engaged while autopilot was off, the vault was paused, or the keeper was dead. It has been
+  // lying since the USDC vault's auto-rebalance was deliberately disabled as Solend containment.
+  // `autoRebalance` gates whether the keeper may CHANGE targets; deployment to existing targets
+  // continues regardless, which is why "off" still means funds are working — just not re-routed.
+  const autopilotOn = !!primaryVault?.autoRebalance && !primaryVault?.paused;
 
   const usdcVault = vaults.find(v => v.name.toUpperCase().includes("USDC"));
   const solVault  = vaults.find(v => v.name.toUpperCase().includes("SOL"));
@@ -93,13 +80,12 @@ export default function Dashboard() {
   const minutesSinceCompound = lastCompound ? Math.floor((Date.now() - lastCompound.getTime()) / 60000) : null;
   const onChainAllocation = primaryVault?.protocols.filter(p => p.targetBps > 0) || [];
   const topApys = [...apys].filter(a => a.riskScore <= 1).sort((a, b) => b.apyPercent - a.apyPercent).slice(0, 2);
-  const currentAllocation = onChainAllocation.length > 0
-    ? onChainAllocation
-    : topApys.length >= 2
-      ? [{ name: topApys[0].name, targetBps: 8000 }, { name: topApys[1].name, targetBps: 2000 }]
-      : topApys.length === 1
-        ? [{ name: topApys[0].name, targetBps: 10000 }]
-        : [];
+  // Show ONLY the vault's real on-chain targets. This previously fell back to a
+  // FABRICATED [best 80% / runner-up 20%] (or [best 100%]) built from the APY list whenever
+  // a vault had no on-chain allocation — indistinguishable, to the user, from a real one.
+  // That is the same failure that produced Solend's fake 5.10% and Jito's hardcoded 6.5%
+  // base: a made-up number wearing the costume of live state. Render nothing instead.
+  const currentAllocation = onChainAllocation;
 
   const tierLabel = userGateBalance >= (primaryVault?.goldThreshold ?? 1_000_000) ? "Gold"
     : userGateBalance >= (primaryVault?.silverThreshold ?? 100_000) ? "Silver"
@@ -256,11 +242,22 @@ export default function Dashboard() {
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 20, fontSize: 12 }}>
-            <div className="live-dot" style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--signal)" }} />
-            <span style={{ color: "var(--signal)", fontFamily: "var(--font-mono)", fontWeight: 500 }}>AUTOPILOT ENGAGED</span>
+            <div className="live-dot" style={{ width: 6, height: 6, borderRadius: "50%", background: autopilotOn ? "var(--signal)" : "var(--text-low)" }} />
+            <span style={{ color: autopilotOn ? "var(--signal)" : "var(--text-low)", fontFamily: "var(--font-mono)", fontWeight: 500 }}>
+              {primaryVault?.paused ? "VAULT PAUSED" : autopilotOn ? "AUTOPILOT ENGAGED" : "AUTOPILOT OFF"}
+            </span>
             {currentAllocation[0] && <span style={{ color: "var(--text-low)" }}>· Routing to {currentAllocation[0].name}</span>}
-            <span style={{ color: "var(--text-low)" }}>· Next rebalance</span>
-            <Countdown lastCompoundTs={primaryVault?.lastCompoundTs ?? null} />
+            {/* Report when the keeper LAST acted (real, from lastCompoundTs on-chain) rather than
+                predicting when it next will. The old "Next rebalance MM:SS" countdown ignored its
+                own prop and rendered Date.now() % 45min — pure theatre. It can't be made accurate:
+                the keeper runs on a GitHub Actions cron whose OBSERVED gaps are 60-98 minutes
+                (the every-45 cron form actually means :00 and :45, and Actions cron drifts heavily on top). A
+                verifiable "last acted" beats a confident, wrong prediction. */}
+            {minutesSinceCompound !== null && (
+              <span style={{ color: "var(--text-low)" }}>
+                · Last compounded <span className="mono-num" style={{ color: "var(--text-hi)" }}>{minutesSinceCompound}m</span> ago
+              </span>
+            )}
           </div>
 
           {currentAllocation.length > 0 && (

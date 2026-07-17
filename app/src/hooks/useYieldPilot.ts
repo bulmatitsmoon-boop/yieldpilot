@@ -37,6 +37,10 @@ export interface VaultInfo {
   totalShares: number;
   autoCompound: boolean;
   autoRebalance: boolean;
+  /** On-chain emergency stop. Deposits are blocked while paused; withdrawals are
+   *  deliberately still allowed so users can always exit. Surfaced so the dashboard can
+   *  say so rather than claiming "AUTOPILOT ENGAGED" over a halted vault. */
+  paused: boolean;
   lastCompoundTs: number;
   protocolCount: number;
   gateMint: string;
@@ -124,6 +128,7 @@ export function useYieldPilot(vaultAddresses: string[]) {
             totalShares: (raw.totalShares as anchor.BN).toNumber(),
             autoCompound: raw.autoCompound as boolean,
             autoRebalance: raw.autoRebalance as boolean,
+            paused: raw.paused as boolean,
             lastCompoundTs: (raw.lastCompoundTs as anchor.BN).toNumber(),
             protocolCount: raw.protocolCount as number,
             gateMint: ((raw.gateMint as any)?.toBase58 ? (raw.gateMint as any).toBase58() : ""),
