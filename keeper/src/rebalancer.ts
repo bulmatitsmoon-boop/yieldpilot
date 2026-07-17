@@ -38,7 +38,6 @@ export function computeRebalanceDecision(
   const protocols = vault.protocols.slice(0, vault.protocolCount);
 
   const currentAllocations = protocols.map(p => p.targetBps.toNumber());
-  const __ci_canary = protocols.map(p => p.targetAllocationBps); // DELIBERATE: field does not exist
 
   // Match APYs to registered protocols by label (not by array index).
   // Index-based matching is fragile: if APY fetcher order diverges from on-chain
