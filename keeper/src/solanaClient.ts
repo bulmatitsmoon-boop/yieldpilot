@@ -70,6 +70,10 @@ function fmtAmount(raw: number, vaultName: string): string {
 // Must match MIN_IDLE_BPS in programs/yieldpilot/src/lib.rs — the vault always keeps
 // this share of total_deposits idle so users can withdraw without waiting for a recall.
 const MIN_IDLE_BPS = 1000; // 10%
+// Dead-band thresholds for executeRebalance (see the long note there). Recalls pay a real
+// protocol exit fee so they get a wider band; deploys only cost a signature.
+const MIN_RECALL_BPS = 25; // 0.25% of deployable
+const MIN_DEPLOY_BPS = 5;  // 0.05% of deployable
 
 const SOLEND_PROGRAM = new PublicKey("So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo");
 const SOLEND_MAIN_MARKET = new PublicKey("4UpD2fh7xH3VP9QQaXtsS1YY3bxzWhtfpks7FatyKvdY");
@@ -851,6 +855,30 @@ export class SolanaClient {
     const minIdle = Math.floor(totalDeposits * MIN_IDLE_BPS / 10_000);
     const deployableTotal = totalDeposits - minIdle;
 
+    // Dead-band — never transact on dust.
+    //
+    // Protocol fees never land on round numbers, so a protocol's deployedBalance can
+    // essentially NEVER exactly equal its target. Filtering on a bare `excess > 0` therefore
+    // means the vault NEVER settles: a few lamports of drift trigger a real, fee-paying
+    // protocol exit every single cycle, forever.
+    //
+    // Observed live 2026-07-17 immediately after the proportional-target fix: marinade sat
+    // 25 lamports (0.000000025 SOL) over target, and the keeper dutifully recalled and
+    // redeployed it every 45 minutes, posting "Deployed 0.0000 SOL" to the alert channel
+    // each time. The wasted fees were trivial; the wasted CREDIBILITY was not — an alert
+    // channel that cries wolf over dust trains people to ignore the alert that matters.
+    //
+    // Asymmetric on purpose: a recall is a REAL protocol exit paying a REAL fee (marinade
+    // ~0.17-0.3%, jito ~0.1%), whereas a deploy only costs a signature. So recalls need a
+    // wider band than deploys. Both are bps-of-deployable, so they scale with vault size
+    // and stay unit-agnostic across SOL (9 decimals) and USDC (6).
+    //
+    // Sizing: must exceed the fee residue left by a legitimate rebalance (recalling 0.008
+    // SOL at marinade's 0.17% leaves ~13.6k lamports ~= 0.019% of target) yet stay far below
+    // REBALANCE_THRESHOLD_BPS (500 = 5%), so real rebalances are never suppressed.
+    const minRecall = Math.floor(deployableTotal * MIN_RECALL_BPS / 10_000);
+    const minDeploy = Math.floor(deployableTotal * MIN_DEPLOY_BPS / 10_000);
+
     const deltas = protocols.map((p, i) => ({
       index: i,
       label: Buffer.from(p.label).toString("utf8").replace(/\0/g, ""),
@@ -862,7 +890,7 @@ export class SolanaClient {
     // Phase 1: Recalls
     const toRecall = deltas
       .map(d => ({ ...d, excess: d.deployed - d.target }))
-      .filter(d => d.excess > 0)
+      .filter(d => d.excess > minRecall)
       .sort((a, b) => b.excess - a.excess);
 
     for (const d of toRecall) {
@@ -902,7 +930,7 @@ export class SolanaClient {
     // Phase 2: Deploys
     const toDeposit = deltas
       .map(d => ({ ...d, deficit: d.target - d.deployed }))
-      .filter(d => d.deficit > 0)
+      .filter(d => d.deficit > minDeploy)
       .sort((a, b) => b.deficit - a.deficit);
 
     // The on-chain program reserves a MIN_IDLE_BPS (10%) withdrawal buffer:
