@@ -706,6 +706,45 @@ pub mod yieldpilot {
         Ok(())
     }
 
+    /// Snap total_deposits back to what the vault ACTUALLY holds: idle + deployed principal.
+    ///
+    /// WHY THIS IS SAFE TO EXPOSE (and could even be permissionless): it writes NOTHING it
+    /// doesn't already read from THIS vault's own on-chain state — the vault_token_account
+    /// balance and total_deployed(), both of which any instruction here already trusts. It
+    /// does NOT decode Kamino/Marinade/Jito state, does NOT read an exchange rate, invents
+    /// no number. So it cannot over-value a share: the value it computes is the same
+    /// conservative floor withdraw() already uses (see the long note in withdraw() — "idle +
+    /// total_deployed is a conservative floor... it never over-values a share, so it can
+    /// never drain the vault"). It can only ever make total_deposits MORE accurate.
+    ///
+    /// WHAT IT FIXES: withdraw() subtracts amount_out and recall books realized gains/losses,
+    /// but rounding and the historical cost-basis bug can leave total_deposits drifted a few
+    /// units off the real (idle + deployed) value — "orphaned" accounting with no funds
+    /// behind it. Observed live 2026-07-17: after a full withdrawal the USDC vault read
+    /// total_shares = 0 with total_deposits = 148. Because the UI prices positions as
+    /// shares * total_deposits / total_shares, that drift misprices the next depositor.
+    /// reconcile() clears it and makes the accounting self-healing against any future drift.
+    ///
+    /// Kept KeeperOnly (not permissionless) only for symmetry with compound/rebalance and to
+    /// keep the admin surface legible; there is no security reason it must be gated, since it
+    /// can only move total_deposits toward the truth. Allowed while paused: reconciling a
+    /// halted vault is strictly safe and may be exactly what an operator wants mid-incident.
+    pub fn reconcile(ctx: Context<Reconcile>) -> Result<()> {
+        let idle = ctx.accounts.vault_token_account.amount;
+        let v = &mut ctx.accounts.vault;
+        require!(
+            ctx.accounts.vault_token_account.key() == v.vault_token_account,
+            VaultError::InvalidTokenAccount
+        );
+        let true_value = idle
+            .checked_add(v.total_deployed())
+            .ok_or(VaultError::MathOverflow)?;
+        let old = v.total_deposits;
+        v.total_deposits = true_value;
+        emit!(Reconciled { vault: v.key(), old_total_deposits: old, new_total_deposits: true_value });
+        Ok(())
+    }
+
     // ── Protocol deployment ───────────────────────────────────────────────────
 
     pub fn deploy_to_kamino<'info>(
@@ -1583,6 +1622,17 @@ pub struct KeeperOnly<'info> {
 }
 
 #[derive(Accounts)]
+pub struct Reconcile<'info> {
+    pub keeper: Signer<'info>,
+    #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
+    pub vault: Account<'info, Vault>,
+    // Read-only: only its .amount (idle balance) is used. Constrained to the vault's own
+    // token account in the handler so a caller can't substitute a different balance.
+    #[account(constraint = vault_token_account.key() == vault.vault_token_account @ VaultError::InvalidTokenAccount)]
+    pub vault_token_account: Account<'info, TokenAccount>,
+}
+
+#[derive(Accounts)]
 pub struct AcceptAdmin<'info> {
     pub new_admin: Signer<'info>,
     #[account(mut, constraint = vault.pending_admin == new_admin.key() @ VaultError::NotPendingAdmin)]
@@ -2051,6 +2101,7 @@ pub struct RecallFromSolend<'info> {
 #[event] pub struct Withdrawn         { pub vault: Pubkey, pub user: Pubkey, pub shares_burned: u64, pub amount_out: u64, pub perf_fee: u64 }
 #[event] pub struct Rebalanced        { pub vault: Pubkey, pub allocations: Vec<u64>, pub ts: i64 }
 #[event] pub struct Compounded        { pub vault: Pubkey, pub ts: i64 }
+#[event] pub struct Reconciled        { pub vault: Pubkey, pub old_total_deposits: u64, pub new_total_deposits: u64 }
 #[event] pub struct FundsDeployed     { pub vault: Pubkey, pub protocol_index: u8, pub amount: u64 }
 #[event] pub struct FundsRecalled     { pub vault: Pubkey, pub protocol_index: u8, pub collateral_amount: u64 }
 #[event] pub struct PauseToggled      { pub vault: Pubkey, pub paused: bool }
