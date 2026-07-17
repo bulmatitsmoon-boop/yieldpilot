@@ -37,33 +37,6 @@ export function computeRebalanceDecision(
 ): RebalanceDecision {
   const protocols = vault.protocols.slice(0, vault.protocolCount);
 
-  // ── Refuse to move money we cannot price ──────────────────────────────────
-  // If ANY registered protocol fell back to a hardcoded APY, abstain from rebalancing
-  // entirely and hold the current allocation.
-  //
-  // Why abstain rather than route around the stale one: excluding it would drive its
-  // target to 0, forcing a FULL EXIT that pays real, unrecoverable protocol fees
-  // (marinade ~0.3%, jito ~0.1%) on the basis of a transient API blip. Acting on
-  // ignorance is strictly worse than waiting 45 minutes for the next cycle — the
-  // funds keep earning wherever they are in the meantime.
-  //
-  // Note this is deliberately asymmetric with the frontend, which only DISPLAYS stale
-  // rates (greyed, sorted last). Displaying a stale number is a cosmetic problem;
-  // routing on one is a financial one.
-  const staleIds = protocols
-    .map((p, i) => ({ id: p.protocolId, apy: apys.find(a => a.protocolId === p.protocolId) }))
-    .filter(x => !x.apy || x.apy.stale)
-    .map(x => x.id);
-  if (staleIds.length > 0) {
-    const current = protocols.map(p => p.targetAllocationBps);
-    return {
-      shouldRebalance: false,
-      reason: `Holding — no live APY for ${staleIds.join(", ")} (fell back to a hardcoded rate). Refusing to reallocate on an unpriceable protocol.`,
-      currentAllocations: current,
-      newAllocations: current,
-      expectedApyImprovement: 0,
-    };
-  }
   const currentAllocations = protocols.map(p => p.targetBps.toNumber());
 
   // Match APYs to registered protocols by label (not by array index).
@@ -79,6 +52,34 @@ export function computeRebalanceDecision(
   );
   const protocolApys = protocolLabels.map(label => apyByLabel.get(label)?.apyBps || 0);
   const protocolIds  = protocolLabels;
+
+  // ── Refuse to move money we cannot price ──────────────────────────────────
+  // If ANY registered protocol fell back to a hardcoded APY (stale), abstain from
+  // rebalancing entirely and hold the current allocation.
+  //
+  // Why abstain rather than route around the stale one: excluding it would drive its
+  // target to 0, forcing a FULL EXIT that pays real, unrecoverable protocol fees
+  // (marinade ~0.3%, jito ~0.1%) on the basis of a transient API blip. Acting on
+  // ignorance is strictly worse than waiting for the next cycle — the funds keep
+  // earning wherever they already are in the meantime.
+  //
+  // This is deliberately asymmetric with the frontend, which merely DISPLAYS stale
+  // rates (greyed, sorted last). Displaying a stale number is a cosmetic problem;
+  // routing real funds on one is a financial one. See the Solend "5.10%" incident:
+  // a hand-typed constant beat every live rate and captured 80% of the USDC vault.
+  const staleLabels = protocolLabels.filter(l => {
+    const a = apyByLabel.get(l);
+    return !a || a.stale;
+  });
+  if (staleLabels.length > 0) {
+    return {
+      shouldRebalance: false,
+      reason: `Holding — no live APY for ${staleLabels.join(", ")} (fell back to a hardcoded rate). Refusing to reallocate on an unpriceable protocol.`,
+      currentAllocations,
+      newAllocations: currentAllocations,
+      expectedApyImprovement: 0,
+    };
+  }
 
   const currentWeightedApy = computeWeightedApy(currentAllocations, protocolApys);
 
