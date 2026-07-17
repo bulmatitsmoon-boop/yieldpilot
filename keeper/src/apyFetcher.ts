@@ -10,6 +10,12 @@ export interface ProtocolApy {
   tvlUsd: number;
   riskScore: number;    // 1 (low) – 3 (high)
   fetchedAt: Date;
+  /**
+   * True when this figure came from FALLBACK_APYS because the live fetch failed —
+   * i.e. it is a HARDCODED NUMBER, not a measurement. Anything that moves real money
+   * MUST refuse to act on a stale figure (see rebalancer.computeRebalanceDecision).
+   */
+  stale?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -80,42 +86,54 @@ async function fetchKaminoApy(): Promise<ProtocolApy[]> {
   }
 }
 
-async function fetchMarinadeApy(): Promise<ProtocolApy[]> {
+/**
+ * Latest APY/TVL for one DeFiLlama pool.
+ *
+ * SINGLE SOURCE OF TRUTH (2026-07-16): everything routable is priced from DeFiLlama,
+ * the same source app/src/app/api/apys/route.ts uses. This is deliberate and matters
+ * for two reasons:
+ *   1. The site and the router MUST agree, or we advertise one rate and optimize on another.
+ *   2. Comparing protocols priced by DIFFERENT methodologies makes the "best APY" decision
+ *      meaningless. Previously Jito was scored as a HARDCODED 6.5% base + live MEV (~6.59%,
+ *      i.e. ~98% a made-up constant, real value 5.27%) while Marinade used its own 30d
+ *      realized API (6.01% vs 7.71% real). The keeper therefore believed jito > marinade
+ *      and pinned the SOL vault at jito 80/20 when marinade was in fact the better rate.
+ *      Same class of bug as Solend's fake 5.10% fallback: not broken logic, garbage inputs.
+ */
+async function fetchLlamaApy(
+  protocolId: keyof typeof DEFILLAMA_POOL_IDS,
+  name: string,
+  asset: string,
+  fallbackTvl: number
+): Promise<ProtocolApy[]> {
   try {
-    // 30d window: 1d is too noisy and can land on a near-zero price-change snapshot
     const { data } = await axios.get(
-      `${process.env.MARINADE_API_URL || "https://api.marinade.finance"}/msol/apy/30d`,
+      `https://yields.llama.fi/chart/${DEFILLAMA_POOL_IDS[protocolId]}`,
       { timeout: 8000 }
     );
-    const apyPercent = sanitizeApy(parseFloat(data?.value || data?.apy || "0") * 100, "marinade-sol");
-    if (!apyPercent || apyPercent < 0.5) return getFallbackApys(["marinade-sol"]);
-    return [{ protocolId: "marinade-sol", name: "Marinade", asset: "SOL", apyBps: Math.round(apyPercent * 100), apyPercent, tvlUsd: data?.tvl_usd || 1_230_000_000, riskScore: 1, fetchedAt: new Date() }];
+    const history: any[] = data?.data ?? [];
+    if (!history.length) return getFallbackApys([protocolId]);
+    const latest = history[history.length - 1];
+    const apyPercent = sanitizeApy(parseFloat(latest.apy ?? "0"), protocolId);
+    if (!(apyPercent > 0)) return getFallbackApys([protocolId]);
+    return [{
+      protocolId, name, asset,
+      apyBps: Math.round(apyPercent * 100), apyPercent,
+      tvlUsd: latest.tvlUsd ?? fallbackTvl,
+      riskScore: 1, fetchedAt: new Date(),
+    }];
   } catch (err: any) {
-    logger.warn("Failed to fetch Marinade APY", { error: err.message });
-    return getFallbackApys(["marinade-sol"]);
+    logger.warn(`Failed to fetch ${name} APY`, { error: err.message });
+    return getFallbackApys([protocolId]);
   }
 }
 
+async function fetchMarinadeApy(): Promise<ProtocolApy[]> {
+  return fetchLlamaApy("marinade-sol", "Marinade", "SOL", 181_896_238);
+}
+
 async function fetchJitoApy(): Promise<ProtocolApy[]> {
-  try {
-    // MEV rewards endpoint — compute annualized APY from mev_reward_per_lamport
-    // epochs_per_year ≈ 182.5 (2 epochs/day * 365)
-    const { data } = await axios.get(
-      "https://kobe.mainnet.jito.network/api/v1/mev_rewards",
-      { timeout: 8000 }
-    );
-    const mevPerLamport: number = data?.mev_reward_per_lamport ?? 0;
-    // Base staking yield ~6.5% APY; MEV adds on top
-    const BASE_STAKING_APY = 6.5;
-    const EPOCHS_PER_YEAR = 182.5;
-    const mevApy = mevPerLamport * EPOCHS_PER_YEAR * 100;
-    const apyPercent = sanitizeApy(BASE_STAKING_APY + mevApy, "jito-sol");
-    if (!apyPercent) return getFallbackApys(["jito-sol"]);
-    return [{ protocolId: "jito-sol", name: "Jito", asset: "SOL", apyBps: Math.round(apyPercent * 100), apyPercent, tvlUsd: 2_100_000_000, riskScore: 1, fetchedAt: new Date() }];
-  } catch (err: any) {
-    logger.warn("Failed to fetch Jito APY", { error: err.message });
-    return getFallbackApys(["jito-sol"]);
-  }
+  return fetchLlamaApy("jito-sol", "Jito", "SOL", 762_417_675);
 }
 
 // MarginFi is intentionally NOT integrated. Their protocol evolved into
@@ -156,21 +174,6 @@ async function fetchSolendApy(): Promise<ProtocolApy[]> {
   }
 }
 
-async function fetchDriftApy(): Promise<ProtocolApy[]> {
-  try {
-    const { data } = await axios.get(
-      "https://dlob.drift.trade/stats/apys",
-      { timeout: 8000 }
-    );
-    const solMarket = data?.find?.((m: any) => m.marketSymbol === "SOL" || m.symbol === "SOL");
-    const apyPercent = parseFloat(solMarket?.depositApy || solMarket?.lendApy || "0");
-    return [{ protocolId: "drift-sol", name: "Drift", asset: "SOL", apyBps: Math.round(apyPercent * 100), apyPercent, tvlUsd: solMarket?.tvl || 220_000_000, riskScore: 1, fetchedAt: new Date() }];
-  } catch (err: any) {
-    logger.warn("Failed to fetch Drift APY", { error: err.message });
-    return getFallbackApys(["drift-sol"]);
-  }
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Fallback APYs — used if API is down (based on recent historical averages)
 // Raydium and Orca are intentionally excluded — LP impermanent loss risk is
@@ -186,12 +189,18 @@ const FALLBACK_APYS: Record<string, Omit<ProtocolApy, "fetchedAt">> = {
   "jito-sol":       { protocolId: "jito-sol",       name: "Jito",       asset: "SOL",  apyBps:  489, apyPercent: 4.89,  tvlUsd: 762_417_675, riskScore: 1 },
   "marinade-sol":   { protocolId: "marinade-sol",   name: "Marinade",   asset: "SOL",  apyBps:  473, apyPercent: 4.73,  tvlUsd: 181_896_238, riskScore: 1 },
   "kamino-usdc":    { protocolId: "kamino-usdc",    name: "Kamino",     asset: "USDC", apyBps:  339, apyPercent: 3.39,  tvlUsd:  23_525_228, riskScore: 1 },
-  "drift-sol":      { protocolId: "drift-sol",      name: "Drift",      asset: "SOL",  apyBps:  588, apyPercent: 5.88,  tvlUsd: 220_000_000, riskScore: 1 },
   "solend-usdc":    { protocolId: "solend-usdc",    name: "Solend",     asset: "USDC", apyBps:  225, apyPercent: 2.25,  tvlUsd:   7_143_891, riskScore: 1 },
 };
 
 function getFallbackApys(ids: string[]): ProtocolApy[] {
-  return ids.map(id => FALLBACK_APYS[id] ? { ...FALLBACK_APYS[id], fetchedAt: new Date() } : null).filter(Boolean) as ProtocolApy[];
+  // stale:true is load-bearing, not cosmetic. These are hand-typed constants; a constant
+  // cannot go up or down when the real rate does, so routing on one is how the Solend
+  // "5.10%" incident happened (a fabricated rate beat every real one and captured 80% of
+  // the USDC vault). Anything downstream that moves funds must treat stale as "unpriceable"
+  // and abstain — NOT as a number to compare against live rates.
+  return ids
+    .map(id => (FALLBACK_APYS[id] ? { ...FALLBACK_APYS[id], fetchedAt: new Date(), stale: true } : null))
+    .filter(Boolean) as ProtocolApy[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -206,7 +215,6 @@ export async function fetchAllApys(): Promise<ProtocolApy[]> {
     fetchMarinadeApy(),
     fetchJitoApy(),
     fetchSolendApy(),
-    fetchDriftApy(),
   ]);
 
   // Merge live results, fall back per-protocol if any fetcher failed
