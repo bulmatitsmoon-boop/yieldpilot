@@ -398,76 +398,104 @@ export function useYieldPilot(vaultAddresses: string[]) {
         const amountOutBN = totalSharesBN.gtn(0) ? shares.mul(totalValueBN).div(totalSharesBN) : new anchor.BN(0);
         const minAmountOut = amountOutBN.muln(99).divn(100); // 1% slippage buffer
 
-        // If idle can't cover the fair payout, bundle a recall instruction ahead
-        // of withdraw() in the same transaction — recalls the vault's ENTIRE
-        // position from whichever protocol currently holds the most (simplest
-        // safe choice: no exchange-rate math needed, guaranteed to free up at
-        // least that protocol's full deployed value; any excess just stays idle
-        // until the keeper's next cycle redeploys it). Relies on the on-chain
-        // recall_from_* change that allows any signer to call recall as long as
-        // a matching withdraw() for the same user is in the same transaction —
-        // see the "PERMISSIONLESS BY DESIGN" comments in lib.rs.
+        // If idle can't cover the fair payout, bundle recall instructions ahead of
+        // withdraw() in the same transaction. Relies on the on-chain recall_from_* gate
+        // that lets ANY signer call recall provided a matching withdraw() for the same
+        // (vault, user) rides in the same transaction — see verify_paired_withdraw in
+        // lib.rs. A standalone recall by a non-keeper is rejected (RecallRequiresPairedWithdraw),
+        // so this can never be used to force-undeploy the vault.
+        //
+        // Recall from EVERY protocol needed, largest first — NOT just the largest one.
+        // Recalling only the biggest silently caps withdrawals whenever a vault spreads
+        // funds across more than one venue, which is the normal case. Measured live on
+        // the round-8 SOL vault (marinade 0.072 / jito 0.018 of 0.1 SOL): recalling
+        // marinade alone freed ~0.082 of the 0.1 needed, so the ceiling was 80% and MAX
+        // always failed. Recalling both raises it to 99.8%.
+        //
+        // Compute budget is deliberately NOT set here: Solana's default is
+        // min(200k * n_instructions, 1.4M), which scales with the number of recalls we
+        // add. A fixed limit would be WORSE for large bundles. Measured: jito 67.5k +
+        // marinade 78k + withdraw 21k = ~167k against a ~600k default. Transaction SIZE
+        // is the real ceiling for many-protocol vaults (each recall carries ~15 accounts).
         if (idleBN.lt(amountOutBN) && protocols.length > 0) {
-          const bestIdx = protocols.reduce(
-            (best: number, p: any, i: number) => (p.deployedBalance.gt(protocols[best].deployedBalance) ? i : best),
-            0
-          );
-          const bestProtocol = protocols[bestIdx];
-          if ((bestProtocol.deployedBalance as anchor.BN).gtn(0)) {
-            const label = Buffer.from(bestProtocol.label).toString("utf8").replace(/\0/g, "");
-            const receiptAccountPubkey = new PublicKey((bestProtocol.vaultReceiptAccount as PublicKey).toBase58());
+          // Largest first: frees the most idle per instruction, so we add as few
+          // recalls (and pay as few exit fees) as possible.
+          const byDeployed = protocols
+            .map((p: any, i: number) => ({ proto: p, idx: i }))
+            .filter((x: { proto: any }) => (x.proto.deployedBalance as anchor.BN).gtn(0))
+            .sort((a: { proto: any }, b: { proto: any }) =>
+              (b.proto.deployedBalance as anchor.BN).cmp(a.proto.deployedBalance as anchor.BN)
+            );
+
+          const receiptFieldByLabel: Record<string, string> = {
+            "kamino-usdc": "vaultCollateralAccount",
+            "kamino-sol": "vaultCollateralAccount",
+            "marinade-sol": "vaultMsolAccount",
+            "jito-sol": "vaultLstAccount",
+            "solend-usdc": "vaultCollateralAccount",
+          };
+
+          const recallIxs: anchor.web3.TransactionInstruction[] = [];
+          // Projected idle assumes a recall returns its full deployed value. It returns
+          // slightly less (exit fees), so this can under-recall by a hair — harmless:
+          // minAmountOut still protects the user, and the tx reverts rather than
+          // underpaying. Never over-recalls, so we never pay an unnecessary exit fee.
+          let projectedIdle = idleBN;
+
+          for (const { proto, idx } of byDeployed) {
+            if (projectedIdle.gte(amountOutBN)) break;
+
+            const label = Buffer.from(proto.label).toString("utf8").replace(/\0/g, "");
+            const receiptAccountPubkey = new PublicKey((proto.vaultReceiptAccount as PublicKey).toBase58());
             const receiptBalance = await connection.getTokenAccountBalance(receiptAccountPubkey);
             const recallAmount = new anchor.BN(receiptBalance.value.amount);
+            if (!recallAmount.gtn(0)) continue;
 
-            if (recallAmount.gtn(0)) {
-              const res = await fetch(`/api/recall-accounts?label=${encodeURIComponent(label)}`);
-              if (!res.ok) {
-                throw new Error(`Insufficient idle liquidity and could not fetch recall accounts for ${label}`);
-              }
-              const { instructionName, accounts: apiAccounts, remainingAccounts } = await res.json();
-
-              const receiptFieldByLabel: Record<string, string> = {
-                "kamino-usdc": "vaultCollateralAccount",
-                "kamino-sol": "vaultCollateralAccount",
-                "marinade-sol": "vaultMsolAccount",
-                "jito-sol": "vaultLstAccount",
-                "solend-usdc": "vaultCollateralAccount",
-              };
-              if (!(label in receiptFieldByLabel)) {
-                throw new Error(`No receipt-account mapping for protocol label "${label}" — add it to receiptFieldByLabel before this can recall from it.`);
-              }
-              const receiptFieldName = receiptFieldByLabel[label];
-
-              const recallAccounts: Record<string, PublicKey> = {
-                keeper: publicKey,
-                vault: vaultPubkey,
-                txInstructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
-                vaultAuthority: vaultAuthorityPda,
-                vaultTokenAccount,
-                [receiptFieldName]: receiptAccountPubkey,
-              };
-              for (const [key, val] of Object.entries(apiAccounts as Record<string, string | undefined>)) {
-                if (val) recallAccounts[key] = new PublicKey(val);
-              }
-
-              const recallMethod = (program.methods as any)[instructionName];
-              if (typeof recallMethod !== "function") {
-                throw new Error(`Program has no method "${instructionName}" — /api/recall-accounts returned an instruction name that doesn't match the IDL.`);
-              }
-              let builder = recallMethod(bestIdx, recallAmount).accounts(recallAccounts);
-              if (remainingAccounts) {
-                builder = builder.remainingAccounts(
-                  (remainingAccounts as string[]).map((pk) => ({
-                    pubkey: new PublicKey(pk),
-                    isSigner: false,
-                    isWritable: false,
-                  }))
-                );
-              }
-              const recallIx = await builder.instruction();
-              preIxs.unshift(recallIx); // must execute before withdraw() in the same tx
+            const res = await fetch(`/api/recall-accounts?label=${encodeURIComponent(label)}`);
+            if (!res.ok) {
+              throw new Error(`Insufficient idle liquidity and could not fetch recall accounts for ${label}`);
             }
+            const { instructionName, accounts: apiAccounts, remainingAccounts } = await res.json();
+
+            if (!(label in receiptFieldByLabel)) {
+              throw new Error(`No receipt-account mapping for protocol label "${label}" — add it to receiptFieldByLabel before this can recall from it.`);
+            }
+            const receiptFieldName = receiptFieldByLabel[label];
+
+            const recallAccounts: Record<string, PublicKey> = {
+              keeper: publicKey,
+              vault: vaultPubkey,
+              txInstructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
+              vaultAuthority: vaultAuthorityPda,
+              vaultTokenAccount,
+              [receiptFieldName]: receiptAccountPubkey,
+            };
+            for (const [key, val] of Object.entries(apiAccounts as Record<string, string | undefined>)) {
+              if (val) recallAccounts[key] = new PublicKey(val);
+            }
+
+            const recallMethod = (program.methods as any)[instructionName];
+            if (typeof recallMethod !== "function") {
+              throw new Error(`Program has no method "${instructionName}" — /api/recall-accounts returned an instruction name that doesn't match the IDL.`);
+            }
+            // NOTE: the protocol index must be the ORIGINAL on-chain index, not the
+            // position in the sorted array — they differ once sorting reorders them.
+            let builder = recallMethod(idx, recallAmount).accounts(recallAccounts);
+            if (remainingAccounts) {
+              builder = builder.remainingAccounts(
+                (remainingAccounts as string[]).map((pk) => ({
+                  pubkey: new PublicKey(pk),
+                  isSigner: false,
+                  isWritable: false,
+                }))
+              );
+            }
+            recallIxs.push(await builder.instruction());
+            projectedIdle = projectedIdle.add(proto.deployedBalance as anchor.BN);
           }
+
+          // All recalls must execute before withdraw() in the same tx.
+          preIxs.unshift(...recallIxs);
         }
 
         return program.methods
