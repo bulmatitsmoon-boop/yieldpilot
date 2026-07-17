@@ -59,6 +59,58 @@ fn verify_paired_withdraw<'info>(
     err!(VaultError::RecallRequiresPairedWithdraw)
 }
 
+
+/// Settle a recall's accounting for one protocol slot.
+///
+/// `received`          — underlying actually returned to the vault by the CPI
+/// `receipt_remaining` — receipt/LST units STILL held after the CPI (0 == we fully exited)
+///
+/// Three cases:
+///   * `received > deployed`   — the protocol returned MORE than the principal we recorded
+///     (accrued yield). Realize the excess into `total_deposits`.
+///   * `receipt_remaining == 0` — we exited the protocol ENTIRELY, so by definition nothing
+///     is deployed there any more. Whatever didn't come back is an exit fee that is GONE:
+///     book it as a realized LOSS and zero the slot.
+///   * otherwise — a partial recall; the remainder is genuinely still deployed.
+///
+/// WHY THE MIDDLE CASE EXISTS (added 2026-07-17). It previously fell into the last branch,
+/// so the fee stayed in `deployed_balance` as PHANTOM deployed capital — the vault went on
+/// claiming money it had already paid away. Proven on mainnet: after a full recall the
+/// receipt account read **0** while `deployed_balance` still claimed 0.000154 SOL, exactly
+/// the fees Marinade and Jito had charged. There was no code path anywhere that could
+/// recognise a realized LOSS; only gains were ever booked.
+///
+/// Why it mattered, both real:
+///   1. `withdraw()` values a share against `idle + total_deployed()`, so the phantom
+///      inflated total_value above the recoverable amount and `require!(idle >= amount_out)`
+///      rejected ANY withdrawal within a fee's width of 100%. Nobody could fully exit; the
+///      frontend had to cap MAX below the ceiling to compensate.
+///   2. It accumulated on ABANDONED protocols specifically. A slot the router rotates away
+///      from is never redeployed, so nothing overwrites the residue — whereas an active slot
+///      "self-heals" the moment the next deploy re-backs it with real receipts. A yield
+///      router abandons venues for a living, so this grew precisely where nobody was looking.
+///
+/// Deliberately keyed on the RECEIPT balance rather than comparing amounts: only "do we
+/// still hold a claim on that protocol?" distinguishes a partial recall from a full exit.
+/// Sizes can't — a fee and a partial withdrawal both just look like `received < deployed`.
+fn settle_recall(v: &mut Vault, idx: usize, received: u64, receipt_remaining: u64) -> Result<()> {
+    let deployed = v.protocols[idx].deployed_balance;
+    if received > deployed {
+        let gain = received - deployed;
+        v.total_deposits = v.total_deposits.checked_add(gain).ok_or(VaultError::MathOverflow)?;
+        v.protocols[idx].deployed_balance = 0;
+    } else if receipt_remaining == 0 {
+        // Fully exited. saturating_sub: a loss can never take total_deposits below zero,
+        // and under-reporting the loss is safer than underflowing the whole vault's value.
+        let loss = deployed - received;
+        v.total_deposits = v.total_deposits.saturating_sub(loss);
+        v.protocols[idx].deployed_balance = 0;
+    } else {
+        v.protocols[idx].deployed_balance = deployed.saturating_sub(received);
+    }
+    Ok(())
+}
+
 // WSOL mint — used to recreate the vault's SOL token account after a full
 // unwrap-for-Marinade cycle (see deploy_to_marinade).
 const WSOL_MINT: Pubkey = pubkey!("So11111111111111111111111111111111111111112");
@@ -753,14 +805,12 @@ pub mod yieldpilot {
         // its own underlying-token accounting.
         ctx.accounts.vault_token_account.reload()?;
         let received = ctx.accounts.vault_token_account.amount.saturating_sub(underlying_before);
-        let deployed = v.protocols[idx].deployed_balance;
-        if received > deployed {
-            let gain = received - deployed;
-            v.total_deposits = v.total_deposits.checked_add(gain).ok_or(VaultError::MathOverflow)?;
-            v.protocols[idx].deployed_balance = 0;
-        } else {
-            v.protocols[idx].deployed_balance = deployed.saturating_sub(received);
-        }
+        // Reload the RECEIPT account before settling: whether we still hold receipt units
+        // is the only thing that distinguishes "partially recalled, remainder still
+        // deployed" from "fully exited, and the shortfall is a fee we already paid".
+        ctx.accounts.vault_collateral_account.reload()?;
+        let receipt_remaining = ctx.accounts.vault_collateral_account.amount;
+        settle_recall(v, idx, received, receipt_remaining)?;
 
         emit!(FundsRecalled { vault: v.key(), protocol_index, collateral_amount });
         Ok(())
@@ -973,14 +1023,12 @@ pub mod yieldpilot {
         // total_deposits instead of discarding it. Previously decremented by
         // msol_amount (mSOL units), a unit mismatch against underlying-token
         // accounting.
-        let deployed = v.protocols[idx].deployed_balance;
-        if received > deployed {
-            let gain = received - deployed;
-            v.total_deposits = v.total_deposits.checked_add(gain).ok_or(VaultError::MathOverflow)?;
-            v.protocols[idx].deployed_balance = 0;
-        } else {
-            v.protocols[idx].deployed_balance = deployed.saturating_sub(received);
-        }
+        // Reload the RECEIPT account before settling: whether we still hold receipt units
+        // is the only thing that distinguishes "partially recalled, remainder still
+        // deployed" from "fully exited, and the shortfall is a fee we already paid".
+        ctx.accounts.vault_msol_account.reload()?;
+        let receipt_remaining = ctx.accounts.vault_msol_account.amount;
+        settle_recall(v, idx, received, receipt_remaining)?;
 
         emit!(FundsRecalled { vault: v.key(), protocol_index, collateral_amount: msol_amount });
         Ok(())
@@ -1180,14 +1228,12 @@ pub mod yieldpilot {
         }
 
         // Same unit-mismatch fix as recall_from_marinade — see its comments.
-        let deployed = v.protocols[idx].deployed_balance;
-        if received > deployed {
-            let gain = received - deployed;
-            v.total_deposits = v.total_deposits.checked_add(gain).ok_or(VaultError::MathOverflow)?;
-            v.protocols[idx].deployed_balance = 0;
-        } else {
-            v.protocols[idx].deployed_balance = deployed.saturating_sub(received);
-        }
+        // Reload the RECEIPT account before settling: whether we still hold receipt units
+        // is the only thing that distinguishes "partially recalled, remainder still
+        // deployed" from "fully exited, and the shortfall is a fee we already paid".
+        ctx.accounts.vault_lst_account.reload()?;
+        let receipt_remaining = ctx.accounts.vault_lst_account.amount;
+        settle_recall(v, idx, received, receipt_remaining)?;
 
         emit!(FundsRecalled { vault: v.key(), protocol_index, collateral_amount: lst_amount });
         Ok(())
@@ -1318,14 +1364,12 @@ pub mod yieldpilot {
         // Same unit-mismatch fix as recall_from_kamino — see its comments.
         ctx.accounts.vault_token_account.reload()?;
         let received = ctx.accounts.vault_token_account.amount.saturating_sub(underlying_before);
-        let deployed = v.protocols[idx].deployed_balance;
-        if received > deployed {
-            let gain = received - deployed;
-            v.total_deposits = v.total_deposits.checked_add(gain).ok_or(VaultError::MathOverflow)?;
-            v.protocols[idx].deployed_balance = 0;
-        } else {
-            v.protocols[idx].deployed_balance = deployed.saturating_sub(received);
-        }
+        // Reload the RECEIPT account before settling: whether we still hold receipt units
+        // is the only thing that distinguishes "partially recalled, remainder still
+        // deployed" from "fully exited, and the shortfall is a fee we already paid".
+        ctx.accounts.vault_collateral_account.reload()?;
+        let receipt_remaining = ctx.accounts.vault_collateral_account.amount;
+        settle_recall(v, idx, received, receipt_remaining)?;
         emit!(FundsRecalled { vault: v.key(), protocol_index, collateral_amount });
         Ok(())
     }
