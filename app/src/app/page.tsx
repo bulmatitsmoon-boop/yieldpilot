@@ -211,7 +211,7 @@ export default function Home() {
               {/* A "Next rebalance MM:SS" countdown used to sit here, driven by a Countdown
                   component fed a hardcoded 15-minute constant — a pure 15:00 loop that reset
                   forever and was tied to NOTHING, on the public landing page. The keeper's real
-                  observed gaps are 60-98 minutes (it runs on a GitHub Actions cron: "*/45"
+                  observed gaps are 60-98 minutes (it runs on a GitHub Actions cron: the every-45 cron form
                   actually means :00 and :45, and Actions cron drifts heavily on top), so the
                   number was fabricated AND wrong by ~4x. Removed rather than "corrected" — we
                   cannot know when the keeper next runs, and inventing a figure a visitor can't
