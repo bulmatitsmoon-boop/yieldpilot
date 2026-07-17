@@ -49,19 +49,40 @@ export default function Dashboard() {
   const bestApy = lendingApys.length ? Math.max(...lendingApys.map((a) => a.apyPercent)) : 0;
   const bestProtocol = lendingApys.find((a) => a.apyPercent === bestApy);
 
+  // Total Earned — a clearly-labelled PROJECTION, not a realized figure.
+  //
+  // We deliberately do NOT trust p.earnedValue here. It is derived from the on-chain
+  // total_deposits, which only learns about yield when a recall REALIZES it — so between
+  // recalls it reads $0, and worse, it can carry orphaned realized-yield from a prior
+  // withdrawal that has no funds behind it (fixed on-chain by settle_recall / reconcile in
+  // the pending upgrade). Until reconcile() ships, the honest on-chain number is either $0
+  // or wrong-by-dust, so dressing it up as "all time" earnings would be a lie.
+  //
+  // Instead project from what IS reliable: real deposited principal x the vault ACTUAL
+  // blended rate (its live allocation weighted by each protocol APY) x time deposited.
+  // Scaled by DEPLOYED_FRACTION because ~10% sits idle as the withdrawal buffer and earns
+  // nothing. This grows continuously and never claims to be realized.
+  const DEPLOYED_FRACTION = 0.9; // mirrors MIN_IDLE_BPS = 1000 (10% idle buffer)
+  const vaultBlendedApy = (vault: typeof vaults[number] | undefined): number => {
+    if (!vault) return 0;
+    const active = vault.protocols.filter(p => p.targetBps > 0);
+    const totalBps = active.reduce((sum, p) => sum + p.targetBps, 0);
+    if (totalBps === 0) return 0;
+    return active.reduce((sum, p) => {
+      const a = apys.find(x => x.protocolId === p.name);
+      return sum + (a ? a.apyPercent : 0) * (p.targetBps / totalBps);
+    }, 0);
+  };
   const totalEarned = positions.reduce((s, p) => {
     const v = vaults.find(v => v.address === p.vault);
-    const decimals = v?.name.toUpperCase().includes("SOL") ? 1e9 : 1e6;
-    if (p.earnedValue > 0) return s + p.earnedValue / decimals;
-    if (p.lastDepositTs > 0 && bestApy > 0) {
-      const secsElapsed = Math.max(0, Date.now() / 1000 - p.lastDepositTs);
-      const yearFraction = secsElapsed / 31_536_000;
-      const depositUsd = (p.depositedAmount / decimals) * (v?.name.toUpperCase().includes("SOL") ? solPrice : 1);
-      return s + depositUsd * (bestApy / 100) * yearFraction;
-    }
-    return s;
+    if (!v || p.lastDepositTs <= 0) return s;
+    const apy = vaultBlendedApy(v);
+    if (apy <= 0) return s;
+    const decimals = v.name.toUpperCase().includes("SOL") ? 1e9 : 1e6;
+    const yearFraction = Math.max(0, Date.now() / 1000 - p.lastDepositTs) / 31_536_000;
+    const principalUsd = (p.depositedAmount / decimals) * (v.name.toUpperCase().includes("SOL") ? solPrice : 1);
+    return s + principalUsd * DEPLOYED_FRACTION * (apy / 100) * yearFraction;
   }, 0);
-  const isProjected = positions.length > 0 && positions.every(p => p.earnedValue === 0);
 
   const primaryVault = vaults[0];
   // "AUTOPILOT ENGAGED" was a HARDCODED string — it never read autoRebalance, so it claimed
@@ -333,7 +354,7 @@ export default function Dashboard() {
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-            <StatCard label="Total Earned" value={`$${fmt(totalEarned)}`} sub={isProjected && totalEarned > 0 ? "projected" : "all time"} accent="var(--signal)" />
+            <StatCard label="Total Earned" value={`$${fmt(totalEarned)}`} sub={totalEarned > 0 ? "projected · est." : positions.length > 0 ? "accruing" : "—"} accent="var(--signal)" />
             <StatCard label="Avg Protocol APY" value={`${fmt(avgApy)}%`} sub="across protocols" accent="var(--token)" />
             <StatCard label="Best Available" value={`${fmt(bestApy)}%`} sub={bestProtocol ? `${bestProtocol.name} · ${bestProtocol.asset}` : ""} accent="var(--warn)" />
           </div>
