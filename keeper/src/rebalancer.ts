@@ -14,7 +14,6 @@ const BPS_DENOM = 10_000;
 const EXIT_COST_BPS: Record<string, number> = {
   "kamino-usdc":      0,
   "kamino-sol":       0,
-  "drift-sol":        0,
   "solend-usdc":      0,
   "marinade-sol":     30, // ~0.3% liquid unstake fee
   "jito-sol":         10, // ~0.1% DEX swap slippage to exit jitoSOL
@@ -37,6 +36,34 @@ export function computeRebalanceDecision(
   apys: ProtocolApy[]
 ): RebalanceDecision {
   const protocols = vault.protocols.slice(0, vault.protocolCount);
+
+  // ── Refuse to move money we cannot price ──────────────────────────────────
+  // If ANY registered protocol fell back to a hardcoded APY, abstain from rebalancing
+  // entirely and hold the current allocation.
+  //
+  // Why abstain rather than route around the stale one: excluding it would drive its
+  // target to 0, forcing a FULL EXIT that pays real, unrecoverable protocol fees
+  // (marinade ~0.3%, jito ~0.1%) on the basis of a transient API blip. Acting on
+  // ignorance is strictly worse than waiting 45 minutes for the next cycle — the
+  // funds keep earning wherever they are in the meantime.
+  //
+  // Note this is deliberately asymmetric with the frontend, which only DISPLAYS stale
+  // rates (greyed, sorted last). Displaying a stale number is a cosmetic problem;
+  // routing on one is a financial one.
+  const staleIds = protocols
+    .map((p, i) => ({ id: p.protocolId, apy: apys.find(a => a.protocolId === p.protocolId) }))
+    .filter(x => !x.apy || x.apy.stale)
+    .map(x => x.id);
+  if (staleIds.length > 0) {
+    const current = protocols.map(p => p.targetAllocationBps);
+    return {
+      shouldRebalance: false,
+      reason: `Holding — no live APY for ${staleIds.join(", ")} (fell back to a hardcoded rate). Refusing to reallocate on an unpriceable protocol.`,
+      currentAllocations: current,
+      newAllocations: current,
+      expectedApyImprovement: 0,
+    };
+  }
   const currentAllocations = protocols.map(p => p.targetBps.toNumber());
 
   // Match APYs to registered protocols by label (not by array index).
@@ -142,7 +169,6 @@ function computeExitCost(
 const SAFE_PROTOCOLS = new Set([
   "kamino-usdc",
   "kamino-sol",
-  "drift-sol",
   "solend-usdc",
   "marinade-sol",
   "jito-sol",
