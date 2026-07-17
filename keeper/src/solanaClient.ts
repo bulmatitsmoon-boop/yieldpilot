@@ -828,11 +828,34 @@ export class SolanaClient {
     }
 
     const protocols = vault.protocols.slice(0, vault.protocolCount);
+
+    // Target allocations are a split of DEPLOYABLE capital, not of totalDeposits.
+    //
+    // The program enforces two rules that are mutually unsatisfiable if read naively:
+    //   1. targetBps across protocols must sum to EXACTLY 10000 (AllocationNotFull), and
+    //   2. idle must never drop below totalDeposits * MIN_IDLE_BPS (the 10% withdrawal buffer).
+    // So "80% of totalDeposits" can never actually be deployed — only 90% of the vault is
+    // ever deployable. Basing targets on totalDeposits therefore over-asks by exactly the
+    // buffer, and the greedy deploy loop silently resolves the shortfall by starving
+    // whichever protocol it happens to reach LAST.
+    //
+    // Observed live 2026-07-17 on the SOL vault (0.1 SOL, marinade 80 / jito 20):
+    // marinade (first) took its full 0.08, jito (last) got 0.01 instead of 0.02 — a 50%
+    // underweight, decided purely by registration order rather than by anything intended.
+    // The harness never caught it: it only ever deployed one protocol at a time.
+    //
+    // Scaling by deployableTotal makes the targets sum to exactly the deployable amount,
+    // so every protocol gets its true share and the result no longer depends on iteration
+    // order. This is also why the same scaling MUST apply to the recall phase — if the two
+    // phases disagreed about what "target" means, they'd fight each other every cycle.
+    const minIdle = Math.floor(totalDeposits * MIN_IDLE_BPS / 10_000);
+    const deployableTotal = totalDeposits - minIdle;
+
     const deltas = protocols.map((p, i) => ({
       index: i,
       label: Buffer.from(p.label).toString("utf8").replace(/\0/g, ""),
       deployed: p.deployedBalance.toNumber(),
-      target: Math.floor(totalDeposits * p.targetBps.toNumber() / 10_000),
+      target: Math.floor(deployableTotal * p.targetBps.toNumber() / 10_000),
       receiptAccount: p.vaultReceiptAccount,
     }));
 
@@ -888,7 +911,6 @@ export class SolanaClient {
     // naively to targets always asks for 100% and is rejected with InsufficientIdle
     // (6012) — i.e. funds could never deploy at all. Cap deployable at idle - min_idle.
     // Found 2026-07-16: 5 real USDC at kamino target 100% failed 3/3 attempts.
-    const minIdle = Math.floor(totalDeposits * MIN_IDLE_BPS / 10_000);
     const idleBalance = await this.getTokenBalance(vault.vaultTokenAccount);
     let available = idleBalance - minIdle;
     logger.info("Idle vault balance after recalls", { idleBalance, minIdle, deployable: available });
