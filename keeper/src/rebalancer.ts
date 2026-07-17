@@ -115,17 +115,31 @@ export function computeRebalanceDecision(
   const driftTrigger = maxDrift >= REBALANCE_THRESHOLD_BPS && netApyImprovement > 0;
   const shouldRebalance = (driftTrigger || apyTrigger) && vault.autoRebalance;
 
-  let reason = "No rebalance needed";
-  if (!vault.autoRebalance) {
+  // The reason MUST be derived from shouldRebalance, never computed by an independent
+  // cascade — otherwise the two drift apart and the log/alert contradicts the action.
+  //
+  // The old cascade tested `!apyTrigger && exitCostBps > 0` BEFORE driftTrigger, so any
+  // drift-triggered rebalance reported "holding position" *while rebalancing*, and that
+  // text was posted verbatim to Telegram as "⚡ Rebalanced — ... — holding position".
+  // Its arithmetic was wrong too: it printed gross gain vs exit cost (e.g. "6.8bps does
+  // not exceed 2bps" — 6.8 plainly does exceed 2) when the actual gate is NET gain vs
+  // MIN_APY_IMPROVEMENT_BPS. Branching on shouldRebalance makes contradiction impossible.
+  const grossGain = optimalWeightedApy - currentWeightedApy;
+  let reason: string;
+  if (shouldRebalance) {
+    if (driftTrigger && apyTrigger) {
+      reason = `Drift ${maxDrift}bps AND net APY gain ${netApyImprovement}bps`;
+    } else if (apyTrigger) {
+      reason = `Net APY improvement of ${netApyImprovement}bps after exit costs`;
+    } else {
+      reason = `Allocation drifted ${maxDrift}bps (threshold ${REBALANCE_THRESHOLD_BPS}bps), net APY gain ${netApyImprovement}bps after ${exitCostBps}bps exit cost`;
+    }
+  } else if (!vault.autoRebalance) {
     reason = "Auto-rebalance is disabled";
-  } else if (!apyTrigger && exitCostBps > 0) {
-    reason = `APY gain (${(optimalWeightedApy - currentWeightedApy)}bps) does not exceed exit cost (${exitCostBps}bps) — holding position`;
-  } else if (driftTrigger && apyTrigger) {
-    reason = `Drift ${maxDrift}bps AND net APY gain ${netApyImprovement}bps`;
-  } else if (driftTrigger) {
-    reason = `Allocation drifted ${maxDrift}bps (threshold: ${REBALANCE_THRESHOLD_BPS}bps)`;
-  } else if (apyTrigger) {
-    reason = `Net APY improvement of ${netApyImprovement}bps after exit costs`;
+  } else if (grossGain > 0) {
+    reason = `Net APY gain ${netApyImprovement}bps (gross ${grossGain}bps - ${exitCostBps}bps exit cost) below the ${MIN_APY_IMPROVEMENT_BPS}bps minimum, and drift ${maxDrift}bps below the ${REBALANCE_THRESHOLD_BPS}bps threshold — holding position`;
+  } else {
+    reason = "No rebalance needed";
   }
 
   return {
