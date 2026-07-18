@@ -16,7 +16,7 @@ export const metadata: Metadata = {
     type: "website",
     images: [
       {
-        url: "https://yieldpilot.fund/api/og?v=3",
+        url: "https://yieldpilot.fund/api/og?v=4",
         width: 1200,
         height: 630,
         alt: "YieldPilot — Solana Yield Optimizer",
@@ -27,7 +27,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "YieldPilot — Earn the best yield on Solana, automatically",
     description: "Deposit once. YieldPilot keeps your funds in the highest-yielding Solana protocol, monitored around the clock.",
-    images: ["https://yieldpilot.fund/api/og?v=3"],
+    images: ["https://yieldpilot.fund/api/og?v=4"],
   },
 };
 
