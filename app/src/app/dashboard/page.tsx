@@ -44,10 +44,18 @@ export default function Dashboard() {
     solDeposited  !== null ? `${solDeposited.toLocaleString("en-US",  { minimumFractionDigits: 4, maximumFractionDigits: 4 })} SOL`  : null,
   ].filter(Boolean).join(" · ") || "—";
 
-  const lendingApys = apys.filter(a => a.riskScore <= 1);
-  const avgApy = lendingApys.length ? lendingApys.reduce((s, a) => s + a.apyPercent, 0) / lendingApys.length : 0;
-  const bestApy = lendingApys.length ? Math.max(...lendingApys.map((a) => a.apyPercent)) : 0;
-  const bestProtocol = lendingApys.find((a) => a.apyPercent === bestApy);
+  // `stale: true` means we did NOT fetch this rate — it is either the client-side
+  // FALLBACK_APYS placeholder (still present in useApys.ts) or a failed fetch. Those
+  // entries carry plausible-looking hardcoded numbers, so every AGGREGATE below must
+  // exclude them or a fabricated rate silently becomes a headline figure. ProtocolTable
+  // already renders per-row stale as "—"; these aggregates did not, which meant Avg
+  // Protocol APY / Best Available rendered fallback numbers on first paint and stayed
+  // there for good if /api/apys was down. Same bug class as the fake Solend 5.10%.
+  const lendingApys = apys.filter(a => a.riskScore <= 1 && !a.stale);
+  const hasLiveApys = lendingApys.length > 0;
+  const avgApy = hasLiveApys ? lendingApys.reduce((s, a) => s + a.apyPercent, 0) / lendingApys.length : 0;
+  const bestApy = hasLiveApys ? Math.max(...lendingApys.map((a) => a.apyPercent)) : 0;
+  const bestProtocol = hasLiveApys ? lendingApys.find((a) => a.apyPercent === bestApy) : undefined;
 
   // Total Earned — a clearly-labelled PROJECTION, not a realized figure.
   //
@@ -62,16 +70,22 @@ export default function Dashboard() {
   // blended rate (its live allocation weighted by each protocol APY) x time deposited.
   // Scaled by DEPLOYED_FRACTION because ~10% sits idle as the withdrawal buffer and earns
   // nothing. This grows continuously and never claims to be realized.
+  //
+  // ABSTAIN if ANY active protocol lacks a live rate. Deliberately mirrors the keeper's
+  // rule from PR #105 (`computeRebalanceDecision` abstains entirely rather than routing
+  // around a stale protocol). Blending only the protocols we CAN price would silently
+  // reweight the vault — a stale 80% leg would let the live 20% leg set the whole
+  // projection — which is how a fabricated input turns into a confident wrong number.
+  // Abstaining shows "accruing" instead, which is honest about what we don't know.
   const DEPLOYED_FRACTION = 0.9; // mirrors MIN_IDLE_BPS = 1000 (10% idle buffer)
   const vaultBlendedApy = (vault: typeof vaults[number] | undefined): number => {
     if (!vault) return 0;
     const active = vault.protocols.filter(p => p.targetBps > 0);
     const totalBps = active.reduce((sum, p) => sum + p.targetBps, 0);
     if (totalBps === 0) return 0;
-    return active.reduce((sum, p) => {
-      const a = apys.find(x => x.protocolId === p.name);
-      return sum + (a ? a.apyPercent : 0) * (p.targetBps / totalBps);
-    }, 0);
+    const rates = active.map(p => apys.find(x => x.protocolId === p.name));
+    if (rates.some(a => !a || a.stale)) return 0;
+    return active.reduce((sum, p, i) => sum + rates[i]!.apyPercent * (p.targetBps / totalBps), 0);
   };
   const totalEarned = positions.reduce((s, p) => {
     const v = vaults.find(v => v.address === p.vault);
@@ -355,8 +369,8 @@ export default function Dashboard() {
 
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
             <StatCard label="Total Earned" value={`$${fmt(totalEarned)}`} sub={totalEarned > 0 ? "projected · est." : positions.length > 0 ? "accruing" : "—"} accent="var(--signal)" />
-            <StatCard label="Avg Protocol APY" value={`${fmt(avgApy)}%`} sub="across protocols" accent="var(--token)" />
-            <StatCard label="Best Available" value={`${fmt(bestApy)}%`} sub={bestProtocol ? `${bestProtocol.name} · ${bestProtocol.asset}` : ""} accent="var(--warn)" />
+            <StatCard label="Avg Protocol APY" value={hasLiveApys ? `${fmt(avgApy)}%` : "—"} sub={hasLiveApys ? "across protocols" : "rates unavailable"} accent="var(--token)" />
+            <StatCard label="Best Available" value={hasLiveApys ? `${fmt(bestApy)}%` : "—"} sub={bestProtocol ? `${bestProtocol.name} · ${bestProtocol.asset}` : "rates unavailable"} accent="var(--warn)" />
           </div>
 
           <Card>
@@ -512,3 +526,4 @@ export default function Dashboard() {
     </div>
   );
 }
+
