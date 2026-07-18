@@ -5,7 +5,7 @@ import { fmtTvl } from "@/components/ui";
 
 interface Props {
   totalDeposited: number; // real, in USD-equivalent
-  blendedApy: number;     // real
+  blendedApy: number | null; // real; null => no live rate available, render "—"
 }
 
 // Deterministic pseudo-random placement so dots don't jump around on re-render,
@@ -77,7 +77,7 @@ export function FleetRadar({ totalDeposited, blendedApy }: Props) {
             {[
               { value: fmtTvl(totalDeposited), label: "Total deposited" },
               { value: String(activePositions), label: "Active positions" },
-              { value: `${blendedApy.toFixed(1)}%`, label: "Blended net APY" },
+              { value: blendedApy === null ? "—" : `${blendedApy.toFixed(1)}%`, label: "Blended net APY" },
             ].map(({ value, label }) => (
               <div key={label} style={{ background: "var(--ink-800)", border: "1px solid var(--line)", borderRadius: 10, padding: "16px 18px" }}>
                 <div className="mono-num" style={{ fontSize: 22, fontWeight: 500, color: "var(--text-hi)" }}>{value}</div>
@@ -120,3 +120,4 @@ export function FleetRadar({ totalDeposited, blendedApy }: Props) {
     </div>
   );
 }
+
