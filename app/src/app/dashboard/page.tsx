@@ -174,8 +174,11 @@ export default function Dashboard() {
               <div style={{ fontSize: 12, color: "var(--text-low)", marginTop: 4 }}>Last Compounded</div>
             </div>
             <div style={{ textAlign: "left" }}>
-              <div className="mono-num" style={{ fontSize: 22, fontWeight: 500, color: "var(--warn)" }}>45 min</div>
-              <div style={{ fontSize: 12, color: "var(--text-low)", marginTop: 4 }}>Rebalance Interval</div>
+              {/* "45 min" was wrong: the 45-minute cron expression fires at :00 and :45
+                  (a 45-then-15 split), and Actions delays on top — observed gaps 60-98 min.
+                  See the How-it-works note below. */}
+              <div className="mono-num" style={{ fontSize: 22, fontWeight: 500, color: "var(--warn)" }}>~hourly</div>
+              <div style={{ fontSize: 12, color: "var(--text-low)", marginTop: 4 }}>Rebalance Cadence</div>
             </div>
           </div>
 
@@ -430,8 +433,17 @@ export default function Dashboard() {
               <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 16 }}>
                 {[
                   ["1. Deposit", "You deposit tokens into the vault. You receive shares representing your ownership."],
-                  ["2. Auto-optimize", "The keeper bot moves funds to highest-yield protocols every 45 minutes."],
-                  ["3. Auto-compound", "Rewards are harvested and reinvested every hour, growing your position."],
+                  // Cadence: the cron is "*/45", which in cron fires at :00 and :45 — a 45-then-15
+                  // split, NOT "every 45 minutes" — and GitHub Actions cron is best-effort on top.
+                  // Observed gaps between real runs: 60-98 minutes. "~hourly" matches the wording
+                  // already used on the APYs page; do not put a precise number back here.
+                  ["2. Auto-optimize", "The keeper bot checks rates roughly hourly and moves funds when a better rate clears the drift threshold."],
+                  // NOT "harvested and reinvested" — compound() is a no-op on-chain (it updates a
+                  // timestamp and emits an event; it moves no funds). Nothing needs harvesting:
+                  // yield accrues inside each receipt token's exchange rate (mSOL/jitoSOL/kUSDC
+                  // appreciate on their own) and is realized into the vault on recall. Claiming an
+                  // hourly harvest described work the program does not do.
+                  ["3. Auto-compound", "Your yield accrues inside each protocol's receipt token, so it compounds on its own — nothing to harvest or claim."],
                   ["4. Withdraw anytime", "Burn your shares to receive your tokens plus earned yield, minus a small performance fee."],
                 ].map(([title, desc]) => (
                   <div key={title}>
@@ -491,3 +503,4 @@ export default function Dashboard() {
     </div>
   );
 }
+
