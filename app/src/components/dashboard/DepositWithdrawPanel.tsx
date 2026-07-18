@@ -166,9 +166,24 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
     }
   };
 
+  // A SOL deposit wraps native SOL into a WSOL account, which the deposit tx transfers
+  // into the vault. That wrap can never take 100% of the wallet: it needs lamports left
+  // for the tx fee AND, if the user has no WSOL ATA yet, that account's rent-exempt
+  // minimum (~0.00204 SOL). So "MAX" on a SOL DEPOSIT must hold back a reserve, or the
+  // transfer leaves nothing for rent+fee and the whole tx reverts — the deposit-side twin
+  // of the withdraw MAX bug fixed in #109. USDC is unaffected: its balance is separate
+  // from the SOL that pays fees. 0.01 SOL comfortably covers WSOL rent + fee + headroom
+  // for a couple of priority-fee'd retries; anyone depositing SOL has far more than that.
+  const SOL_DEPOSIT_RESERVE = 0.01;
+  const maxDeposit = asset === "SOL" && walletBalance !== null
+    ? Math.max(0, walletBalance - SOL_DEPOSIT_RESERVE)
+    : walletBalance;
+
   const setMax = () => {
-    if (tab === "deposit" && walletBalance !== null) {
-      setAmount(String(walletBalance));
+    if (tab === "deposit" && maxDeposit !== null) {
+      // Floor to the asset's precision so we never round the reserve back up.
+      const dp = decimals === 9 ? 4 : 2;
+      setAmount((Math.floor(maxDeposit * 10 ** dp) / 10 ** dp).toFixed(dp));
     } else if (tab === "withdraw") {
       // FLOOR, never toFixed: toFixed ROUNDS, and rounding up by one ulp puts the
       // amount back above the ceiling and reverts the transaction. Flooring 0.0998596
