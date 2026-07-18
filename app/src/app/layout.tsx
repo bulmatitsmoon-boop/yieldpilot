@@ -7,10 +7,10 @@ import "@/styles/globals.css";
 export const metadata: Metadata = {
   title: "YieldPilot — Solana Yield Optimizer",
   description: "YieldPilot automatically moves your USDC and SOL across Solana lending protocols to earn the highest APY. Non-custodial, automated, on-chain.",
-  keywords: ["Solana", "DeFi", "yield", "APY", "Kamino", "Marinade", "USDC", "auto-compound"],
+  keywords: ["Solana", "DeFi", "yield", "APY", "Kamino", "Marinade", "USDC", "auto-rebalance"],
   openGraph: {
     title: "YieldPilot — Earn the best yield on Solana, automatically",
-    description: "Deposit once. YieldPilot routes your funds to the highest-yielding protocol every 45 minutes. Non-custodial.",
+    description: "Deposit once. YieldPilot keeps your funds in the highest-yielding Solana protocol, monitored around the clock. Non-custodial.",
     url: "https://yieldpilot.fund",
     siteName: "YieldPilot",
     type: "website",
@@ -26,7 +26,7 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     title: "YieldPilot — Earn the best yield on Solana, automatically",
-    description: "Deposit once. YieldPilot routes your funds to the highest-yielding protocol every 45 minutes.",
+    description: "Deposit once. YieldPilot keeps your funds in the highest-yielding Solana protocol, monitored around the clock.",
     images: ["https://yieldpilot.fund/api/og?v=3"],
   },
 };
@@ -44,3 +44,4 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     </html>
   );
 }
+
