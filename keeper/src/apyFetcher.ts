@@ -11,235 +11,205 @@ export interface ProtocolApy {
   riskScore: number;    // 1 (low) – 3 (high)
   fetchedAt: Date;
   /**
-   * True when this figure came from FALLBACK_APYS because the live fetch failed —
-   * i.e. it is a HARDCODED NUMBER, not a measurement. Anything that moves real money
-   * MUST refuse to act on a stale figure (see rebalancer.computeRebalanceDecision).
+   * True when we could NOT obtain a live rate for this protocol. There is deliberately
+   * no hardcoded fallback value any more — a stale entry carries apyPercent 0 and this
+   * flag, so it is impossible to mistake for a measurement.
+   *
+   * computeRebalanceDecision ABSTAINS from rebalancing when ANY registered protocol is
+   * stale (PR #105). That is what makes "no live rate" safe: the keeper holds its current
+   * allocation instead of routing on a number it cannot trust.
    */
   stale?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Individual protocol fetchers
-// All protocols here are lending or liquid staking — no LP impermanent loss.
-// Liquid staking exits (Jito, Marinade) go via DEX at <0.3%
-// slippage, which the rebalancer accounts for before routing out of them.
+// LIVE APY — FIRST-PARTY SOURCES ONLY. NO THIRD-PARTY AGGREGATOR.
 // ─────────────────────────────────────────────────────────────────────────────
+// These are the SAME sources as app/src/app/api/apys/route.ts, deliberately — the site
+// and the router must never advertise one rate and optimize on another.
+//
+// WHY DEFILLAMA IS GONE (2026-07-18). It is a third-party aggregator and it glitched:
+// it reported kamino-usdc at 10.75% for one sample (with pool TVL simultaneously
+// "dropping" $22M -> $4M) while Kamino's own API said 3.45% and the vault's realized
+// on-chain appreciation was 3.76%. That number reached the deposit button. It is the same
+// failure family as Solend's fabricated 5.10% and Jito's hardcoded 6.5% base: a number
+// that is wrong but looks live. Read from the protocol that actually pays the rate.
+//
+// AND NO HARDCODED FALLBACKS. The old FALLBACK_APYS table was hand-typed and could not
+// track reality; a stale guess was indistinguishable from a live rate, which is exactly
+// how the Solend incident routed 80% of the USDC vault into the worst venue. If a source
+// is down we emit stale:true and the rebalancer holds position.
 
-// Hard cap: any fetched APY above this is treated as corrupt/spoofed data and falls back.
-// Legitimate Solana lending yields do not exceed 50% APY. This guards against DNS hijack
-// or CDN compromise feeding inflated numbers that trick the keeper into a bad rebalance.
-const MAX_SANE_APY_PERCENT = 50;
+const KAMINO_MARKET = "7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF";
+const KAMINO_RESERVE: Record<string, string> = {
+  "kamino-usdc": "D6q6wuQSrifJKZYpR1M8R4YawnLDtDsMmWM1NbBmgJ59",
+  "kamino-sol":  "d4A2prbA2whesmvHaL88BH6Ewn5N4bTSU2Ze8P6Bc4Q",
+};
+const SOLEND_USDC_RESERVE = "BgxfHJDzm44T7XG68MYKx7YisTjZu73tVovyZSjJMpmw";
+const JITO_POOL = "Jito4APyf642JPZPx3hGc6WWJ8zPKtRbRs4P815Awbb";
 
-function sanitizeApy(rawPercent: number, source: string): number {
-  if (!isFinite(rawPercent) || rawPercent < 0) {
-    logger.warn(`${source}: invalid APY ${rawPercent}, using 0`);
-    return 0;
-  }
-  if (rawPercent > MAX_SANE_APY_PERCENT) {
-    logger.warn(`${source}: APY ${rawPercent}% exceeds sanity cap ${MAX_SANE_APY_PERCENT}%, rejecting`);
-    return 0;
-  }
-  return rawPercent;
-}
-
-// DeFiLlama pool IDs for the pools we care about (Kamino main market, highest TVL)
-const DEFILLAMA_POOL_IDS: Record<string, string> = {
-  "kamino-usdc": "d2141a59-c199-4be7-8d4b-c8223954836b", // Kamino main market USDC, $19M TVL
-  "kamino-sol":  "525b2dab-ea6a-4cbc-a07f-84ce561d1f83", // Kamino main market SOL, highest TVL
-  "marinade-sol":"b3f93865-5ec8-4662-90a0-11808e0aa2bd", // Marinade mSOL
-  "jito-sol":    "0e7d0722-9054-4907-8593-567b353c0900", // Jito jitoSOL
-  // Solend rebranded to "Save". Main Pool USDC (underlyingTokens == [USDC mint]),
-  // matching SOLEND_USDC_RESERVE used on-chain.
-  "solend-usdc": "dde4c16c-504d-470b-9404-006287ce0906",
+/** Static display metadata only — never a rate. */
+const META: Record<string, { name: string; asset: string; riskScore: number; tvlUsd: number }> = {
+  "kamino-usdc":  { name: "Kamino",   asset: "USDC", riskScore: 1, tvlUsd:  23_525_228 },
+  "kamino-sol":   { name: "Kamino",   asset: "SOL",  riskScore: 1, tvlUsd:  17_698_922 },
+  "marinade-sol": { name: "Marinade", asset: "SOL",  riskScore: 1, tvlUsd: 181_896_238 },
+  "solend-usdc":  { name: "Solend",   asset: "USDC", riskScore: 1, tvlUsd:   7_143_891 },
+  "jito-sol":     { name: "Jito",     asset: "SOL",  riskScore: 1, tvlUsd: 762_417_675 },
 };
 
-async function fetchKaminoApy(): Promise<ProtocolApy[]> {
+// A rate is only believable inside this band. Outside it we treat the source as broken
+// rather than routing on it — guards against a hijacked endpoint feeding inflated numbers.
+const MIN_SANE_APY_PERCENT = 0.05;
+const MAX_SANE_APY_PERCENT = 25;
+const sane = (v: number | undefined | null): v is number =>
+  typeof v === "number" && isFinite(v) && v >= MIN_SANE_APY_PERCENT && v <= MAX_SANE_APY_PERCENT;
+
+const TIMEOUT = 8000;
+
+/** Kamino — one call returns every reserve, so both our pools come from a single request. */
+async function fetchKamino(): Promise<Record<string, number>> {
+  const out: Record<string, number> = {};
   try {
-    // Fetch both pools in one call via DeFiLlama
-    const ids = [DEFILLAMA_POOL_IDS["kamino-usdc"], DEFILLAMA_POOL_IDS["kamino-sol"]];
-    const responses = await Promise.all(
-      ids.map(id => axios.get(`https://yields.llama.fi/chart/${id}`, { timeout: 8000 }))
+    const { data } = await axios.get(
+      `https://api.kamino.finance/kamino-market/${KAMINO_MARKET}/reserves/metrics`,
+      { timeout: TIMEOUT }
     );
-    const results: ProtocolApy[] = [];
-    const labels: Array<{ protocolId: "kamino-usdc" | "kamino-sol"; asset: string; tvl: number }> = [
-      { protocolId: "kamino-usdc", asset: "USDC", tvl: 19_320_000 },
-      { protocolId: "kamino-sol",  asset: "SOL",  tvl: 280_000_000 },
-    ];
-    for (let i = 0; i < responses.length; i++) {
-      const history: any[] = responses[i].data?.data ?? [];
-      if (!history.length) continue;
-      const latest = history[history.length - 1];
-      const apyPercent = sanitizeApy(parseFloat(latest.apy ?? "0"), labels[i].protocolId);
-      if (apyPercent > 0) results.push({
-        protocolId: labels[i].protocolId,
-        name: "Kamino", asset: labels[i].asset,
-        apyBps: Math.round(apyPercent * 100), apyPercent,
-        tvlUsd: latest.tvlUsd ?? labels[i].tvl,
-        riskScore: 1, fetchedAt: new Date(),
-      });
+    if (!Array.isArray(data)) return out;
+    for (const [protocolId, reserve] of Object.entries(KAMINO_RESERVE)) {
+      const r = data.find((x: any) => x?.reserve === reserve);
+      const apy = parseFloat(r?.supplyApy) * 100;
+      if (sane(apy)) out[protocolId] = apy;
+      else logger.warn(`kamino: ${protocolId} supplyApy out of band`, { raw: r?.supplyApy });
     }
-    logger.debug("Kamino APYs fetched via DeFiLlama", { count: results.length });
-    return results.length ? results : getFallbackApys(["kamino-usdc", "kamino-sol"]);
   } catch (err: any) {
-    logger.warn("Failed to fetch Kamino APY", { error: err.message });
-    return getFallbackApys(["kamino-usdc", "kamino-sol"]);
+    logger.warn("Kamino APY fetch failed", { error: err.message });
+  }
+  return out;
+}
+
+/** Marinade — first-party realized mSOL yield (rewards land per epoch, so an LST rate is
+ *  inherently a recent realized figure; 7d is Marinade's own window, not our smoothing). */
+async function fetchMarinade(): Promise<number | null> {
+  try {
+    const { data } = await axios.get("https://api.marinade.finance/msol/apy/7d", { timeout: TIMEOUT });
+    const apy = parseFloat(data?.value) * 100;
+    return sane(apy) ? apy : null;
+  } catch (err: any) {
+    logger.warn("Marinade APY fetch failed", { error: err.message });
+    return null;
   }
 }
 
-/**
- * Latest APY/TVL for one DeFiLlama pool.
+/** Solend/Save — first-party reserve stats; supplyInterest is already a percent. */
+async function fetchSolend(): Promise<number | null> {
+  try {
+    const { data } = await axios.get(
+      `https://api.solend.fi/v1/reserves/?ids=${SOLEND_USDC_RESERVE}`, { timeout: TIMEOUT }
+    );
+    const apy = parseFloat(data?.results?.[0]?.rates?.supplyInterest);
+    return sane(apy) ? apy : null;
+  } catch (err: any) {
+    logger.warn("Solend APY fetch failed", { error: err.message });
+    return null;
+  }
+}
+
+/** Jito — ON-CHAIN. jitoSOL's total yield (staking + MEV) is exactly the growth of the
+ *  pool's SOL-per-jitoSOL exchange rate, so we read the stake pool account rather than
+ *  trusting an API. kobe publishes only the MEV slice, which is why the previous fetcher
+ *  added a hardcoded 6.5% "base" and produced a number that was ~98% invented.
  *
- * SINGLE SOURCE OF TRUTH (2026-07-16): everything routable is priced from DeFiLlama,
- * the same source app/src/app/api/apys/route.ts uses. This is deliberate and matters
- * for two reasons:
- *   1. The site and the router MUST agree, or we advertise one rate and optimize on another.
- *   2. Comparing protocols priced by DIFFERENT methodologies makes the "best APY" decision
- *      meaningless. Previously Jito was scored as a HARDCODED 6.5% base + live MEV (~6.59%,
- *      i.e. ~98% a made-up constant, real value 5.27%) while Marinade used its own 30d
- *      realized API (6.01% vs 7.71% real). The keeper therefore believed jito > marinade
- *      and pinned the SOL vault at jito 80/20 when marinade was in fact the better rate.
- *      Same class of bug as Solend's fake 5.10% fallback: not broken logic, garbage inputs.
- */
-async function fetchLlamaApy(
-  protocolId: keyof typeof DEFILLAMA_POOL_IDS,
-  name: string,
-  asset: string,
-  fallbackTvl: number
-): Promise<ProtocolApy[]> {
+ *  Offsets: reserveStake@130 / managerFeeAccount@194 are verified correct (the live
+ *  jitoSOL deploy+recall CPIs use them), which pins the SPL StakePool layout and puts
+ *  totalLamports@258 and poolTokenSupply@266. The last-epoch pair @418/426 was located by
+ *  inspection and is NOT independently verified — the gates below are what make that safe:
+ *  wrong offsets produce a nonsense rate, we return null, and the keeper holds position. */
+async function fetchJito(): Promise<number | null> {
   try {
-    const { data } = await axios.get(
-      `https://yields.llama.fi/chart/${DEFILLAMA_POOL_IDS[protocolId]}`,
-      { timeout: 8000 }
-    );
-    const history: any[] = data?.data ?? [];
-    if (!history.length) return getFallbackApys([protocolId]);
-    const latest = history[history.length - 1];
-    const apyPercent = sanitizeApy(parseFloat(latest.apy ?? "0"), protocolId);
-    if (!(apyPercent > 0)) return getFallbackApys([protocolId]);
-    return [{
-      protocolId, name, asset,
-      apyBps: Math.round(apyPercent * 100), apyPercent,
-      tvlUsd: latest.tvlUsd ?? fallbackTvl,
-      riskScore: 1, fetchedAt: new Date(),
-    }];
+    const rpc = process.env.RPC_URL;
+    if (!rpc) { logger.warn("Jito APY: RPC_URL unset"); return null; }
+    const { data } = await axios.post(rpc, {
+      jsonrpc: "2.0", id: 1, method: "getAccountInfo",
+      params: [JITO_POOL, { encoding: "base64", commitment: "confirmed" }],
+    }, { timeout: TIMEOUT });
+
+    const b64 = data?.result?.value?.data?.[0];
+    if (!b64) return null;
+    const d = Buffer.from(b64, "base64");
+    if (d.length < 434) return null;
+
+    const rateNow  = Number(d.readBigUInt64LE(258)) / Number(d.readBigUInt64LE(266));
+    const rateLast = Number(d.readBigUInt64LE(426)) / Number(d.readBigUInt64LE(418));
+
+    // An LST rate is ~1.0–1.6 and only ever grows. Anything else means bad offsets.
+    if (!isFinite(rateNow) || rateNow < 1.0 || rateNow > 1.6) return null;
+    if (!isFinite(rateLast) || rateLast < 1.0 || rateLast >= rateNow) return null;
+
+    const EPOCHS_PER_YEAR = 182.5; // ~2 epochs/day
+    const apy = (Math.pow(rateNow / rateLast, EPOCHS_PER_YEAR) - 1) * 100;
+    return sane(apy) ? apy : null;
   } catch (err: any) {
-    logger.warn(`Failed to fetch ${name} APY`, { error: err.message });
-    return getFallbackApys([protocolId]);
-  }
-}
-
-async function fetchMarinadeApy(): Promise<ProtocolApy[]> {
-  return fetchLlamaApy("marinade-sol", "Marinade", "SOL", 181_896_238);
-}
-
-async function fetchJitoApy(): Promise<ProtocolApy[]> {
-  return fetchLlamaApy("jito-sol", "Jito", "SOL", 762_417_675);
-}
-
-// MarginFi is intentionally NOT integrated. Their protocol evolved into
-// "Project 0" (a multi-venue prime broker) in late 2025, and their official
-// marginfi-client-v2 SDK (even the latest published version) throws a decode
-// error reading their own current mainnet bank accounts — confirmed via a
-// local reproduction. This file previously had a hand-rolled byte-offset
-// decoder for the raw bank account, but that approach doesn't fail loudly on
-// a layout mismatch — it would silently read garbage at the wrong offsets and
-// produce a plausible-looking but wrong number, which is worse than an honest
-// failure for something feeding real rebalancing decisions. Removed until
-// verified against whatever Project 0 actually exposes for integration.
-
-// Solend had NO live fetcher until 2026-07-16 — it always fell through to the
-// hardcoded FALLBACK_APYS value of 5.10%. That fake number beat Kamino USDC live
-// (~3.3%), so the rebalancer "rationally" pushed 80% of the USDC vault into Solend,
-// whose real rate is ~2.25% (i.e. WORSE than Kamino). A fabricated input produced a
-// genuinely wrong allocation. Always source a live rate for anything routable.
-async function fetchSolendApy(): Promise<ProtocolApy[]> {
-  try {
-    const { data } = await axios.get(
-      `https://yields.llama.fi/chart/${DEFILLAMA_POOL_IDS["solend-usdc"]}`,
-      { timeout: 8000 }
-    );
-    const history: any[] = data?.data ?? [];
-    if (!history.length) return getFallbackApys(["solend-usdc"]);
-    const latest = history[history.length - 1];
-    const apyPercent = sanitizeApy(parseFloat(latest.apy ?? "0"), "solend-usdc");
-    if (!(apyPercent > 0)) return getFallbackApys(["solend-usdc"]);
-    return [{
-      protocolId: "solend-usdc", name: "Solend", asset: "USDC",
-      apyBps: Math.round(apyPercent * 100), apyPercent,
-      tvlUsd: latest.tvlUsd ?? 7_143_891, riskScore: 1, fetchedAt: new Date(),
-    }];
-  } catch (err: any) {
-    logger.warn("Failed to fetch Solend APY", { error: err.message });
-    return getFallbackApys(["solend-usdc"]);
+    logger.warn("Jito APY fetch failed", { error: err.message });
+    return null;
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Fallback APYs — used if API is down (based on recent historical averages)
-// Raydium and Orca are intentionally excluded — LP impermanent loss risk is
-// incompatible with principal-preserving yield vaults.
-// ─────────────────────────────────────────────────────────────────────────────
-
-const FALLBACK_APYS: Record<string, Omit<ProtocolApy, "fetchedAt">> = {
-  // Last-resort ONLY (live fetch failed). Refreshed 2026-07-16 against real DeFiLlama
-  // rates — the previous values were badly stale (jito 8.90 vs real 4.89, kamino-usdc
-  // 8.42 vs real 3.39, solend 5.10 vs real 2.25) and fed real allocation decisions.
-  // If these drift again they will silently skew routing: re-check periodically.
-  "kamino-sol":     { protocolId: "kamino-sol",     name: "Kamino",     asset: "SOL",  apyBps:  584, apyPercent: 5.84,  tvlUsd:  17_698_922, riskScore: 1 },
-  "jito-sol":       { protocolId: "jito-sol",       name: "Jito",       asset: "SOL",  apyBps:  489, apyPercent: 4.89,  tvlUsd: 762_417_675, riskScore: 1 },
-  "marinade-sol":   { protocolId: "marinade-sol",   name: "Marinade",   asset: "SOL",  apyBps:  473, apyPercent: 4.73,  tvlUsd: 181_896_238, riskScore: 1 },
-  "kamino-usdc":    { protocolId: "kamino-usdc",    name: "Kamino",     asset: "USDC", apyBps:  339, apyPercent: 3.39,  tvlUsd:  23_525_228, riskScore: 1 },
-  "solend-usdc":    { protocolId: "solend-usdc",    name: "Solend",     asset: "USDC", apyBps:  225, apyPercent: 2.25,  tvlUsd:   7_143_891, riskScore: 1 },
-};
-
-function getFallbackApys(ids: string[]): ProtocolApy[] {
-  // stale:true is load-bearing, not cosmetic. These are hand-typed constants; a constant
-  // cannot go up or down when the real rate does, so routing on one is how the Solend
-  // "5.10%" incident happened (a fabricated rate beat every real one and captured 80% of
-  // the USDC vault). Anything downstream that moves funds must treat stale as "unpriceable"
-  // and abstain — NOT as a number to compare against live rates.
-  return ids
-    .map(id => (FALLBACK_APYS[id] ? { ...FALLBACK_APYS[id], fetchedAt: new Date(), stale: true } : null))
-    .filter(Boolean) as ProtocolApy[];
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Main export: fetch all APYs in parallel
+// Main export
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function fetchAllApys(): Promise<ProtocolApy[]> {
-  logger.info("Fetching APYs from all protocols...");
+  logger.info("Fetching APYs from first-party sources...");
 
-  const results = await Promise.allSettled([
-    fetchKaminoApy(),
-    fetchMarinadeApy(),
-    fetchJitoApy(),
-    fetchSolendApy(),
+  const [kamino, marinade, solend, jito] = await Promise.all([
+    fetchKamino(), fetchMarinade(), fetchSolend(), fetchJito(),
   ]);
 
-  // Merge live results, fall back per-protocol if any fetcher failed
-  const liveMap = new Map<string, ProtocolApy>();
-  results.flatMap(r => r.status === "fulfilled" ? r.value : [])
-    .forEach(p => liveMap.set(p.protocolId, p));
+  const live: Record<string, number | null> = {
+    "kamino-usdc":  kamino["kamino-usdc"] ?? null,
+    "kamino-sol":   kamino["kamino-sol"] ?? null,
+    "marinade-sol": marinade,
+    "solend-usdc":  solend,
+    "jito-sol":     jito,
+  };
 
-  // Ensure every fallback protocol is represented (use live data where available)
-  const allProtocolIds = Object.keys(FALLBACK_APYS);
-  const apys: ProtocolApy[] = allProtocolIds.map(id => liveMap.get(id) || { ...FALLBACK_APYS[id], fetchedAt: new Date() });
+  const now = new Date();
+  const apys: ProtocolApy[] = Object.entries(META).map(([protocolId, m]) => {
+    const v = live[protocolId];
+    // No hardcoded fallback: a missing rate is reported as stale with 0, never invented.
+    return {
+      protocolId,
+      name: m.name,
+      asset: m.asset,
+      apyPercent: v ?? 0,
+      apyBps: v ? Math.round(v * 100) : 0,
+      tvlUsd: m.tvlUsd,
+      riskScore: m.riskScore,
+      fetchedAt: now,
+      ...(v == null ? { stale: true } : {}),
+    };
+  });
+
+  const staleIds = apys.filter(a => a.stale).map(a => a.protocolId);
+  if (staleIds.length) {
+    logger.warn("No live APY for some protocols — rebalancing will be held", { stale: staleIds });
+  }
 
   logger.info("APY fetch complete", {
-    protocols: apys.map(a => `${a.name}(${a.asset}): ${a.apyPercent.toFixed(2)}%`),
+    protocols: apys.map(a => `${a.name}(${a.asset}): ${a.stale ? "— (no live rate)" : a.apyPercent.toFixed(2) + "%"}`),
   });
 
   return apys;
 }
 
-// Find best APY for a given asset (optionally cap risk score)
+// Find best APY for a given asset (optionally cap risk score).
+// Stale entries are excluded outright so they can never win this comparison.
 export function bestApyForAsset(
   apys: ProtocolApy[],
   asset: string,
   maxRisk: number = 3
 ): ProtocolApy | undefined {
   return apys
-    .filter(a => a.asset === asset && a.riskScore <= maxRisk)
+    .filter(a => a.asset === asset && a.riskScore <= maxRisk && !a.stale)
     .sort((a, b) => b.apyBps - a.apyBps)[0];
 }
