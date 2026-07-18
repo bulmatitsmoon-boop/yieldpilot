@@ -45,7 +45,7 @@ export default function Dashboard() {
   ].filter(Boolean).join(" · ") || "—";
 
   // `stale: true` means we did NOT fetch this rate — it is either the client-side
-  // FALLBACK_APYS placeholder (still present in useApys.ts) or a failed fetch. Those
+  // placeholder or a failed fetch. Stale entries may still carry a number, so those
   // entries carry plausible-looking hardcoded numbers, so every AGGREGATE below must
   // exclude them or a fabricated rate silently becomes a headline figure. ProtocolTable
   // already renders per-row stale as "—"; these aggregates did not, which meant Avg
@@ -371,7 +371,16 @@ export default function Dashboard() {
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-            <StatCard label="Total Earned" value={`$${fmt(totalEarned)}`} sub={totalEarned > 0 ? "projected · est." : positions.length > 0 ? "accruing" : "—"} accent="var(--signal)" />
+            {/* Sub-cent earnings are REAL but round to $0.00 at 2dp, which reads as broken.
+                A $12 position at ~6.5% takes ~3 days to clear a cent, so this is the normal
+                early state, not an edge case. Show "<$0.01 · accruing" instead of a
+                confident "$0.00 · projected". */}
+            <StatCard
+              label="Total Earned"
+              value={totalEarned > 0 && totalEarned < 0.005 ? "<$0.01" : `$${fmt(totalEarned)}`}
+              sub={totalEarned >= 0.005 ? "projected · est." : positions.length > 0 ? "accruing" : "—"}
+              accent="var(--signal)"
+            />
             <StatCard label="Avg Protocol APY" value={hasLiveApys ? `${fmt(avgApy)}%` : "—"} sub={hasLiveApys ? "across protocols" : "rates unavailable"} accent="var(--token)" />
             <StatCard label="Best Available" value={hasLiveApys ? `${fmt(bestApy)}%` : "—"} sub={bestProtocol ? `${bestProtocol.name} · ${bestProtocol.asset}` : "rates unavailable"} accent="var(--warn)" />
           </div>
@@ -538,4 +547,6 @@ export default function Dashboard() {
     </div>
   );
 }
+
+
 

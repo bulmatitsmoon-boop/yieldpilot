@@ -68,10 +68,13 @@ export default function Home() {
   const totalDepositedUsd =
     (usdcVault ? usdcVault.totalDeposits / 1e6 : 0) +
     (solVault ? (solVault.totalDeposits / 1e9) * solPrice : 0);
-  const routableApys = apys.filter(a => ROUTABLE_PROTOCOL_IDS.has(a.protocolId));
+  // Excludes stale entries: averaging a rate we did not actually fetch would put a
+  // fabricated number in the hero. null (not 0) when nothing is live, so FleetRadar
+  // can render "—" — 0.0% would read as a real, terrible rate.
+  const routableApys = apys.filter(a => ROUTABLE_PROTOCOL_IDS.has(a.protocolId) && !a.stale);
   const blendedApy = routableApys.length
     ? routableApys.reduce((s, a) => s + a.apyPercent, 0) / routableApys.length
-    : 0;
+    : null;
 
   return (
     <div style={{ position: "relative" }}>
@@ -501,4 +504,5 @@ export default function Home() {
     </div>
   );
 }
+
 
