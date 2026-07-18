@@ -130,7 +130,7 @@ export default function Home() {
               color: "var(--text-mid)", fontSize: 16, lineHeight: 1.75,
               maxWidth: 460, marginBottom: 40,
             }}>
-              YieldPilot routes your USDC or SOL to the top Solana protocol every 45 minutes.
+              YieldPilot routes your USDC or SOL to the top Solana protocol, around the clock.
               No manual moves. No missed rates. Non-custodial the whole way.
             </p>
 
@@ -161,7 +161,7 @@ export default function Home() {
 
             <div style={{ display: "flex", gap: 32, marginTop: 48, flexWrap: "wrap" }}>
               {[
-                { value: "45 min", label: "rebalance cycle" },
+                { value: "~Hourly", label: "rebalance cycle" },
                 { value: "0–9%", label: "perf fee · tiered by $YPILOT held" },
                 { value: "Non-custodial", label: "on-chain smart contract" },
               ].map(({ value, label }) => (
@@ -430,7 +430,7 @@ export default function Home() {
               {[
                 ["Is this non-custodial?", "Yes. Funds are held in on-chain smart contracts governed by the program. No one — including us — can access your funds outside the defined instructions."],
                 ["What are the fees?", "Performance fees are tiered by how much $YPILOT you hold: Gold (1,000,000+) pays 0%, Silver (100,000+) pays 3%, Bronze (10,000+) pays 6%, and holding none still works at 9%. Fees apply on profits only, collected at withdrawal. Nothing on deposits or idle balances."],
-                ["How does routing work?", "A keeper bot fetches live APY data every 45 minutes. When a better rate exists beyond a 0.5% threshold, it rebalances — 80% to the top protocol, 20% to the runner-up."],
+                ["How does routing work?", "A keeper bot fetches live APY data roughly once an hour. When a better rate exists beyond a 0.5% threshold, it rebalances — 80% to the top protocol, 20% to the runner-up."],
                 ["Can I withdraw anytime?", "Yes. Withdrawals are always available, even if the vault is paused for deposits. You receive your principal plus all earned yield, minus the tiered performance fee on profits (9% base, down to 0% for Gold)."],
                 ["Has the code been audited?", `Not yet — the team is validating real product interest before commissioning a paid audit. The on-chain program ID is publicly verifiable on Solscan at any time${IS_MAINNET ? "" : ", and the protocol is currently running on devnet while integrations are being finalized"}.`],
               ].map(([q, a], i) => (
@@ -501,3 +501,4 @@ export default function Home() {
     </div>
   );
 }
+
