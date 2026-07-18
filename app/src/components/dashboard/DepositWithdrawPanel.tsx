@@ -179,18 +179,30 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
     ? Math.max(0, walletBalance - SOL_DEPOSIT_RESERVE)
     : walletBalance;
 
+  // Precision to floor MAX at. Math.floor only ever rounds DOWN, so it can't round above
+  // a ceiling; the open question is how much precision to keep.
+  //
+  // The old code floored at a flat 2 dp (USDC) / 4 dp (SOL). For USDC that threw away up
+  // to 0.01 — on a ~1 USDC position it stranded ~1% and showed MAX = 0.99 for a real
+  // position of 0.999999666. So finer is better... EXCEPT when a recall will pay an exit
+  // fee. Empirically (simulated on the live SOL vault): a MAX withdraw settles at 4 dp
+  // (0.1000) but REVERTS at 5–6 dp (0.10008 / 0.100083). The coarse floor is load-bearing
+  // safety margin there, not cosmetics — because withdraw() values shares against the
+  // vault's deployed_balance at FACE value while a recall returns face-minus-fee, so the
+  // settleable max sits a hair below the computed ceiling by an amount only ~4 dp of slack
+  // reliably clears.
+  //
+  // Discriminator: phantomRaw > 0 means fee-bearing capital is deployed, so a MAX withdraw
+  // will recall-and-lose-fee -> keep the proven 4 dp margin. phantomRaw == 0 (e.g. the
+  // USDC vault: Kamino/Solend both zero exit cost) means no recall fee -> native precision
+  // is safe and fixes the stranding. Deposits never touch a ceiling, so always native.
+  const withdrawFloorDp = phantomRaw > 0 ? 4 : decimals;
   const setMax = () => {
     if (tab === "deposit" && maxDeposit !== null) {
-      // Floor to the asset's precision so we never round the reserve back up.
-      const dp = decimals === 9 ? 4 : 2;
-      setAmount((Math.floor(maxDeposit * 10 ** dp) / 10 ** dp).toFixed(dp));
+      setAmount((Math.floor(maxDeposit * 10 ** decimals) / 10 ** decimals).toFixed(decimals));
     } else if (tab === "withdraw") {
-      // FLOOR, never toFixed: toFixed ROUNDS, and rounding up by one ulp puts the
-      // amount back above the ceiling and reverts the transaction. Flooring 0.0998596
-      // to 4dp gives 0.0998 — the exact value proven to settle on mainnet.
-      const dp = decimals === 9 ? 4 : 2;
-      const floored = Math.floor(maxWithdrawTokens * 10 ** dp) / 10 ** dp;
-      setAmount(floored.toFixed(dp));
+      const dp = withdrawFloorDp;
+      setAmount((Math.floor(maxWithdrawTokens * 10 ** dp) / 10 ** dp).toFixed(dp));
     }
   };
 
