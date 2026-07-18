@@ -240,23 +240,76 @@ export function useYieldPilot(vaultAddresses: string[]) {
       if (!publicKey) return;
       setTxStatus("signing");
       setTxError(null);
-      try {
-        setTxStatus("confirming");
-        const sig = await fn();
+
+      // Mark a signature confirmed and refresh — shared by the happy path and the
+      // timeout-recovery path below.
+      const markSuccess = (sig: string) => {
         setLastTxSig(sig);
         setTxStatus("success");
         setTxHistory(h => [{ sig, type: "transaction", ts: Date.now() }, ...h].slice(0, 20));
         setTimeout(() => { fetchVaults(); fetchPositions(); }, 2000);
         setTimeout(() => setTxStatus("idle"), 5000);
         return sig;
+      };
+
+      try {
+        setTxStatus("confirming");
+        const sig = await fn();
+        return markSuccess(sig);
       } catch (err: any) {
+        // A confirmation TIMEOUT is not a failure — the transaction very often landed and
+        // the client simply stopped waiting at web3.js's 30s default. Showing a red
+        // "not confirmed in 30 seconds" error on a tx that actually succeeded is what makes
+        // a user re-submit and double-deposit. So when we time out, DON'T declare failure —
+        // poll the chain for the signature's real fate first.
+        //
+        // web3.js exposes the signature on TransactionExpiredTimeoutError (and repeats it in
+        // the message: "Check signature <sig> using ..."), so we can look it up even though
+        // Anchor's .rpc() only returns the sig on success.
+        const timedOut =
+          err?.name === "TransactionExpiredTimeoutError" ||
+          /was not confirmed in|Check signature/i.test(err?.message || "");
+        // Prefer the structured signature; fall back to the first base58 run of >=40 chars
+        // in the message (robust to whatever punctuation surrounds it, e.g. backticks).
+        const sig: string | undefined =
+          err?.signature || err?.message?.match(/[1-9A-HJ-NP-Za-km-z]{40,}/)?.[0];
+
+        if (timedOut && sig) {
+          setTxStatus("confirming");
+          // Poll ~90s (past the blockhash window) — landed, failed, or genuinely unknown.
+          const start = Date.now();
+          while (Date.now() - start < 90_000) {
+            try {
+              const st = await connection.getSignatureStatus(sig, { searchTransactionHistory: true });
+              const v = st.value;
+              if (v?.err) {
+                setTxError("Transaction failed on-chain.");
+                setTxStatus("error");
+                setTimeout(() => setTxStatus("idle"), 6000);
+                return;
+              }
+              if (v && (v.confirmationStatus === "confirmed" || v.confirmationStatus === "finalized")) {
+                return markSuccess(sig);
+              }
+            } catch { /* transient RPC error — keep polling */ }
+            await new Promise(r => setTimeout(r, 2000));
+          }
+          // Never resolved: genuinely unknown. Tell the user to CHECK, not to blindly retry —
+          // a blind retry is exactly the double-submit we're trying to prevent.
+          setLastTxSig(sig);
+          setTxError("Still confirming — check Solscan before retrying to avoid a double submit.");
+          setTxStatus("error");
+          setTimeout(() => setTxStatus("idle"), 9000);
+          return;
+        }
+
         console.error("Transaction error", err);
         setTxError(err.message || "Transaction failed");
         setTxStatus("error");
         setTimeout(() => setTxStatus("idle"), 6000);
       }
     },
-    [publicKey, fetchVaults, fetchPositions]
+    [publicKey, fetchVaults, fetchPositions, connection]
   );
 
   const deposit = useCallback(
