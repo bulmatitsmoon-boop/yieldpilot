@@ -115,11 +115,38 @@ async function fetchSolend(): Promise<Live | null> {
  *  trusting any API. kobe only publishes the MEV slice, which is why the old fetcher
  *  hardcoded a 6.5% "base" and got the total wrong.
  *
- *  Offsets: reserveStake@130 and managerFeeAccount@194 are verified correct (the live
- *  jitoSOL deploy/recall CPIs use them), which pins the SPL StakePool layout and puts
- *  totalLamports@258 / poolTokenSupply@266. The last-epoch pair @418/426 was located by
- *  inspection and is NOT independently verified — the sanity gates below are what make
- *  that safe: wrong offsets yield a nonsense rate and we return null (-> last known). */
+ *  CURRENT fields sit at FIXED, VERIFIED offsets: reserveStake@130 / managerFeeAccount@194
+ *  are proven correct (the live jitoSOL deploy/recall CPIs use them), pinning the SPL
+ *  StakePool layout so total_lamports@258 and pool_token_supply@266.
+ *
+ *  The LAST-EPOCH pair must NOT be hardcoded — variable-length fields (`FutureEpoch<Fee>`,
+ *  `Option<Pubkey>`) sit in front of it, so its position moves (e.g. scheduling a fee
+ *  change shifts it 16 bytes). A hardcoded 418/426 was off by ONE byte on 2026-07-18,
+ *  making every value exactly 256x too large; the ratio survived the shift so the APY
+ *  still looked like a correct 5.43% and passed a ratio-only check. Verified 419/427 today.
+ *
+ *  So we LOCATE the pair and validate on MAGNITUDE, not just ratio: one epoch ago the
+ *  pool's supply and lamports must each be within a few percent of today's, and the implied
+ *  rate must be just below today's (an LST rate only grows). A byte-shifted read fails the
+ *  magnitude test immediately. Exactly one candidate is required; otherwise return null so
+ *  the UI shows last-known/"—" rather than a guess. */
+function findLastEpochRate(d: Buffer, supplyNow: number, lamportsNow: number, rateNow: number): number | null {
+  const matches: number[] = [];
+  for (let o = 282; o + 16 <= d.length; o++) {
+    const supply = Number(d.readBigUInt64LE(o));
+    const lamports = Number(d.readBigUInt64LE(o + 8));
+    if (!Number.isFinite(supply) || !Number.isFinite(lamports) || supply <= 0) continue;
+    const magSupply = supply / supplyNow;
+    const magLamports = lamports / lamportsNow;
+    if (magSupply < 0.90 || magSupply > 1.02) continue;
+    if (magLamports < 0.90 || magLamports > 1.02) continue;
+    const rate = lamports / supply;
+    if (!(rate > 1.0 && rate < rateNow)) continue;
+    matches.push(rate);
+  }
+  return matches.length === 1 ? matches[0] : null;
+}
+
 async function fetchJito(): Promise<Live | null> {
   try {
     const rpc = process.env.MAINNET_RPC_URL || "https://api.mainnet-beta.solana.com";
@@ -136,14 +163,15 @@ async function fetchJito(): Promise<Live | null> {
     const b64 = j?.result?.value?.data?.[0];
     if (!b64) return null;
     const d = Buffer.from(b64, "base64");
-    if (d.length < 434) return null;
+    if (d.length < 300) return null;
 
-    const rateNow  = Number(d.readBigUInt64LE(258)) / Number(d.readBigUInt64LE(266));
-    const rateLast = Number(d.readBigUInt64LE(426)) / Number(d.readBigUInt64LE(418));
-
-    // Gates: an LST rate is ~1.0-1.6 and only ever grows. Anything else = bad offsets.
+    const lamportsNow = Number(d.readBigUInt64LE(258));
+    const supplyNow   = Number(d.readBigUInt64LE(266));
+    const rateNow = lamportsNow / supplyNow;
     if (!Number.isFinite(rateNow) || rateNow < 1.0 || rateNow > 1.6) return null;
-    if (!Number.isFinite(rateLast) || rateLast < 1.0 || rateLast >= rateNow) return null;
+
+    const rateLast = findLastEpochRate(d, supplyNow, lamportsNow, rateNow);
+    if (rateLast === null) return null;
 
     const EPOCHS_PER_YEAR = 182.5; // ~2 epochs/day
     const apy = (Math.pow(rateNow / rateLast, EPOCHS_PER_YEAR) - 1) * 100;
