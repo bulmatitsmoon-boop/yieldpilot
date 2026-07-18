@@ -119,11 +119,45 @@ async function fetchSolend(): Promise<number | null> {
  *  trusting an API. kobe publishes only the MEV slice, which is why the previous fetcher
  *  added a hardcoded 6.5% "base" and produced a number that was ~98% invented.
  *
- *  Offsets: reserveStake@130 / managerFeeAccount@194 are verified correct (the live
- *  jitoSOL deploy+recall CPIs use them), which pins the SPL StakePool layout and puts
- *  totalLamports@258 and poolTokenSupply@266. The last-epoch pair @418/426 was located by
- *  inspection and is NOT independently verified — the gates below are what make that safe:
- *  wrong offsets produce a nonsense rate, we return null, and the keeper holds position. */
+ *  CURRENT fields are at FIXED, VERIFIED offsets: reserveStake@130 / managerFeeAccount@194
+ *  are proven correct (the live jitoSOL deploy+recall CPIs use them), which pins the SPL
+ *  StakePool layout and puts total_lamports@258 / pool_token_supply@266.
+ *
+ *  The LAST-EPOCH pair is NOT at a fixed offset and must not be hardcoded. Between it and
+ *  the header sit variable-length fields (`FutureEpoch<Fee>` enums, `Option<Pubkey>`), so
+ *  the position shifts — e.g. if Jito ever schedules a fee change, a hardcoded offset moves
+ *  by 16 bytes and silently reads the wrong thing.
+ *
+ *  This bit me for real (2026-07-18): a hardcoded 418/426 was off by ONE byte, so every
+ *  value came back exactly 256x too large. The ratio survived the shift, so the APY still
+ *  looked like a correct 5.43% and passed a ratio-only sanity check — a textbook
+ *  plausible-but-wrong read. Verified offsets are 419/427 TODAY.
+ *
+ *  So instead of trusting any offset we LOCATE the pair and validate it on magnitude, not
+ *  just ratio: one epoch ago the pool's supply and lamports must both be within a few
+ *  percent of today's, and the implied rate must be just below today's (an LST rate only
+ *  ever grows). A 256x-shifted read fails the magnitude test instantly. We require exactly
+ *  one candidate; zero or several means we cannot identify it, so we return null and the
+ *  keeper holds position rather than routing on a guess. */
+function findLastEpochRate(d: Buffer, supplyNow: number, lamportsNow: number, rateNow: number): number | null {
+  const matches: number[] = [];
+  for (let o = 282; o + 16 <= d.length; o++) {
+    const supply = Number(d.readBigUInt64LE(o));
+    const lamports = Number(d.readBigUInt64LE(o + 8));
+    if (!isFinite(supply) || !isFinite(lamports) || supply <= 0) continue;
+    const magSupply = supply / supplyNow;
+    const magLamports = lamports / lamportsNow;
+    // One epoch of growth is ~0.03%, so last epoch is just under today. Allow a wide-ish
+    // band for safety but tight enough that a byte-shifted (256x) read can never pass.
+    if (magSupply < 0.90 || magSupply > 1.02) continue;
+    if (magLamports < 0.90 || magLamports > 1.02) continue;
+    const rate = lamports / supply;
+    if (!(rate > 1.0 && rate < rateNow)) continue;
+    matches.push(rate);
+  }
+  return matches.length === 1 ? matches[0] : null;
+}
+
 async function fetchJito(): Promise<number | null> {
   try {
     const rpc = process.env.RPC_URL;
@@ -136,14 +170,19 @@ async function fetchJito(): Promise<number | null> {
     const b64 = data?.result?.value?.data?.[0];
     if (!b64) return null;
     const d = Buffer.from(b64, "base64");
-    if (d.length < 434) return null;
+    if (d.length < 300) return null;
 
-    const rateNow  = Number(d.readBigUInt64LE(258)) / Number(d.readBigUInt64LE(266));
-    const rateLast = Number(d.readBigUInt64LE(426)) / Number(d.readBigUInt64LE(418));
-
-    // An LST rate is ~1.0–1.6 and only ever grows. Anything else means bad offsets.
+    const lamportsNow = Number(d.readBigUInt64LE(258));
+    const supplyNow   = Number(d.readBigUInt64LE(266));
+    const rateNow = lamportsNow / supplyNow;
+    // An LST rate is ~1.0-1.6. Anything else means the verified header offsets moved.
     if (!isFinite(rateNow) || rateNow < 1.0 || rateNow > 1.6) return null;
-    if (!isFinite(rateLast) || rateLast < 1.0 || rateLast >= rateNow) return null;
+
+    const rateLast = findLastEpochRate(d, supplyNow, lamportsNow, rateNow);
+    if (rateLast === null) {
+      logger.warn("Jito APY: could not uniquely identify last-epoch fields — holding");
+      return null;
+    }
 
     const EPOCHS_PER_YEAR = 182.5; // ~2 epochs/day
     const apy = (Math.pow(rateNow / rateLast, EPOCHS_PER_YEAR) - 1) * 100;
