@@ -122,7 +122,22 @@ export default function Dashboard() {
   // base: a made-up number wearing the costume of live state. Render nothing instead.
   const currentAllocation = onChainAllocation;
 
-  const tierLabel = userGateBalance >= (primaryVault?.goldThreshold ?? 1_000_000) ? "Gold"
+  // Tiers only exist when the vault actually has a gate mint set. `system_program::ID` is
+  // the program's "unset" sentinel, and on an ungated vault `withdraw()` skips tier logic
+  // entirely and falls through to STANDARD_FEE_BPS = 900 (9%) for everyone.
+  //
+  // Without this check the ladder is decided by comparing `userGateBalance` against the
+  // thresholds directly. That is currently harmless ONLY because the balance is always 0
+  // (no gate mint exists on mainnet, so nobody can hold the token). The moment a real
+  // gate mint is set, this would award tiers off a balance the program does not honour —
+  // showing a user "Gold · 0% fee" while the chain charges them 9%. DepositWithdrawPanel
+  // already gates on this; the dashboard did not.
+  const SYSTEM_PROGRAM = "11111111111111111111111111111111";
+  const gatingActive = !!primaryVault?.gateMint
+    && primaryVault.gateMint !== SYSTEM_PROGRAM
+    && primaryVault.gateMint !== "";
+  const tierLabel = !gatingActive ? "Standard"
+    : userGateBalance >= (primaryVault?.goldThreshold ?? 1_000_000) ? "Gold"
     : userGateBalance >= (primaryVault?.silverThreshold ?? 100_000) ? "Silver"
     : userGateBalance >= (primaryVault?.bronzeThreshold ?? 10_000) ? "Bronze"
     : "Standard";
@@ -139,7 +154,9 @@ export default function Dashboard() {
     Silver: primaryVault?.silverThreshold ?? 100_000,
     Gold: primaryVault?.goldThreshold ?? 1_000_000,
   };
-  const nextTier = NEXT_TIER[tierLabel];
+  // Suppressed while gating is off: promising a fee saving nobody can unlock is the same
+  // class of claim as the cadence and harvest copy removed in #121/#122.
+  const nextTier = gatingActive ? NEXT_TIER[tierLabel] : undefined;
   const tokensToNextTier = nextTier ? Math.max(0, THRESHOLD_BY_TIER[nextTier] - userGateBalance) : 0;
   const nextTierFeeSavingsPct = nextTier ? FEE_BPS_BY_TIER[tierLabel] - FEE_BPS_BY_TIER[nextTier] : 0;
 
@@ -547,6 +564,7 @@ export default function Dashboard() {
     </div>
   );
 }
+
 
 
 
