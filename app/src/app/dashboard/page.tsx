@@ -45,7 +45,7 @@ export default function Dashboard() {
   ].filter(Boolean).join(" · ") || "—";
 
   // `stale: true` means we did NOT fetch this rate — it is either the client-side
-  // FALLBACK_APYS placeholder (still present in useApys.ts) or a failed fetch. Those
+  // placeholder or a failed fetch. Stale entries may still carry a number, so those
   // entries carry plausible-looking hardcoded numbers, so every AGGREGATE below must
   // exclude them or a fabricated rate silently becomes a headline figure. ProtocolTable
   // already renders per-row stale as "—"; these aggregates did not, which meant Avg
@@ -538,4 +538,5 @@ export default function Dashboard() {
     </div>
   );
 }
+
 
