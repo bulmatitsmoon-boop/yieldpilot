@@ -301,6 +301,47 @@ export class SolanaClient {
 
   // ── Transaction helpers ───────────────────────────────────────────────────
 
+  /**
+   * Resolve what actually happened to a transaction whose confirmation TIMED OUT.
+   *
+   * A timeout is not a failure. web3.js gives up at its 30s default, but under load the
+   * tx frequently lands afterwards — and Anchor's .rpc() only returns the signature on
+   * SUCCESS, so a naive retry resends a transaction that may already be on-chain. The
+   * retry fires well inside the ~60-90s blockhash window, so the resend is valid and
+   * would execute a SECOND time.
+   *
+   * Mirrors the frontend recovery path added in #118 (useYieldPilot.wrapTx) deliberately:
+   * same detection, same signature extraction, same ~90s poll. One idiom, two callers.
+   *
+   * Returns: "landed" | "failed" | "unknown".
+   */
+  private async resolveTimedOutTx(err: any, label: string): Promise<{ state: "landed" | "failed" | "unknown"; sig?: string }> {
+    const timedOut =
+      err?.name === "TransactionExpiredTimeoutError" ||
+      /was not confirmed in|Check signature/i.test(err?.message || "");
+    // Prefer the structured signature; fall back to the first base58 run of >=40 chars
+    // in the message ("Check signature <sig> using ..."), robust to surrounding punctuation.
+    const sig: string | undefined =
+      err?.signature || err?.message?.match(/[1-9A-HJ-NP-Za-km-z]{40,}/)?.[0];
+
+    if (!timedOut || !sig) return { state: "failed" };
+
+    logger.warn(`${label} confirmation timed out — polling chain before deciding`, { signature: sig });
+    const start = Date.now();
+    while (Date.now() - start < 90_000) {
+      try {
+        const st = await this.connection.getSignatureStatus(sig, { searchTransactionHistory: true });
+        const v = st.value;
+        if (v?.err) return { state: "failed", sig };
+        if (v && (v.confirmationStatus === "confirmed" || v.confirmationStatus === "finalized")) {
+          return { state: "landed", sig };
+        }
+      } catch { /* transient RPC error — keep polling */ }
+      await sleep(2000);
+    }
+    return { state: "unknown", sig };
+  }
+
   async sendWithRetry(
     txFn: () => Promise<string>,
     label: string,
@@ -316,6 +357,27 @@ export class SolanaClient {
         logger.warn(`${label} failed (attempt ${attempt}/${maxAttempts})`, {
           error: err.message,
         });
+
+        // Before resending, find out whether the previous attempt actually landed.
+        const outcome = await this.resolveTimedOutTx(err, label);
+        if (outcome.state === "landed") {
+          logger.info(`${label} landed despite the timeout — not resending`, {
+            signature: outcome.sig,
+            attempt,
+          });
+          return outcome.sig!;
+        }
+        if (outcome.state === "unknown") {
+          // Genuinely undetermined after ~90s. Resending here is the double-send we are
+          // trying to prevent, and the keeper runs again on the next cycle anyway — so
+          // ABORT rather than gamble. Deliberately asymmetric: a missed action costs one
+          // cycle of yield, a duplicate costs real funds and is irreversible.
+          logger.error(`${label} unresolved after 90s — ABORTING retries to avoid a double-send`, {
+            signature: outcome.sig,
+          });
+          return null;
+        }
+
         if (!isLast) {
           await sleep(1000 * 2 ** attempt);
         }
@@ -992,3 +1054,4 @@ export class SolanaClient {
 function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
+
