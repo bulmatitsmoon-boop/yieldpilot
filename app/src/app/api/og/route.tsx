@@ -22,7 +22,7 @@ export async function GET() {
         <div style={{
           position: "absolute", top: -100, left: -100,
           width: 500, height: 500, borderRadius: "50%",
-          background: "radial-gradient(circle, rgba(124,58,237,0.15) 0%, transparent 70%)",
+          background: "radial-gradient(circle, rgba(63,224,160,0.15) 0%, transparent 70%)",
           display: "flex",
         }} />
         <div style={{
@@ -36,12 +36,13 @@ export async function GET() {
         <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 32 }}>
           <div style={{
             width: 64, height: 64, borderRadius: 16,
-            background: "#7c3aed",
+            background: "#18202B",
+            border: "1px solid #26313F",
             display: "flex", alignItems: "center", justifyContent: "center",
           }}>
             <svg width="32" height="32" viewBox="0 0 14 14" fill="none">
-              <path d="M7 1L12 4V10L7 13L2 10V4L7 1Z" stroke="#fff" strokeWidth="1.5" strokeLinejoin="round"/>
-              <circle cx="7" cy="7" r="2" fill="#fff"/>
+              <path d="M7 1L12 4V10L7 13L2 10V4L7 1Z" stroke="#3FE0A0" strokeWidth="1.5" strokeLinejoin="round"/>
+              <circle cx="7" cy="7" r="2" fill="#3FE0A0"/>
             </svg>
           </div>
           <span style={{ fontSize: 52, fontWeight: 900, color: "#e2e8f0", letterSpacing: "-2px" }}>
@@ -61,9 +62,9 @@ export async function GET() {
         {/* Stats row */}
         <div style={{ display: "flex", gap: 24 }}>
           {[
-            { label: "Auto-Rebalance", value: "Every 15 min" },
-            { label: "Performance Fee", value: "5% of profit" },
-            { label: "Protocols", value: "Kamino · Marinade · Drift" },
+            { label: "Auto-Rebalance", value: "Around the clock" },
+            { label: "Performance Fee", value: "0-9% of profit" },
+            { label: "Protocols", value: "Kamino · Marinade · Jito" },
           ].map(({ label, value }) => (
             <div key={label} style={{
               background: "rgba(255,255,255,0.04)",
@@ -83,7 +84,7 @@ export async function GET() {
           color: "#374151", fontSize: 18, letterSpacing: "0.5px",
           display: "flex",
         }}>
-          yieldpilot-chi.vercel.app
+          yieldpilot.fund
         </div>
       </div>
     ),
@@ -93,3 +94,4 @@ export async function GET() {
     }
   );
 }
+
