@@ -260,10 +260,19 @@ pub mod orca_lp {
         /// CHECK: Whirlpool program validates + initializes
         #[account(mut)]
         pub position: UncheckedAccount<'info>,
+        /// Position NFT mint. Does NOT exist yet - Orca's open_position inits it,
+        /// so this must be an unvalidated Signer, never Account<Mint>. Typing it as
+        /// Account<Mint> made Anchor deserialize it BEFORE the instruction body ran,
+        /// failing with AccountNotInitialized (3012) and making this instruction
+        /// permanently unreachable. Found by the local harness 2026-07-20 on the
+        /// first ever execution of this code path.
         #[account(mut)]
-        pub position_mint: Box<Account<'info, Mint>>,
+        pub position_mint: Signer<'info>,
+        /// CHECK: created by the open_position CPI as an ATA for position_mint owned
+        /// by vault_authority. Same reason as above - cannot be Account<TokenAccount>
+        /// because it does not exist when Anchor validates accounts.
         #[account(mut)]
-        pub position_token_account: Box<Account<'info, TokenAccount>>,
+        pub position_token_account: UncheckedAccount<'info>,
         /// CHECK: Whirlpool program validates
         pub whirlpool: UncheckedAccount<'info>,
 
@@ -461,10 +470,19 @@ pub mod orca_lp {
         /// CHECK: Whirlpool program validates + initializes
         #[account(mut)]
         pub position: UncheckedAccount<'info>,
+        /// Position NFT mint. Does NOT exist yet - Orca's open_position inits it,
+        /// so this must be an unvalidated Signer, never Account<Mint>. Typing it as
+        /// Account<Mint> made Anchor deserialize it BEFORE the instruction body ran,
+        /// failing with AccountNotInitialized (3012) and making this instruction
+        /// permanently unreachable. Found by the local harness 2026-07-20 on the
+        /// first ever execution of this code path.
         #[account(mut)]
-        pub position_mint: Box<Account<'info, Mint>>,
+        pub position_mint: Signer<'info>,
+        /// CHECK: created by the open_position CPI as an ATA for position_mint owned
+        /// by vault_authority. Same reason as above - cannot be Account<TokenAccount>
+        /// because it does not exist when Anchor validates accounts.
         #[account(mut)]
-        pub position_token_account: Box<Account<'info, TokenAccount>>,
+        pub position_token_account: UncheckedAccount<'info>,
         /// CHECK: Whirlpool program validates; must match lp_vault.pool
         #[account(address = lp_vault.pool)]
         pub whirlpool: UncheckedAccount<'info>,
@@ -541,8 +559,8 @@ pub mod orca_lp {
                 OrcaOpenPosition {
                     vault_authority:          ctx.accounts.vault_authority.to_account_info(),
                     position:                 ctx.accounts.position.to_account_info(),
-                    position_mint:            (*ctx.accounts.position_mint).clone(),
-                    position_token_account:   (*ctx.accounts.position_token_account).clone(),
+                    position_mint:            ctx.accounts.position_mint.to_account_info(),
+                    position_token_account:   ctx.accounts.position_token_account.to_account_info(),
                     whirlpool:                ctx.accounts.whirlpool.to_account_info(),
                     token_program:            ctx.accounts.token_program.clone(),
                     system_program:           ctx.accounts.system_program.clone(),
@@ -852,8 +870,8 @@ pub mod orca_lp {
                 OrcaOpenPosition {
                     vault_authority:          ctx.accounts.vault_authority.to_account_info(),
                     position:                 ctx.accounts.position.to_account_info(),
-                    position_mint:            (*ctx.accounts.position_mint).clone(),
-                    position_token_account:   (*ctx.accounts.position_token_account).clone(),
+                    position_mint:            ctx.accounts.position_mint.to_account_info(),
+                    position_token_account:   ctx.accounts.position_token_account.to_account_info(),
                     whirlpool:                ctx.accounts.whirlpool.to_account_info(),
                     token_program:            ctx.accounts.token_program.clone(),
                     system_program:           ctx.accounts.system_program.clone(),
