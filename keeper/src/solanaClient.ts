@@ -8,6 +8,7 @@ import {
 } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { Transaction, SystemProgram } from "@solana/web3.js";
+import { notifyTelegram } from "./telegramNotify";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -60,6 +61,21 @@ const JITO_POOL = new PublicKey("Jito4APyf642JPZPx3hGc6WWJ8zPKtRbRs4P815Awbb"); 
 // ─────────────────────────────────────────────────────────────────────────────
 // Solend mainnet constants
 // ─────────────────────────────────────────────────────────────────────────────
+/** Format a raw token amount for user-facing alerts. SOL vaults are 9dp, USDC 6dp. */
+function fmtAmount(raw: number, vaultName: string): string {
+  const isSol = vaultName.toUpperCase().includes("SOL");
+  const dec = isSol ? 9 : 6;
+  return (raw / 10 ** dec).toFixed(isSol ? 4 : 2) + " " + (isSol ? "SOL" : "USDC");
+}
+
+// Must match MIN_IDLE_BPS in programs/yieldpilot/src/lib.rs — the vault always keeps
+// this share of total_deposits idle so users can withdraw without waiting for a recall.
+const MIN_IDLE_BPS = 1000; // 10%
+// Dead-band thresholds for executeRebalance (see the long note there). Recalls pay a real
+// protocol exit fee so they get a wider band; deploys only cost a signature.
+const MIN_RECALL_BPS = 25; // 0.25% of deployable
+const MIN_DEPLOY_BPS = 5;  // 0.05% of deployable
+
 const SOLEND_PROGRAM = new PublicKey("So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo");
 const SOLEND_MAIN_MARKET = new PublicKey("4UpD2fh7xH3VP9QQaXtsS1YY3bxzWhtfpks7FatyKvdY");
 const SOLEND_USDC_RESERVE = new PublicKey("BgxfHJDzm44T7XG68MYKx7YisTjZu73tVovyZSjJMpmw");
@@ -318,6 +334,47 @@ export class SolanaClient {
 
   // ── Transaction helpers ───────────────────────────────────────────────────
 
+  /**
+   * Resolve what actually happened to a transaction whose confirmation TIMED OUT.
+   *
+   * A timeout is not a failure. web3.js gives up at its 30s default, but under load the
+   * tx frequently lands afterwards — and Anchor's .rpc() only returns the signature on
+   * SUCCESS, so a naive retry resends a transaction that may already be on-chain. The
+   * retry fires well inside the ~60-90s blockhash window, so the resend is valid and
+   * would execute a SECOND time.
+   *
+   * Mirrors the frontend recovery path added in #118 (useYieldPilot.wrapTx) deliberately:
+   * same detection, same signature extraction, same ~90s poll. One idiom, two callers.
+   *
+   * Returns: "landed" | "failed" | "unknown".
+   */
+  private async resolveTimedOutTx(err: any, label: string): Promise<{ state: "landed" | "failed" | "unknown"; sig?: string }> {
+    const timedOut =
+      err?.name === "TransactionExpiredTimeoutError" ||
+      /was not confirmed in|Check signature/i.test(err?.message || "");
+    // Prefer the structured signature; fall back to the first base58 run of >=40 chars
+    // in the message ("Check signature <sig> using ..."), robust to surrounding punctuation.
+    const sig: string | undefined =
+      err?.signature || err?.message?.match(/[1-9A-HJ-NP-Za-km-z]{40,}/)?.[0];
+
+    if (!timedOut || !sig) return { state: "failed" };
+
+    logger.warn(`${label} confirmation timed out — polling chain before deciding`, { signature: sig });
+    const start = Date.now();
+    while (Date.now() - start < 90_000) {
+      try {
+        const st = await this.connection.getSignatureStatus(sig, { searchTransactionHistory: true });
+        const v = st.value;
+        if (v?.err) return { state: "failed", sig };
+        if (v && (v.confirmationStatus === "confirmed" || v.confirmationStatus === "finalized")) {
+          return { state: "landed", sig };
+        }
+      } catch { /* transient RPC error — keep polling */ }
+      await sleep(2000);
+    }
+    return { state: "unknown", sig };
+  }
+
   async sendWithRetry(
     txFn: () => Promise<string>,
     label: string,
@@ -333,6 +390,27 @@ export class SolanaClient {
         logger.warn(`${label} failed (attempt ${attempt}/${maxAttempts})`, {
           error: err.message,
         });
+
+        // Before resending, find out whether the previous attempt actually landed.
+        const outcome = await this.resolveTimedOutTx(err, label);
+        if (outcome.state === "landed") {
+          logger.info(`${label} landed despite the timeout — not resending`, {
+            signature: outcome.sig,
+            attempt,
+          });
+          return outcome.sig!;
+        }
+        if (outcome.state === "unknown") {
+          // Genuinely undetermined after ~90s. Resending here is the double-send we are
+          // trying to prevent, and the keeper runs again on the next cycle anyway — so
+          // ABORT rather than gamble. Deliberately asymmetric: a missed action costs one
+          // cycle of yield, a duplicate costs real funds and is irreversible.
+          logger.error(`${label} unresolved after 90s — ABORTING retries to avoid a double-send`, {
+            signature: outcome.sig,
+          });
+          return null;
+        }
+
         if (!isLast) {
           await sleep(1000 * 2 ** attempt);
         }
@@ -849,18 +927,65 @@ export class SolanaClient {
     }
 
     const protocols = vault.protocols.slice(0, vault.protocolCount);
+
+    // Target allocations are a split of DEPLOYABLE capital, not of totalDeposits.
+    //
+    // The program enforces two rules that are mutually unsatisfiable if read naively:
+    //   1. targetBps across protocols must sum to EXACTLY 10000 (AllocationNotFull), and
+    //   2. idle must never drop below totalDeposits * MIN_IDLE_BPS (the 10% withdrawal buffer).
+    // So "80% of totalDeposits" can never actually be deployed — only 90% of the vault is
+    // ever deployable. Basing targets on totalDeposits therefore over-asks by exactly the
+    // buffer, and the greedy deploy loop silently resolves the shortfall by starving
+    // whichever protocol it happens to reach LAST.
+    //
+    // Observed live 2026-07-17 on the SOL vault (0.1 SOL, marinade 80 / jito 20):
+    // marinade (first) took its full 0.08, jito (last) got 0.01 instead of 0.02 — a 50%
+    // underweight, decided purely by registration order rather than by anything intended.
+    // The harness never caught it: it only ever deployed one protocol at a time.
+    //
+    // Scaling by deployableTotal makes the targets sum to exactly the deployable amount,
+    // so every protocol gets its true share and the result no longer depends on iteration
+    // order. This is also why the same scaling MUST apply to the recall phase — if the two
+    // phases disagreed about what "target" means, they'd fight each other every cycle.
+    const minIdle = Math.floor(totalDeposits * MIN_IDLE_BPS / 10_000);
+    const deployableTotal = totalDeposits - minIdle;
+
+    // Dead-band — never transact on dust.
+    //
+    // Protocol fees never land on round numbers, so a protocol's deployedBalance can
+    // essentially NEVER exactly equal its target. Filtering on a bare `excess > 0` therefore
+    // means the vault NEVER settles: a few lamports of drift trigger a real, fee-paying
+    // protocol exit every single cycle, forever.
+    //
+    // Observed live 2026-07-17 immediately after the proportional-target fix: marinade sat
+    // 25 lamports (0.000000025 SOL) over target, and the keeper dutifully recalled and
+    // redeployed it every 45 minutes, posting "Deployed 0.0000 SOL" to the alert channel
+    // each time. The wasted fees were trivial; the wasted CREDIBILITY was not — an alert
+    // channel that cries wolf over dust trains people to ignore the alert that matters.
+    //
+    // Asymmetric on purpose: a recall is a REAL protocol exit paying a REAL fee (marinade
+    // ~0.17-0.3%, jito ~0.1%), whereas a deploy only costs a signature. So recalls need a
+    // wider band than deploys. Both are bps-of-deployable, so they scale with vault size
+    // and stay unit-agnostic across SOL (9 decimals) and USDC (6).
+    //
+    // Sizing: must exceed the fee residue left by a legitimate rebalance (recalling 0.008
+    // SOL at marinade's 0.17% leaves ~13.6k lamports ~= 0.019% of target) yet stay far below
+    // REBALANCE_THRESHOLD_BPS (500 = 5%), so real rebalances are never suppressed.
+    const minRecall = Math.floor(deployableTotal * MIN_RECALL_BPS / 10_000);
+    const minDeploy = Math.floor(deployableTotal * MIN_DEPLOY_BPS / 10_000);
+
     const deltas = protocols.map((p, i) => ({
       index: i,
       label: Buffer.from(p.label).toString("utf8").replace(/\0/g, ""),
       deployed: p.deployedBalance.toNumber(),
-      target: Math.floor(totalDeposits * p.targetBps.toNumber() / 10_000),
+      target: Math.floor(deployableTotal * p.targetBps.toNumber() / 10_000),
       receiptAccount: p.vaultReceiptAccount,
     }));
 
     // Phase 1: Recalls
     const toRecall = deltas
       .map(d => ({ ...d, excess: d.deployed - d.target }))
-      .filter(d => d.excess > 0)
+      .filter(d => d.excess > minRecall)
       .sort((a, b) => b.excess - a.excess);
 
     for (const d of toRecall) {
@@ -869,19 +994,28 @@ export class SolanaClient {
         const receiptBalance = await this.getTokenBalance(d.receiptAccount);
         if (receiptBalance === 0) { logger.warn("No receipt balance, skipping", { label: d.label }); continue; }
         const receiptToWithdraw = new anchor.BN(Math.max(1, Math.floor(receiptBalance * d.excess / d.deployed)));
+        let sig: string | null = null;
         if (d.label === "kamino-usdc") {
-          await this.recallFromKamino(vaultAddress, d.index, receiptToWithdraw);
+          sig = await this.recallFromKamino(vaultAddress, d.index, receiptToWithdraw);
         } else if (d.label === "kamino-sol") {
-          await this.recallFromKaminoSol(vaultAddress, d.index, receiptToWithdraw);
+          sig = await this.recallFromKaminoSol(vaultAddress, d.index, receiptToWithdraw);
         } else if (d.label === "marinade-sol") {
-          await this.recallFromMarinade(vaultAddress, d.index, receiptToWithdraw);
+          sig = await this.recallFromMarinade(vaultAddress, d.index, receiptToWithdraw);
         } else if (d.label === "jito-sol") {
           const cfg = await this.getJitoPoolConfig();
-          await this.recallFromSolLst(vaultAddress, d.index, receiptToWithdraw, cfg);
+          sig = await this.recallFromSolLst(vaultAddress, d.index, receiptToWithdraw, cfg);
         } else if (d.label === "solend-usdc") {
-          await this.recallFromSolend(vaultAddress, d.index, receiptToWithdraw);
+          sig = await this.recallFromSolend(vaultAddress, d.index, receiptToWithdraw);
         } else {
           logger.warn("No recall handler for protocol", { label: d.label });
+        }
+        // Recalls move real funds back out of a protocol — alert like deploys do.
+        if (sig) {
+          await notifyTelegram(
+            `↩️ <b>Recalled</b> — ${d.label} → vault
+` +
+            `<a href="https://solscan.io/tx/${sig}">View transaction</a>`
+          );
         }
       } catch (err: any) {
         logger.error("Recall failed", { label: d.label, error: err.message });
@@ -891,11 +1025,22 @@ export class SolanaClient {
     // Phase 2: Deploys
     const toDeposit = deltas
       .map(d => ({ ...d, deficit: d.target - d.deployed }))
-      .filter(d => d.deficit > 0)
+      .filter(d => d.deficit > minDeploy)
       .sort((a, b) => b.deficit - a.deficit);
 
-    let available = await this.getTokenBalance(vault.vaultTokenAccount);
-    logger.info("Idle vault balance after recalls", { available });
+    // The on-chain program reserves a MIN_IDLE_BPS (10%) withdrawal buffer:
+    //   require!(idle - amount >= total_deposits * MIN_IDLE_BPS / BPS_DENOM)
+    // Target allocations must sum to EXACTLY 100% (AllocationNotFull), so deploying
+    // naively to targets always asks for 100% and is rejected with InsufficientIdle
+    // (6012) — i.e. funds could never deploy at all. Cap deployable at idle - min_idle.
+    // Found 2026-07-16: 5 real USDC at kamino target 100% failed 3/3 attempts.
+    const idleBalance = await this.getTokenBalance(vault.vaultTokenAccount);
+    let available = idleBalance - minIdle;
+    logger.info("Idle vault balance after recalls", { idleBalance, minIdle, deployable: available });
+    if (available <= 0) {
+      logger.info("executeRebalance: all idle funds reserved for the withdrawal buffer, nothing to deploy");
+      return;
+    }
 
     for (const d of toDeposit) {
       if (available <= 0) break;
@@ -904,20 +1049,31 @@ export class SolanaClient {
 
       logger.info("Deploy to protocol", { label: d.label, amount: amount.toString(), deficit: d.deficit });
       try {
+        let sig: string | null = null;
         if (d.label === "kamino-usdc") {
-          await this.deployToKamino(vaultAddress, d.index, amount);
+          sig = await this.deployToKamino(vaultAddress, d.index, amount);
         } else if (d.label === "kamino-sol") {
-          await this.deployToKaminoSol(vaultAddress, d.index, amount);
+          sig = await this.deployToKaminoSol(vaultAddress, d.index, amount);
         } else if (d.label === "marinade-sol") {
-          await this.deployToMarinade(vaultAddress, d.index, amount);
+          sig = await this.deployToMarinade(vaultAddress, d.index, amount);
         } else if (d.label === "jito-sol") {
           const cfg = await this.getJitoPoolConfig();
-          await this.deployToSolLst(vaultAddress, d.index, amount, cfg);
+          sig = await this.deployToSolLst(vaultAddress, d.index, amount, cfg);
         } else if (d.label === "solend-usdc") {
-          await this.deployToSolend(vaultAddress, d.index, amount);
+          sig = await this.deployToSolend(vaultAddress, d.index, amount);
         } else {
           logger.warn("No deploy handler for protocol", { label: d.label });
           continue;
+        }
+        // Fund movements are the most user-visible thing the keeper does, but they were
+        // the ONLY action with no alert — notifyTelegram was wired to rebalance+compound
+        // only. Found 2026-07-16: 4.5 USDC deployed to Kamino and the channel said nothing.
+        if (sig) {
+          await notifyTelegram(
+            `⚡ <b>Deployed</b> — ${fmtAmount(amount.toNumber(), vault.name)} → ${d.label}
+` +
+            `<a href="https://solscan.io/tx/${sig}">View transaction</a>`
+          );
         }
         available -= amount.toNumber();
       } catch (err: any) {
@@ -1092,3 +1248,4 @@ export class SolanaClient {
 function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
+
