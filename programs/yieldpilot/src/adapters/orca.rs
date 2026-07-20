@@ -40,11 +40,13 @@ pub struct OrcaOpenPosition<'info> {
     /// New position NFT mint (0 decimals, 1 unit ever minted). Must be a
     /// fresh signer keypair at the client level (Anchor `init` on a Mint).
     #[account(mut)]
-    pub position_mint: Account<'info, Mint>,
+    /// CHECK: does not exist yet - Orca inits this mint inside open_position.
+    pub position_mint: AccountInfo<'info>,
 
     /// Vault-owned ATA that will hold the position NFT (proof of ownership).
     #[account(mut)]
-    pub position_token_account: Account<'info, TokenAccount>,
+    /// CHECK: does not exist yet - created by open_position as an ATA.
+    pub position_token_account: AccountInfo<'info>,
 
     /// The Whirlpool (pool state) this position belongs to.
     /// CHECK: Whirlpool program validates
@@ -86,7 +88,8 @@ pub struct OrcaModifyLiquidity<'info> {
 
     /// Vault-owned ATA holding the position NFT (must hold exactly 1 unit).
     #[account(constraint = position_token_account.amount == 1)]
-    pub position_token_account: Account<'info, TokenAccount>,
+    /// CHECK: does not exist yet - created by open_position as an ATA.
+    pub position_token_account: AccountInfo<'info>,
 
     /// Vault's token A (e.g. USDC) staging account.
     #[account(mut)]
@@ -137,7 +140,8 @@ pub struct OrcaClosePosition<'info> {
     pub position_mint: AccountInfo<'info>,
 
     #[account(constraint = position_token_account.amount == 1)]
-    pub position_token_account: Account<'info, TokenAccount>,
+    /// CHECK: does not exist yet - created by open_position as an ATA.
+    pub position_token_account: AccountInfo<'info>,
 
     pub token_program: Program<'info, Token>,
 
