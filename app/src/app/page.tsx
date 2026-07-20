@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { useWallet } from "@solana/wallet-adapter-react";
@@ -28,20 +27,6 @@ const VAULT_ADDRESSES = (process.env.NEXT_PUBLIC_VAULT_ADDRESSES || "F1r513ZZdof
 
 const IS_MAINNET = process.env.NEXT_PUBLIC_SOLANA_NETWORK === "mainnet-beta";
 
-function Countdown({ seconds }: { seconds: number }) {
-  const [remaining, setRemaining] = useState(seconds);
-  useEffect(() => {
-    const id = setInterval(() => setRemaining(r => (r <= 0 ? seconds : r - 1)), 1000);
-    return () => clearInterval(id);
-  }, [seconds]);
-  const mm = String(Math.floor(remaining / 60)).padStart(2, "0");
-  const ss = String(remaining % 60).padStart(2, "0");
-  return (
-    <span className="mono-num" style={{ color: remaining <= 10 ? "var(--warn)" : "var(--text-hi)" }}>
-      {mm}:{ss}
-    </span>
-  );
-}
 
 function Reveal({ children, delay = 0 }: { children: React.ReactNode; delay?: number }) {
   return (
@@ -83,10 +68,13 @@ export default function Home() {
   const totalDepositedUsd =
     (usdcVault ? usdcVault.totalDeposits / 1e6 : 0) +
     (solVault ? (solVault.totalDeposits / 1e9) * solPrice : 0);
-  const routableApys = apys.filter(a => ROUTABLE_PROTOCOL_IDS.has(a.protocolId));
+  // Excludes stale entries: averaging a rate we did not actually fetch would put a
+  // fabricated number in the hero. null (not 0) when nothing is live, so FleetRadar
+  // can render "—" — 0.0% would read as a real, terrible rate.
+  const routableApys = apys.filter(a => ROUTABLE_PROTOCOL_IDS.has(a.protocolId) && !a.stale);
   const blendedApy = routableApys.length
     ? routableApys.reduce((s, a) => s + a.apyPercent, 0) / routableApys.length
-    : 0;
+    : null;
 
   return (
     <div style={{ position: "relative" }}>
@@ -145,7 +133,7 @@ export default function Home() {
               color: "var(--text-mid)", fontSize: 16, lineHeight: 1.75,
               maxWidth: 460, marginBottom: 40,
             }}>
-              YieldPilot routes your USDC or SOL to the top Solana protocol every 15 minutes.
+              YieldPilot routes your USDC or SOL to the top Solana protocol, around the clock.
               No manual moves. No missed rates. Non-custodial the whole way.
             </p>
 
@@ -176,7 +164,7 @@ export default function Home() {
 
             <div style={{ display: "flex", gap: 32, marginTop: 48, flexWrap: "wrap" }}>
               {[
-                { value: "15 min", label: "rebalance cycle" },
+                { value: "~Hourly", label: "rebalance cycle" },
                 { value: "0–9%", label: "perf fee · tiered by $YPILOT held" },
                 { value: "Non-custodial", label: "on-chain smart contract" },
               ].map(({ value, label }) => (
@@ -212,7 +200,7 @@ export default function Home() {
                   <span style={{ fontSize: 12, color: "var(--text-mid)", fontFamily: "var(--font-mono)" }}>{best.asset}</span>
                 </div>
                 <div className="mono-num" style={{ fontSize: 40, fontWeight: 500, color: "var(--signal)", lineHeight: 1, marginBottom: 16 }}>
-                  {fmt(best.apyPercent)}%
+                  {best.stale ? "—" : `${fmt(best.apyPercent)}%`}
                   <span style={{ fontSize: 14, color: "var(--text-low)", marginLeft: 6 }}>APY</span>
                 </div>
               </>
@@ -223,8 +211,15 @@ export default function Home() {
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 18, fontSize: 12, color: "var(--signal)" }}>
               <div className="live-dot" style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--signal)" }} />
               <span style={{ fontFamily: "var(--font-mono)" }}>LIVE</span>
-              <span style={{ color: "var(--text-low)" }}>· Next rebalance</span>
-              <Countdown seconds={15 * 60} />
+              {/* A "Next rebalance MM:SS" countdown used to sit here, driven by a Countdown
+                  component fed a hardcoded 15-minute constant — a pure 15:00 loop that reset
+                  forever and was tied to NOTHING, on the public landing page. The keeper's real
+                  observed gaps are 60-98 minutes (it runs on a GitHub Actions cron: the every-45 cron form
+                  actually means :00 and :45, and Actions cron drifts heavily on top), so the
+                  number was fabricated AND wrong by ~4x. Removed rather than "corrected" — we
+                  cannot know when the keeper next runs, and inventing a figure a visitor can't
+                  check is exactly how the APY display ended up advertising ~2x reality. */}
+              <span style={{ color: "var(--text-low)" }}>· Rebalances automatically</span>
             </div>
 
             {/* Flight-path routing visual */}
@@ -330,7 +325,7 @@ export default function Home() {
                     textAlign: "right", fontWeight: 500, fontSize: 15,
                     color: i === 0 ? "var(--signal)" : "var(--text-hi)",
                   }}>
-                    {fmt(p.apyPercent)}%
+                    {p.stale ? "—" : `${fmt(p.apyPercent)}%`}
                   </span>
                 </div>
               ))}
@@ -356,7 +351,7 @@ export default function Home() {
                     {p.asset}
                   </span>
                   <span className="mono-num" style={{ textAlign: "right", fontWeight: 500, fontSize: 15, color: "var(--text-mid)" }}>
-                    {fmt(p.apyPercent)}%
+                    {p.stale ? "—" : `${fmt(p.apyPercent)}%`}
                   </span>
                 </div>
               ))}
@@ -438,7 +433,7 @@ export default function Home() {
               {[
                 ["Is this non-custodial?", "Yes. Funds are held in on-chain smart contracts governed by the program. No one — including us — can access your funds outside the defined instructions."],
                 ["What are the fees?", "Performance fees are tiered by how much $YPILOT you hold: Gold (1,000,000+) pays 0%, Silver (100,000+) pays 3%, Bronze (10,000+) pays 6%, and holding none still works at 9%. Fees apply on profits only, collected at withdrawal. Nothing on deposits or idle balances."],
-                ["How does routing work?", "A keeper bot fetches live APY data every 15 minutes. When a better rate exists beyond a 0.5% threshold, it rebalances — 80% to the top protocol, 20% to the runner-up."],
+                ["How does routing work?", "A keeper bot fetches live APY data roughly once an hour. When a better rate exists beyond a 0.5% threshold, it rebalances — 80% to the top protocol, 20% to the runner-up."],
                 ["Can I withdraw anytime?", "Yes. Withdrawals are always available, even if the vault is paused for deposits. You receive your principal plus all earned yield, minus the tiered performance fee on profits (9% base, down to 0% for Gold)."],
                 ["Has the code been audited?", `Not yet — the team is validating real product interest before commissioning a paid audit. The on-chain program ID is publicly verifiable on Solscan at any time${IS_MAINNET ? "" : ", and the protocol is currently running on devnet while integrations are being finalized"}.`],
               ].map(([q, a], i) => (
@@ -509,3 +504,5 @@ export default function Home() {
     </div>
   );
 }
+
+

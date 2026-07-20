@@ -1,6 +1,7 @@
 ﻿import Link from "next/link";
 
 export function Footer() {
+  const isMainnet = process.env.NEXT_PUBLIC_SOLANA_NETWORK === "mainnet-beta";
   return (
     <footer style={{
       borderTop: "1px solid var(--border)",
@@ -61,7 +62,11 @@ export function Footer() {
             © {new Date().getFullYear()} YieldPilot. Not financial advice.
           </p>
           <p style={{ color: "var(--text-dim)", fontSize: 12 }}>
-            Currently on <span style={{ color: "var(--warn)" }}>Devnet</span> — do not deposit real funds.
+            {isMainnet ? (
+              <>Live on <span style={{ color: "var(--signal)" }}>Solana Mainnet</span>.</>
+            ) : (
+              <>Currently on <span style={{ color: "var(--warn)" }}>Devnet</span> — do not deposit real funds.</>
+            )}
           </p>
         </div>
       </div>

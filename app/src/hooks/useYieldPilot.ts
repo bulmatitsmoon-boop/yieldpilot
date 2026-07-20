@@ -7,6 +7,7 @@ import {
   PublicKey,
   SystemProgram,
   SYSVAR_RENT_PUBKEY,
+  SYSVAR_INSTRUCTIONS_PUBKEY,
 } from "@solana/web3.js";
 import {
   getAssociatedTokenAddress,
@@ -21,7 +22,7 @@ import { Transaction, SystemProgram as SP } from "@solana/web3.js";
 import IDL from "@/idl/yieldpilot.mainnet.json";
 
 const PROGRAM_ID = new PublicKey(
-  process.env.NEXT_PUBLIC_PROGRAM_ID || "CVJrJGoKjseTJqiFGctssYde3pLAnPaRZtjAaKXd8pWk"
+  process.env.NEXT_PUBLIC_PROGRAM_ID || "3tAEmHXZ51YVLe9ts8b9cMcgQPgaSamLxLtxR31VpREi"
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -34,9 +35,12 @@ export interface VaultInfo {
   mint: string;
   totalDeposits: number;
   totalShares: number;
-  perfFeeBps: number;
   autoCompound: boolean;
   autoRebalance: boolean;
+  /** On-chain emergency stop. Deposits are blocked while paused; withdrawals are
+   *  deliberately still allowed so users can always exit. Surfaced so the dashboard can
+   *  say so rather than claiming "AUTOPILOT ENGAGED" over a halted vault. */
+  paused: boolean;
   lastCompoundTs: number;
   protocolCount: number;
   gateMint: string;
@@ -48,6 +52,7 @@ export interface VaultInfo {
     targetBps: number;
     currentBalance: number;
     enabled: boolean;
+    vaultReceiptAccount: string;
   }[];
 }
 
@@ -121,9 +126,9 @@ export function useYieldPilot(vaultAddresses: string[]) {
             mint: (raw.mint as PublicKey).toBase58(),
             totalDeposits: (raw.totalDeposits as anchor.BN).toNumber(),
             totalShares: (raw.totalShares as anchor.BN).toNumber(),
-            perfFeeBps: (raw.perfFeeBps as anchor.BN).toNumber(),
             autoCompound: raw.autoCompound as boolean,
             autoRebalance: raw.autoRebalance as boolean,
+            paused: raw.paused as boolean,
             lastCompoundTs: (raw.lastCompoundTs as anchor.BN).toNumber(),
             protocolCount: raw.protocolCount as number,
             gateMint: ((raw.gateMint as any)?.toBase58 ? (raw.gateMint as any).toBase58() : ""),
@@ -137,6 +142,7 @@ export function useYieldPilot(vaultAddresses: string[]) {
                 targetBps: p.targetBps.toNumber(),
                 currentBalance: p.deployedBalance.toNumber(),
                 enabled: p.targetBps > 0,
+                vaultReceiptAccount: (p.vaultReceiptAccount as PublicKey).toBase58(),
               })),
           } as VaultInfo;
         })
@@ -234,23 +240,76 @@ export function useYieldPilot(vaultAddresses: string[]) {
       if (!publicKey) return;
       setTxStatus("signing");
       setTxError(null);
-      try {
-        setTxStatus("confirming");
-        const sig = await fn();
+
+      // Mark a signature confirmed and refresh — shared by the happy path and the
+      // timeout-recovery path below.
+      const markSuccess = (sig: string) => {
         setLastTxSig(sig);
         setTxStatus("success");
         setTxHistory(h => [{ sig, type: "transaction", ts: Date.now() }, ...h].slice(0, 20));
         setTimeout(() => { fetchVaults(); fetchPositions(); }, 2000);
         setTimeout(() => setTxStatus("idle"), 5000);
         return sig;
+      };
+
+      try {
+        setTxStatus("confirming");
+        const sig = await fn();
+        return markSuccess(sig);
       } catch (err: any) {
+        // A confirmation TIMEOUT is not a failure — the transaction very often landed and
+        // the client simply stopped waiting at web3.js's 30s default. Showing a red
+        // "not confirmed in 30 seconds" error on a tx that actually succeeded is what makes
+        // a user re-submit and double-deposit. So when we time out, DON'T declare failure —
+        // poll the chain for the signature's real fate first.
+        //
+        // web3.js exposes the signature on TransactionExpiredTimeoutError (and repeats it in
+        // the message: "Check signature <sig> using ..."), so we can look it up even though
+        // Anchor's .rpc() only returns the sig on success.
+        const timedOut =
+          err?.name === "TransactionExpiredTimeoutError" ||
+          /was not confirmed in|Check signature/i.test(err?.message || "");
+        // Prefer the structured signature; fall back to the first base58 run of >=40 chars
+        // in the message (robust to whatever punctuation surrounds it, e.g. backticks).
+        const sig: string | undefined =
+          err?.signature || err?.message?.match(/[1-9A-HJ-NP-Za-km-z]{40,}/)?.[0];
+
+        if (timedOut && sig) {
+          setTxStatus("confirming");
+          // Poll ~90s (past the blockhash window) — landed, failed, or genuinely unknown.
+          const start = Date.now();
+          while (Date.now() - start < 90_000) {
+            try {
+              const st = await connection.getSignatureStatus(sig, { searchTransactionHistory: true });
+              const v = st.value;
+              if (v?.err) {
+                setTxError("Transaction failed on-chain.");
+                setTxStatus("error");
+                setTimeout(() => setTxStatus("idle"), 6000);
+                return;
+              }
+              if (v && (v.confirmationStatus === "confirmed" || v.confirmationStatus === "finalized")) {
+                return markSuccess(sig);
+              }
+            } catch { /* transient RPC error — keep polling */ }
+            await new Promise(r => setTimeout(r, 2000));
+          }
+          // Never resolved: genuinely unknown. Tell the user to CHECK, not to blindly retry —
+          // a blind retry is exactly the double-submit we're trying to prevent.
+          setLastTxSig(sig);
+          setTxError("Still confirming — check Solscan before retrying to avoid a double submit.");
+          setTxStatus("error");
+          setTimeout(() => setTxStatus("idle"), 9000);
+          return;
+        }
+
         console.error("Transaction error", err);
         setTxError(err.message || "Transaction failed");
         setTxStatus("error");
         setTimeout(() => setTxStatus("idle"), 6000);
       }
     },
-    [publicKey, fetchVaults, fetchPositions]
+    [publicKey, fetchVaults, fetchPositions, connection]
   );
 
   const deposit = useCallback(
@@ -344,6 +403,14 @@ export function useYieldPilot(vaultAddresses: string[]) {
         const userTokenAccount = await getAssociatedTokenAddress(mintPubkey, publicKey);
         const userSharesAccount = await getAssociatedTokenAddress(sharesMint, publicKey);
 
+        // Treasury token account: derived from the vault's treasury WALLET address
+        // (vaultRaw.treasury) — must always be passed, since withdraw() requires it
+        // whenever the withdrawal realizes any profit (perf_fee > 0). Passing null
+        // here caused every profitable withdrawal to fail (the exact bug hit live
+        // in rounds 2/3/5 — see the program-side fix in withdraw()'s treasury check).
+        const treasuryPubkey = new PublicKey((vaultRaw.treasury as PublicKey).toBase58());
+        const treasuryTokenAccount = await getAssociatedTokenAddress(mintPubkey, treasuryPubkey);
+
         const gateMint = new PublicKey((vaultRaw.gateMint as PublicKey).toBase58());
         const isGatingEnabled = gateMint.toBase58() !== PublicKey.default.toBase58();
         const userGateAccount = isGatingEnabled
@@ -373,15 +440,125 @@ export function useYieldPilot(vaultAddresses: string[]) {
           postIxs.push(createCloseAccountInstruction(userTokenAccount, publicKey, publicKey));
         }
 
-        const totalShares = (vaultRaw.totalShares as anchor.BN).toNumber();
+        // Value the withdrawal against total vault value (idle + deployed) — must
+        // match the on-chain math in withdraw() exactly (idle + total_deployed()),
+        // since minAmountOut is what protects the user from being underpaid.
+        const totalSharesBN: anchor.BN = vaultRaw.totalShares;
         const vaultTokenAcct = await connection.getTokenAccountBalance(vaultTokenAccount);
-        const vaultBal = vaultTokenAcct.value.uiAmount || 0;
-        const estimatedOut = totalShares > 0 ? (shares.toNumber() / totalShares) * vaultBal : 0;
-        const minAmountOut = new anchor.BN(Math.floor(estimatedOut * 0.99 * Math.pow(10, vaultTokenAcct.value.decimals)));
+        const idleBN = new anchor.BN(vaultTokenAcct.value.amount);
+        const protocolCount: number = vaultRaw.protocolCount;
+        const protocols = (vaultRaw.protocols as any[]).slice(0, protocolCount);
+        const totalDeployedBN = protocols.reduce(
+          (sum: anchor.BN, p: any) => sum.add(p.deployedBalance as anchor.BN),
+          new anchor.BN(0)
+        );
+        const totalValueBN = idleBN.add(totalDeployedBN);
+        const amountOutBN = totalSharesBN.gtn(0) ? shares.mul(totalValueBN).div(totalSharesBN) : new anchor.BN(0);
+        const minAmountOut = amountOutBN.muln(99).divn(100); // 1% slippage buffer
+
+        // If idle can't cover the fair payout, bundle recall instructions ahead of
+        // withdraw() in the same transaction. Relies on the on-chain recall_from_* gate
+        // that lets ANY signer call recall provided a matching withdraw() for the same
+        // (vault, user) rides in the same transaction — see verify_paired_withdraw in
+        // lib.rs. A standalone recall by a non-keeper is rejected (RecallRequiresPairedWithdraw),
+        // so this can never be used to force-undeploy the vault.
+        //
+        // Recall from EVERY protocol needed, largest first — NOT just the largest one.
+        // Recalling only the biggest silently caps withdrawals whenever a vault spreads
+        // funds across more than one venue, which is the normal case. Measured live on
+        // the round-8 SOL vault (marinade 0.072 / jito 0.018 of 0.1 SOL): recalling
+        // marinade alone freed ~0.082 of the 0.1 needed, so the ceiling was 80% and MAX
+        // always failed. Recalling both raises it to 99.8%.
+        //
+        // Compute budget is deliberately NOT set here: Solana's default is
+        // min(200k * n_instructions, 1.4M), which scales with the number of recalls we
+        // add. A fixed limit would be WORSE for large bundles. Measured: jito 67.5k +
+        // marinade 78k + withdraw 21k = ~167k against a ~600k default. Transaction SIZE
+        // is the real ceiling for many-protocol vaults (each recall carries ~15 accounts).
+        if (idleBN.lt(amountOutBN) && protocols.length > 0) {
+          // Largest first: frees the most idle per instruction, so we add as few
+          // recalls (and pay as few exit fees) as possible.
+          const byDeployed = protocols
+            .map((p: any, i: number) => ({ proto: p, idx: i }))
+            .filter((x: { proto: any }) => (x.proto.deployedBalance as anchor.BN).gtn(0))
+            .sort((a: { proto: any }, b: { proto: any }) =>
+              (b.proto.deployedBalance as anchor.BN).cmp(a.proto.deployedBalance as anchor.BN)
+            );
+
+          const receiptFieldByLabel: Record<string, string> = {
+            "kamino-usdc": "vaultCollateralAccount",
+            "kamino-sol": "vaultCollateralAccount",
+            "marinade-sol": "vaultMsolAccount",
+            "jito-sol": "vaultLstAccount",
+            "solend-usdc": "vaultCollateralAccount",
+          };
+
+          const recallIxs: anchor.web3.TransactionInstruction[] = [];
+          // Projected idle assumes a recall returns its full deployed value. It returns
+          // slightly less (exit fees), so this can under-recall by a hair — harmless:
+          // minAmountOut still protects the user, and the tx reverts rather than
+          // underpaying. Never over-recalls, so we never pay an unnecessary exit fee.
+          let projectedIdle = idleBN;
+
+          for (const { proto, idx } of byDeployed) {
+            if (projectedIdle.gte(amountOutBN)) break;
+
+            const label = Buffer.from(proto.label).toString("utf8").replace(/\0/g, "");
+            const receiptAccountPubkey = new PublicKey((proto.vaultReceiptAccount as PublicKey).toBase58());
+            const receiptBalance = await connection.getTokenAccountBalance(receiptAccountPubkey);
+            const recallAmount = new anchor.BN(receiptBalance.value.amount);
+            if (!recallAmount.gtn(0)) continue;
+
+            const res = await fetch(`/api/recall-accounts?label=${encodeURIComponent(label)}`);
+            if (!res.ok) {
+              throw new Error(`Insufficient idle liquidity and could not fetch recall accounts for ${label}`);
+            }
+            const { instructionName, accounts: apiAccounts, remainingAccounts } = await res.json();
+
+            if (!(label in receiptFieldByLabel)) {
+              throw new Error(`No receipt-account mapping for protocol label "${label}" — add it to receiptFieldByLabel before this can recall from it.`);
+            }
+            const receiptFieldName = receiptFieldByLabel[label];
+
+            const recallAccounts: Record<string, PublicKey> = {
+              keeper: publicKey,
+              vault: vaultPubkey,
+              txInstructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
+              vaultAuthority: vaultAuthorityPda,
+              vaultTokenAccount,
+              [receiptFieldName]: receiptAccountPubkey,
+            };
+            for (const [key, val] of Object.entries(apiAccounts as Record<string, string | undefined>)) {
+              if (val) recallAccounts[key] = new PublicKey(val);
+            }
+
+            const recallMethod = (program.methods as any)[instructionName];
+            if (typeof recallMethod !== "function") {
+              throw new Error(`Program has no method "${instructionName}" — /api/recall-accounts returned an instruction name that doesn't match the IDL.`);
+            }
+            // NOTE: the protocol index must be the ORIGINAL on-chain index, not the
+            // position in the sorted array — they differ once sorting reorders them.
+            let builder = recallMethod(idx, recallAmount).accounts(recallAccounts);
+            if (remainingAccounts) {
+              builder = builder.remainingAccounts(
+                (remainingAccounts as string[]).map((pk) => ({
+                  pubkey: new PublicKey(pk),
+                  isSigner: false,
+                  isWritable: false,
+                }))
+              );
+            }
+            recallIxs.push(await builder.instruction());
+            projectedIdle = projectedIdle.add(proto.deployedBalance as anchor.BN);
+          }
+
+          // All recalls must execute before withdraw() in the same tx.
+          preIxs.unshift(...recallIxs);
+        }
 
         return program.methods
           .withdraw(shares, minAmountOut)
-          .accounts({
+          .accountsPartial({
             user: publicKey,
             vault: vaultPubkey,
             vaultAuthority: vaultAuthorityPda,
@@ -390,7 +567,7 @@ export function useYieldPilot(vaultAddresses: string[]) {
             sharesMint,
             userPosition: positionPda,
             userSharesAccount,
-            treasuryTokenAccount: null as any,
+            treasuryTokenAccount,
             userGateAccount: userGateAccount as any,
             whitelistEntry: whitelistEntry as any,
             tokenProgram: TOKEN_PROGRAM_ID,

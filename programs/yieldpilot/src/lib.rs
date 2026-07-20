@@ -1,9 +1,63 @@
 use anchor_lang::prelude::*;
 use anchor_lang::system_program::{self, Transfer as SystemTransfer};
+use anchor_lang::solana_program::sysvar::instructions::{
+    load_instruction_at_checked, ID as INSTRUCTIONS_SYSVAR_ID,
+};
 use anchor_spl::{
     associated_token::{self, AssociatedToken, Create},
     token::{self, Mint, MintTo, Token, TokenAccount, Transfer, Burn, CloseAccount, SyncNative},
 };
+
+// sha256("global:withdraw")[0..8] — the Anchor instruction discriminator for
+// `withdraw`, precomputed rather than pulled from the auto-generated
+// `crate::instruction` module so this doesn't depend on that module's exact
+// shape across Anchor versions. Used by verify_paired_withdraw below.
+const WITHDRAW_DISCRIMINATOR: [u8; 8] = [183, 18, 70, 156, 148, 109, 161, 34];
+
+/// Called by recall_from_* when the signer is NOT the vault's keeper: confirms
+/// a `withdraw` instruction for this exact (vault, user) pair exists elsewhere
+/// in the same transaction. This is what makes opening recall up to any signer
+/// safe — a non-keeper caller can only ever trigger a recall as an inseparable
+/// part of their own real, share-burning withdrawal in the same atomic
+/// transaction, never as a standalone free action (which would otherwise let
+/// anyone force-undeploy the vault's funds — see PR discussion). The keeper's
+/// own routine rebalancing recalls are unaffected: they're never paired with a
+/// withdraw, so this function is only reached when the caller isn't the keeper.
+fn verify_paired_withdraw<'info>(
+    instructions_sysvar: &AccountInfo<'info>,
+    expected_vault: &Pubkey,
+    expected_caller: &Pubkey,
+) -> Result<()> {
+    require_keys_eq!(
+        *instructions_sysvar.key,
+        INSTRUCTIONS_SYSVAR_ID,
+        VaultError::InvalidInstructionsSysvar
+    );
+
+    let mut i: u16 = 0;
+    loop {
+        // load_instruction_at_checked errors once i runs past the last
+        // instruction in this transaction — that's our loop terminator.
+        let ix = match load_instruction_at_checked(i as usize, instructions_sysvar) {
+            Ok(ix) => ix,
+            Err(_) => break,
+        };
+        // Withdraw's account order (see the Withdraw accounts struct):
+        // [0] = user (Signer), [1] = vault.
+        if ix.program_id == crate::ID
+            && ix.data.len() >= 8
+            && ix.data[0..8] == WITHDRAW_DISCRIMINATOR
+            && ix.accounts.len() >= 2
+            && ix.accounts[0].pubkey == *expected_caller
+            && ix.accounts[1].pubkey == *expected_vault
+        {
+            return Ok(());
+        }
+        i += 1;
+        if i > 32 { break; } // sane upper bound — no real transaction has this many instructions
+    }
+    err!(VaultError::RecallRequiresPairedWithdraw)
+}
 
 // WSOL mint — used to recreate the vault's SOL token account after a full
 // unwrap-for-Marinade cycle (see deploy_to_marinade).
@@ -43,12 +97,12 @@ pub use lp_vault::raydium_lp::*;
 #[cfg(not(feature = "mainnet"))]
 declare_id!("8c7Boyk91MWkn5jabf5CnYD8DrG6p4hYm9eDdAAWXEKH");
 #[cfg(feature = "mainnet")]
-declare_id!("CVJrJGoKjseTJqiFGctssYde3pLAnPaRZtjAaKXd8pWk");
+declare_id!("3tAEmHXZ51YVLe9ts8b9cMcgQPgaSamLxLtxR31VpREi");
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const BPS_DENOM: u64          = 10_000;
-const MAX_PROTOCOLS: usize    = 8;
+const MAX_PROTOCOLS: usize    = 6; // trimmed from 8 (2026-07-16): Vault.protocols array was pushing BorshDeserialize::deserialize_reader 64 bytes over the 4096 BPF stack frame limit (flagged by cargo-build-sbf as a real undefined-behavior risk). Only 2 protocols are registered per vault today; 6 leaves 4x headroom.
 const COMPOUND_INTERVAL: i64  = 3_600;        // 1 hour
 const MIN_FIRST_DEPOSIT: u64  = 1_000_000;    // $1 minimum first deposit (anti-donation-attack)
 // Keeper must leave at least 10% of total deposits idle at all times.
@@ -118,6 +172,10 @@ pub mod yieldpilot {
         v.protocols           = [ProtocolAdapter::default(); MAX_PROTOCOLS];
         v.paused              = false;
         v.tvl_cap             = params.tvl_cap;
+        // Unique per-lifecycle stamp: lets deposit() tell apart a genuinely fresh
+        // position from a stale one left over by a prior vault at the same PDA
+        // (same mint+admin seeds can be reinitialized after close_vault).
+        v.created_at          = Clock::get()?.unix_timestamp;
 
         emit!(VaultInitialized { vault: v.key(), admin: v.admin, mint: v.mint });
         Ok(())
@@ -268,11 +326,17 @@ pub mod yieldpilot {
             pos.vault = v.key();
             pos.bump  = ctx.bumps.user_position;
         }
-        // If vault was reset (total_shares was 0 before this deposit), clear any
-        // phantom shares left over from a previous vault lifecycle.
-        if v.total_shares == shares_to_mint {
+        // Clear any phantom shares/deposited_amount left over from a previous vault
+        // lifecycle at this same PDA (close_vault only closes the Vault account,
+        // never the UserPosition PDAs — a reinitialized vault with the same
+        // mint+admin seeds would otherwise inherit every past depositor's stale
+        // balance, not just the very first one back). Compare against the vault's
+        // own creation stamp rather than "am I the first depositor", since that
+        // stale-detection only ever caught the first depositor after a reset.
+        if pos.vault_created_at != v.created_at {
             pos.shares           = 0;
             pos.deposited_amount = 0;
+            pos.vault_created_at = v.created_at;
         }
         pos.shares           = pos.shares.checked_add(shares_to_mint).ok_or(VaultError::MathOverflow)?;
         pos.deposited_amount = pos.deposited_amount.checked_add(amount).ok_or(VaultError::MathOverflow)?;
@@ -293,22 +357,30 @@ pub mod yieldpilot {
         require!(v.total_shares > 0, VaultError::ZeroShares);
 
         // How many base tokens does this share represent?
-        // Use actual vault token balance so accrued yield is included in share price.
-        // IMPORTANT: if funds are currently deployed to Kamino/Marinade, vault_balance
-        // will be lower than total value. Users must wait for the keeper to recall funds
-        // before withdrawing, or the keeper must recall first. We enforce this explicitly.
-        let vault_balance = ctx.accounts.vault_token_account.amount;
+        // A share is a claim on the vault's TOTAL value, not just the idle portion.
+        // Value it against idle balance + funds currently deployed to protocols —
+        // otherwise, whenever the keeper has funds deployed (up to 90% of TVL), a
+        // withdrawer would be paid only their fraction of the ~10% idle balance and
+        // silently lose the rest to the remaining holders. deployed_balance tracks
+        // deployed principal (accrued yield is realized into total_deposits on
+        // recall), so idle + total_deployed is a conservative floor on true value:
+        // it never over-values a share, so it can never drain the vault.
+        let idle_balance = ctx.accounts.vault_token_account.amount;
+        let total_value = idle_balance
+            .checked_add(v.total_deployed())
+            .ok_or(VaultError::MathOverflow)?;
         let amount_out = (shares as u128)
-            .checked_mul(vault_balance as u128)
+            .checked_mul(total_value as u128)
             .and_then(|x| x.checked_div(v.total_shares as u128))
             .ok_or(VaultError::MathOverflow)? as u64;
         require!(amount_out > 0, VaultError::ZeroAmount);
         // Slippage guard: caller specifies the minimum they will accept.
         // Protects against vault balance dropping between simulation and execution.
         require!(amount_out >= min_amount_out, VaultError::SlippageExceeded);
-        // SECURITY: ensure vault has sufficient idle liquidity to cover this withdrawal.
-        // Prevents a user from burning shares and receiving 0 tokens when funds are deployed.
-        require!(vault_balance >= amount_out, VaultError::InsufficientIdle);
+        // SECURITY: the payout is drawn from the idle balance only. If funds are
+        // deployed and idle can't cover the fair amount, revert so the keeper
+        // recalls first — never underpay the user by valuing against idle alone.
+        require!(idle_balance >= amount_out, VaultError::InsufficientIdle);
 
         // Cost basis for this share tranche (for fee calculation)
         let cost_basis = (shares as u128)
@@ -641,6 +713,13 @@ pub mod yieldpilot {
         collateral_amount: u64,
     ) -> Result<()> {
         let v = &mut ctx.accounts.vault;
+        if v.keeper != ctx.accounts.keeper.key() {
+            verify_paired_withdraw(
+                &ctx.accounts.tx_instructions_sysvar.to_account_info(),
+                &v.key(),
+                &ctx.accounts.keeper.key(),
+            )?;
+        }
         let idx = protocol_index as usize;
         require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
         require!(v.protocols[idx].kind == ProtocolKind::Kamino, AdapterError::UnsupportedProtocol);
@@ -717,6 +796,17 @@ pub mod yieldpilot {
         require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
         require!(v.protocols[idx].kind == ProtocolKind::Marinade, AdapterError::UnsupportedProtocol);
         assert_state_matches(&v.protocols[idx], ctx.accounts.marinade_state.key)?;
+        // SECURITY: validate the mSOL receipt account matches the one registered for
+        // this protocol index. Without this, a compromised keeper could redirect the
+        // mSOL minted by this deposit to an account they control — the real SOL still
+        // leaves the vault, but the vault's actual claim on it (the mSOL) never lands
+        // in vault_msol_account, silently draining value while deployed_balance still
+        // looks correct. Same protection deploy_to_kamino already has; this and the
+        // other two protocol adapters (Solend, SPL Stake Pool) were missing it.
+        require!(
+            ctx.accounts.vault_msol_account.key() == v.protocols[idx].vault_receipt_account,
+            VaultError::InvalidTokenAccount
+        );
 
         // SECURITY: enforce the same minimum idle liquidity buffer as deploy_to_kamino,
         // so this protocol can't be used to deploy 100% of funds and block withdrawals.
@@ -823,10 +913,23 @@ pub mod yieldpilot {
         msol_amount: u64,
     ) -> Result<()> {
         let v = &mut ctx.accounts.vault;
+        if v.keeper != ctx.accounts.keeper.key() {
+            verify_paired_withdraw(
+                &ctx.accounts.tx_instructions_sysvar.to_account_info(),
+                &v.key(),
+                &ctx.accounts.keeper.key(),
+            )?;
+        }
         let idx = protocol_index as usize;
         require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
         require!(v.protocols[idx].kind == ProtocolKind::Marinade, AdapterError::UnsupportedProtocol);
         assert_state_matches(&v.protocols[idx], ctx.accounts.marinade_state.key)?;
+        // SECURITY: same registry check as deploy_to_marinade — burn mSOL from the
+        // registered account, not an arbitrary one the keeper supplies.
+        require!(
+            ctx.accounts.vault_msol_account.key() == v.protocols[idx].vault_receipt_account,
+            VaultError::InvalidTokenAccount
+        );
 
         let vault_key = v.key();
         let seeds: &[&[u8]] = &[b"vault", vault_key.as_ref(), &[v.authority_bump]];
@@ -912,9 +1015,18 @@ pub mod yieldpilot {
         require!(!v.paused, AdapterError::VaultPaused);
         let idx = protocol_index as usize;
         require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
+        require!(v.protocols[idx].kind == ProtocolKind::Jito, AdapterError::UnsupportedProtocol);
         // SECURITY: validate the stake pool passed matches what's registered for this
         // index — same check every other protocol (Kamino/Marinade/Solend) already has.
         assert_state_matches(&v.protocols[idx], ctx.accounts.stake_pool.key)?;
+        // SECURITY: validate the LST receipt account matches the one registered for
+        // this protocol index — same reasoning as deploy_to_marinade's equivalent
+        // check (without it, a compromised keeper could redirect the jitoSOL minted
+        // by this deposit to an account they control).
+        require!(
+            ctx.accounts.vault_lst_account.key() == v.protocols[idx].vault_receipt_account,
+            VaultError::InvalidTokenAccount
+        );
 
         // SECURITY: enforce the same minimum idle liquidity buffer as deploy_to_kamino,
         // so this protocol can't be used to deploy 100% of funds and block withdrawals.
@@ -1016,11 +1128,25 @@ pub mod yieldpilot {
     ) -> Result<()> {
         require!(lst_amount > 0, VaultError::ZeroAmount);
         let v = &mut ctx.accounts.vault;
+        if v.keeper != ctx.accounts.keeper.key() {
+            verify_paired_withdraw(
+                &ctx.accounts.tx_instructions_sysvar.to_account_info(),
+                &v.key(),
+                &ctx.accounts.keeper.key(),
+            )?;
+        }
         let idx = protocol_index as usize;
         require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
+        require!(v.protocols[idx].kind == ProtocolKind::Jito, AdapterError::UnsupportedProtocol);
         // SECURITY: validate the stake pool passed matches what's registered for this
         // index — same check every other protocol (Kamino/Marinade/Solend) already has.
         assert_state_matches(&v.protocols[idx], ctx.accounts.stake_pool.key)?;
+        // SECURITY: same registry check as deploy_to_sol_lst — burn LST from the
+        // registered account, not an arbitrary one the keeper supplies.
+        require!(
+            ctx.accounts.vault_lst_account.key() == v.protocols[idx].vault_receipt_account,
+            VaultError::InvalidTokenAccount
+        );
 
         let vault_key = v.key();
         let seeds: &[&[u8]] = &[b"vault", vault_key.as_ref(), &[v.authority_bump]];
@@ -1096,6 +1222,20 @@ pub mod yieldpilot {
         require!(!v.paused, AdapterError::VaultPaused);
         let idx = protocol_index as usize;
         require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
+        require!(v.protocols[idx].kind == ProtocolKind::Solend, AdapterError::UnsupportedProtocol);
+        // SECURITY: deploy_to_solend was missing BOTH checks every other protocol has —
+        // the reserve wasn't validated against the registry at all, and neither was the
+        // cToken receipt destination. Without the first, a compromised keeper could
+        // deposit into an arbitrary Solend reserve instead of the registered one
+        // (deployed_balance would then track the wrong market). Without the second,
+        // same fund-diversion risk as deploy_to_marinade/deploy_to_sol_lst above — the
+        // minted cTokens could be redirected to an account the keeper controls while
+        // the real USDC still leaves the vault.
+        assert_state_matches(&v.protocols[idx], ctx.accounts.reserve.key)?;
+        require!(
+            ctx.accounts.vault_collateral_account.key() == v.protocols[idx].vault_receipt_account,
+            VaultError::InvalidTokenAccount
+        );
 
         // SECURITY: enforce the same minimum idle liquidity buffer as deploy_to_kamino,
         // so this protocol can't be used to deploy 100% of funds and block withdrawals.
@@ -1147,8 +1287,22 @@ pub mod yieldpilot {
     ) -> Result<()> {
         require!(collateral_amount > 0, VaultError::ZeroAmount);
         let v = &mut ctx.accounts.vault;
+        if v.keeper != ctx.accounts.keeper.key() {
+            verify_paired_withdraw(
+                &ctx.accounts.tx_instructions_sysvar.to_account_info(),
+                &v.key(),
+                &ctx.accounts.keeper.key(),
+            )?;
+        }
         let idx = protocol_index as usize;
         require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
+        require!(v.protocols[idx].kind == ProtocolKind::Solend, AdapterError::UnsupportedProtocol);
+        // SECURITY: same two checks added to deploy_to_solend — see its comment.
+        assert_state_matches(&v.protocols[idx], ctx.accounts.reserve.key)?;
+        require!(
+            ctx.accounts.vault_collateral_account.key() == v.protocols[idx].vault_receipt_account,
+            VaultError::InvalidTokenAccount
+        );
 
         let vault_key = v.key();
         let seeds: &[&[u8]] = &[b"vault", vault_key.as_ref(), &[v.authority_bump]];
@@ -1341,6 +1495,10 @@ pub struct Vault {
     pub tvl_cap:             u64,
     pub name:                String,
     pub protocols:           [ProtocolAdapter; MAX_PROTOCOLS],
+    // Unix timestamp set once at initialize_vault — a per-lifecycle stamp so
+    // deposit() can detect a UserPosition left over from a prior vault at the
+    // same PDA. See deposit()'s reset check.
+    pub created_at:          i64,
 }
 
 impl Vault {
@@ -1379,6 +1537,9 @@ pub struct UserPosition {
     // Tier at time of most recent deposit. Fee is the HIGHER of current tier and snapshot tier,
     // preventing a flash loan of gate tokens to temporarily gain a better fee rate at withdrawal.
     pub tier_at_deposit:  u8, // 0=Gold, 1=Silver, 2=Bronze, 3=None/ungated
+    // Copy of Vault.created_at as of this position's last reset/deposit — lets
+    // deposit() detect a stale position from a prior vault lifecycle at the same PDA.
+    pub vault_created_at: i64,
 }
 
 impl UserPosition {
@@ -1661,10 +1822,19 @@ pub struct DeployToKamino<'info> {
 
 #[derive(Accounts)]
 pub struct RecallFromKamino<'info> {
+    // Callable by the vault's keeper (routine rebalancing, unrestricted) OR by
+    // any other signer PAIRED with a `withdraw` instruction for this exact
+    // (vault, this signer) in the same transaction — see verify_paired_withdraw.
+    // Recall only ever moves funds into the vault's own fixed, registry-
+    // validated accounts, so this can never be used to redirect funds.
     #[account(mut)]
     pub keeper: Signer<'info>,
-    #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
+    #[account(mut)]
     pub vault: Account<'info, Vault>,
+    /// CHECK: address-constrained to the real sysvar; used only to look up
+    /// sibling instructions in this same transaction for the pairing check.
+    #[account(address = INSTRUCTIONS_SYSVAR_ID)]
+    pub tx_instructions_sysvar: UncheckedAccount<'info>,
     /// CHECK: PDA
     #[account(mut, seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
     pub vault_authority: UncheckedAccount<'info>,
@@ -1737,10 +1907,15 @@ pub struct DeployToMarinade<'info> {
 
 #[derive(Accounts)]
 pub struct RecallFromMarinade<'info> {
+    // Callable by the vault's keeper OR any signer paired with a matching
+    // `withdraw` instruction in the same transaction — see RecallFromKamino.
     #[account(mut)]
     pub keeper: Signer<'info>,
-    #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
+    #[account(mut)]
     pub vault: Box<Account<'info, Vault>>,
+    /// CHECK: address-constrained to the real sysvar; see RecallFromKamino.
+    #[account(address = INSTRUCTIONS_SYSVAR_ID)]
+    pub tx_instructions_sysvar: UncheckedAccount<'info>,
     /// CHECK: PDA
     #[account(mut, seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
     pub vault_authority: UncheckedAccount<'info>,
@@ -1809,10 +1984,15 @@ pub struct DeployToSolLst<'info> {
 
 #[derive(Accounts)]
 pub struct RecallFromSolLst<'info> {
+    // Callable by the vault's keeper OR any signer paired with a matching
+    // `withdraw` instruction in the same transaction — see RecallFromKamino.
     #[account(mut)]
     pub keeper: Signer<'info>,
-    #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
+    #[account(mut)]
     pub vault: Box<Account<'info, Vault>>,
+    /// CHECK: address-constrained to the real sysvar; see RecallFromKamino.
+    #[account(address = INSTRUCTIONS_SYSVAR_ID)]
+    pub tx_instructions_sysvar: UncheckedAccount<'info>,
     /// Vault's wrapped-SOL account — native SOL received from the stake pool
     /// gets wrapped back in here (transfer + sync_native), no close/recreate
     /// needed since we're topping up an already-open account.
@@ -1885,9 +2065,14 @@ pub struct DeployToSolend<'info> {
 
 #[derive(Accounts)]
 pub struct RecallFromSolend<'info> {
+    // Callable by the vault's keeper OR any signer paired with a matching
+    // `withdraw` instruction in the same transaction — see RecallFromKamino.
     #[account(mut)] pub keeper: Signer<'info>,
-    #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
+    #[account(mut)]
     pub vault: Box<Account<'info, Vault>>,
+    /// CHECK: address-constrained to the real sysvar; see RecallFromKamino.
+    #[account(address = INSTRUCTIONS_SYSVAR_ID)]
+    pub tx_instructions_sysvar: UncheckedAccount<'info>,
     /// CHECK: PDA
     #[account(mut, seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
     pub vault_authority: UncheckedAccount<'info>,
@@ -1900,6 +2085,7 @@ pub struct RecallFromSolend<'info> {
     /// CHECK: Solend validates
     #[account(mut)] pub reserve_liquidity_supply: UncheckedAccount<'info>,
     /// CHECK: Solend validates
+    #[account(mut)] // Solend writes rate_limiter here on redeem (outflow)
     pub lending_market: UncheckedAccount<'info>,
     /// CHECK: Solend validates
     pub lending_market_authority: UncheckedAccount<'info>,
@@ -1962,4 +2148,6 @@ pub enum VaultError {
     #[msg("Gate mint already set and cannot be changed")]     GateMintAlreadySet,
     #[msg("Vault still has deposits — withdraw all before closing")] VaultNotEmpty,
     #[msg("Deploy would breach minimum idle buffer (10%)")]    IdleBufferBreach,
+    #[msg("Non-keeper recall must be paired with a withdraw instruction for the same user and vault in the same transaction")] RecallRequiresPairedWithdraw,
+    #[msg("Invalid instructions sysvar account")] InvalidInstructionsSysvar,
 }

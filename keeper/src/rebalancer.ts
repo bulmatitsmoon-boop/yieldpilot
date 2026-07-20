@@ -14,7 +14,6 @@ const BPS_DENOM = 10_000;
 const EXIT_COST_BPS: Record<string, number> = {
   "kamino-usdc":      0,
   "kamino-sol":       0,
-  "drift-sol":        0,
   "solend-usdc":      0,
   "marinade-sol":     30, // ~0.3% liquid unstake fee
   "jito-sol":         10, // ~0.1% DEX swap slippage to exit jitoSOL
@@ -37,6 +36,7 @@ export function computeRebalanceDecision(
   apys: ProtocolApy[]
 ): RebalanceDecision {
   const protocols = vault.protocols.slice(0, vault.protocolCount);
+
   const currentAllocations = protocols.map(p => p.targetBps.toNumber());
 
   // Match APYs to registered protocols by label (not by array index).
@@ -52,6 +52,34 @@ export function computeRebalanceDecision(
   );
   const protocolApys = protocolLabels.map(label => apyByLabel.get(label)?.apyBps || 0);
   const protocolIds  = protocolLabels;
+
+  // ── Refuse to move money we cannot price ──────────────────────────────────
+  // If ANY registered protocol fell back to a hardcoded APY (stale), abstain from
+  // rebalancing entirely and hold the current allocation.
+  //
+  // Why abstain rather than route around the stale one: excluding it would drive its
+  // target to 0, forcing a FULL EXIT that pays real, unrecoverable protocol fees
+  // (marinade ~0.3%, jito ~0.1%) on the basis of a transient API blip. Acting on
+  // ignorance is strictly worse than waiting for the next cycle — the funds keep
+  // earning wherever they already are in the meantime.
+  //
+  // This is deliberately asymmetric with the frontend, which merely DISPLAYS stale
+  // rates (greyed, sorted last). Displaying a stale number is a cosmetic problem;
+  // routing real funds on one is a financial one. See the Solend "5.10%" incident:
+  // a hand-typed constant beat every live rate and captured 80% of the USDC vault.
+  const staleLabels = protocolLabels.filter(l => {
+    const a = apyByLabel.get(l);
+    return !a || a.stale;
+  });
+  if (staleLabels.length > 0) {
+    return {
+      shouldRebalance: false,
+      reason: `Holding — no live APY for ${staleLabels.join(", ")} (fell back to a hardcoded rate). Refusing to reallocate on an unpriceable protocol.`,
+      currentAllocations,
+      newAllocations: currentAllocations,
+      expectedApyImprovement: 0,
+    };
+  }
 
   const currentWeightedApy = computeWeightedApy(currentAllocations, protocolApys);
 
@@ -87,17 +115,31 @@ export function computeRebalanceDecision(
   const driftTrigger = maxDrift >= REBALANCE_THRESHOLD_BPS && netApyImprovement > 0;
   const shouldRebalance = (driftTrigger || apyTrigger) && vault.autoRebalance;
 
-  let reason = "No rebalance needed";
-  if (!vault.autoRebalance) {
+  // The reason MUST be derived from shouldRebalance, never computed by an independent
+  // cascade — otherwise the two drift apart and the log/alert contradicts the action.
+  //
+  // The old cascade tested `!apyTrigger && exitCostBps > 0` BEFORE driftTrigger, so any
+  // drift-triggered rebalance reported "holding position" *while rebalancing*, and that
+  // text was posted verbatim to Telegram as "⚡ Rebalanced — ... — holding position".
+  // Its arithmetic was wrong too: it printed gross gain vs exit cost (e.g. "6.8bps does
+  // not exceed 2bps" — 6.8 plainly does exceed 2) when the actual gate is NET gain vs
+  // MIN_APY_IMPROVEMENT_BPS. Branching on shouldRebalance makes contradiction impossible.
+  const grossGain = optimalWeightedApy - currentWeightedApy;
+  let reason: string;
+  if (shouldRebalance) {
+    if (driftTrigger && apyTrigger) {
+      reason = `Drift ${maxDrift}bps AND net APY gain ${netApyImprovement}bps`;
+    } else if (apyTrigger) {
+      reason = `Net APY improvement of ${netApyImprovement}bps after exit costs`;
+    } else {
+      reason = `Allocation drifted ${maxDrift}bps (threshold ${REBALANCE_THRESHOLD_BPS}bps), net APY gain ${netApyImprovement}bps after ${exitCostBps}bps exit cost`;
+    }
+  } else if (!vault.autoRebalance) {
     reason = "Auto-rebalance is disabled";
-  } else if (!apyTrigger && exitCostBps > 0) {
-    reason = `APY gain (${(optimalWeightedApy - currentWeightedApy)}bps) does not exceed exit cost (${exitCostBps}bps) — holding position`;
-  } else if (driftTrigger && apyTrigger) {
-    reason = `Drift ${maxDrift}bps AND net APY gain ${netApyImprovement}bps`;
-  } else if (driftTrigger) {
-    reason = `Allocation drifted ${maxDrift}bps (threshold: ${REBALANCE_THRESHOLD_BPS}bps)`;
-  } else if (apyTrigger) {
-    reason = `Net APY improvement of ${netApyImprovement}bps after exit costs`;
+  } else if (grossGain > 0) {
+    reason = `Net APY gain ${netApyImprovement}bps (gross ${grossGain}bps - ${exitCostBps}bps exit cost) below the ${MIN_APY_IMPROVEMENT_BPS}bps minimum, and drift ${maxDrift}bps below the ${REBALANCE_THRESHOLD_BPS}bps threshold — holding position`;
+  } else {
+    reason = "No rebalance needed";
   }
 
   return {
@@ -142,7 +184,6 @@ function computeExitCost(
 const SAFE_PROTOCOLS = new Set([
   "kamino-usdc",
   "kamino-sol",
-  "drift-sol",
   "solend-usdc",
   "marinade-sol",
   "jito-sol",
@@ -198,6 +239,14 @@ function computeWeightedApy(allocations: number[], apys: number[]): number {
 export function shouldCompound(vault: VaultState): { compound: boolean; reason: string } {
   if (!vault.autoCompound) {
     return { compound: false, reason: "Auto-compound is disabled" };
+  }
+
+  // Compounding an empty vault is a guaranteed no-op: it burns a keeper tx fee every
+  // cycle AND fires a "🔄 Compounded" Telegram alert, which reads to a user as
+  // "your money is earning" when the vault holds nothing. Found 2026-07-16: the empty
+  // SOL vault was alerting on every 45-min cycle alongside the funded USDC vault.
+  if (vault.totalDeposits.isZero()) {
+    return { compound: false, reason: "Vault is empty — nothing to compound" };
   }
 
   const nowSec = Math.floor(Date.now() / 1000);

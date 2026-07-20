@@ -181,7 +181,6 @@ pub fn solend_deposit<'info>(
         AccountMeta::new_readonly(*ctx.accounts.lending_market.key, false),
         AccountMeta::new_readonly(*ctx.accounts.lending_market_authority.key, false),
         AccountMeta::new_readonly(*ctx.accounts.vault_authority.key, true),  // user_transfer_authority (signer, NOT writable per Solend spec)
-        AccountMeta::new_readonly(*ctx.accounts.clock_sysvar.key, false),
         AccountMeta::new_readonly(*ctx.accounts.token_program.key, false),
     ];
 
@@ -200,7 +199,6 @@ pub fn solend_deposit<'info>(
             ctx.accounts.lending_market.clone(),
             ctx.accounts.lending_market_authority.clone(),
             ctx.accounts.vault_authority.clone(),
-            ctx.accounts.clock_sysvar.clone(),
             ctx.accounts.token_program.to_account_info(),
         ],
         &[authority_seeds],
@@ -248,10 +246,14 @@ pub fn solend_withdraw<'info>(
         AccountMeta::new(*ctx.accounts.reserve.key, false),
         AccountMeta::new(ctx.accounts.reserve_collateral_mint.key(), false),
         AccountMeta::new(*ctx.accounts.reserve_liquidity_supply.key, false),
-        AccountMeta::new_readonly(*ctx.accounts.lending_market.key, false),
+        // WRITABLE on redeem: a redeem is an OUTFLOW, and Solend records it in the
+        // lending market RateLimiter (rate_limiter.cur_qty), so Solend writes to this
+        // account. Passing it read-only fails with:
+        //   "instruction modified data of a read-only account"
+        // Deposit is an INFLOW, never touches the limiter, and correctly stays readonly.
+        AccountMeta::new(*ctx.accounts.lending_market.key, false),
         AccountMeta::new_readonly(*ctx.accounts.lending_market_authority.key, false),
         AccountMeta::new_readonly(*ctx.accounts.vault_authority.key, true),   // user_transfer_authority (signer, NOT writable per Solend spec)
-        AccountMeta::new_readonly(*ctx.accounts.clock_sysvar.key, false),
         AccountMeta::new_readonly(*ctx.accounts.token_program.key, false),
     ];
 
@@ -270,7 +272,6 @@ pub fn solend_withdraw<'info>(
             ctx.accounts.lending_market.clone(),
             ctx.accounts.lending_market_authority.clone(),
             ctx.accounts.vault_authority.clone(),
-            ctx.accounts.clock_sysvar.clone(),
             ctx.accounts.token_program.to_account_info(),
         ],
         &[authority_seeds],

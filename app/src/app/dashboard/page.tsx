@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { StatCard, Card, CardHeader, Toggle, TxBanner, fmt, fmtAddr } from "@/components/ui";
@@ -20,26 +20,7 @@ const VAULT_ADDRESSES = (process.env.NEXT_PUBLIC_VAULT_ADDRESSES || "F1r513ZZdof
 type Tab = "overview" | "protocols" | "deposit" | "withdraw";
 
 const ADMIN_PUBKEY = "8i7kydJHwi3Cdp46Xugyux2vWJmTScYDvnJrBiBihBnP";
-const REBALANCE_INTERVAL_SEC = 15 * 60;
 
-function Countdown({ lastCompoundTs }: { lastCompoundTs: number | null }) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, []);
-  // Approximate: countdown to the next 15-min boundary since we don't expose the
-  // keeper's exact next-poll timestamp. Good enough for the "alive" feel.
-  const elapsed = Math.floor(now / 1000) % REBALANCE_INTERVAL_SEC;
-  const remaining = REBALANCE_INTERVAL_SEC - elapsed;
-  const mm = String(Math.floor(remaining / 60)).padStart(2, "0");
-  const ss = String(remaining % 60).padStart(2, "0");
-  return (
-    <span className="mono-num" style={{ color: remaining <= 10 ? "var(--warn)" : "var(--text-hi)" }}>
-      {mm}:{ss}
-    </span>
-  );
-}
 
 export default function Dashboard() {
   const { publicKey, connected } = useWallet();
@@ -63,26 +44,67 @@ export default function Dashboard() {
     solDeposited  !== null ? `${solDeposited.toLocaleString("en-US",  { minimumFractionDigits: 4, maximumFractionDigits: 4 })} SOL`  : null,
   ].filter(Boolean).join(" · ") || "—";
 
-  const lendingApys = apys.filter(a => a.riskScore <= 1);
-  const avgApy = lendingApys.length ? lendingApys.reduce((s, a) => s + a.apyPercent, 0) / lendingApys.length : 0;
-  const bestApy = lendingApys.length ? Math.max(...lendingApys.map((a) => a.apyPercent)) : 0;
-  const bestProtocol = lendingApys.find((a) => a.apyPercent === bestApy);
+  // `stale: true` means we did NOT fetch this rate — it is either the client-side
+  // placeholder or a failed fetch. Stale entries may still carry a number, so those
+  // entries carry plausible-looking hardcoded numbers, so every AGGREGATE below must
+  // exclude them or a fabricated rate silently becomes a headline figure. ProtocolTable
+  // already renders per-row stale as "—"; these aggregates did not, which meant Avg
+  // Protocol APY / Best Available rendered fallback numbers on first paint and stayed
+  // there for good if /api/apys was down. Same bug class as the fake Solend 5.10%.
+  const lendingApys = apys.filter(a => a.riskScore <= 1 && !a.stale);
+  const hasLiveApys = lendingApys.length > 0;
+  const avgApy = hasLiveApys ? lendingApys.reduce((s, a) => s + a.apyPercent, 0) / lendingApys.length : 0;
+  const bestApy = hasLiveApys ? Math.max(...lendingApys.map((a) => a.apyPercent)) : 0;
+  const bestProtocol = hasLiveApys ? lendingApys.find((a) => a.apyPercent === bestApy) : undefined;
 
+  // Total Earned — a clearly-labelled PROJECTION, not a realized figure.
+  //
+  // We deliberately do NOT trust p.earnedValue here. It is derived from the on-chain
+  // total_deposits, which only learns about yield when a recall REALIZES it — so between
+  // recalls it reads $0, and worse, it can carry orphaned realized-yield from a prior
+  // withdrawal that has no funds behind it (fixed on-chain by settle_recall / reconcile in
+  // the pending upgrade). Until reconcile() ships, the honest on-chain number is either $0
+  // or wrong-by-dust, so dressing it up as "all time" earnings would be a lie.
+  //
+  // Instead project from what IS reliable: real deposited principal x the vault ACTUAL
+  // blended rate (its live allocation weighted by each protocol APY) x time deposited.
+  // Scaled by DEPLOYED_FRACTION because ~10% sits idle as the withdrawal buffer and earns
+  // nothing. This grows continuously and never claims to be realized.
+  //
+  // ABSTAIN if ANY active protocol lacks a live rate. Deliberately mirrors the keeper's
+  // rule from PR #105 (`computeRebalanceDecision` abstains entirely rather than routing
+  // around a stale protocol). Blending only the protocols we CAN price would silently
+  // reweight the vault — a stale 80% leg would let the live 20% leg set the whole
+  // projection — which is how a fabricated input turns into a confident wrong number.
+  // Abstaining shows "accruing" instead, which is honest about what we don't know.
+  const DEPLOYED_FRACTION = 0.9; // mirrors MIN_IDLE_BPS = 1000 (10% idle buffer)
+  const vaultBlendedApy = (vault: typeof vaults[number] | undefined): number => {
+    if (!vault) return 0;
+    const active = vault.protocols.filter(p => p.targetBps > 0);
+    const totalBps = active.reduce((sum, p) => sum + p.targetBps, 0);
+    if (totalBps === 0) return 0;
+    const rates = active.map(p => apys.find(x => x.protocolId === p.name));
+    if (rates.some(a => !a || a.stale)) return 0;
+    return active.reduce((sum, p, i) => sum + rates[i]!.apyPercent * (p.targetBps / totalBps), 0);
+  };
   const totalEarned = positions.reduce((s, p) => {
     const v = vaults.find(v => v.address === p.vault);
-    const decimals = v?.name.toUpperCase().includes("SOL") ? 1e9 : 1e6;
-    if (p.earnedValue > 0) return s + p.earnedValue / decimals;
-    if (p.lastDepositTs > 0 && bestApy > 0) {
-      const secsElapsed = Math.max(0, Date.now() / 1000 - p.lastDepositTs);
-      const yearFraction = secsElapsed / 31_536_000;
-      const depositUsd = (p.depositedAmount / decimals) * (v?.name.toUpperCase().includes("SOL") ? solPrice : 1);
-      return s + depositUsd * (bestApy / 100) * yearFraction;
-    }
-    return s;
+    if (!v || p.lastDepositTs <= 0) return s;
+    const apy = vaultBlendedApy(v);
+    if (apy <= 0) return s;
+    const decimals = v.name.toUpperCase().includes("SOL") ? 1e9 : 1e6;
+    const yearFraction = Math.max(0, Date.now() / 1000 - p.lastDepositTs) / 31_536_000;
+    const principalUsd = (p.depositedAmount / decimals) * (v.name.toUpperCase().includes("SOL") ? solPrice : 1);
+    return s + principalUsd * DEPLOYED_FRACTION * (apy / 100) * yearFraction;
   }, 0);
-  const isProjected = positions.length > 0 && positions.every(p => p.earnedValue === 0);
 
   const primaryVault = vaults[0];
+  // "AUTOPILOT ENGAGED" was a HARDCODED string — it never read autoRebalance, so it claimed
+  // engaged while autopilot was off, the vault was paused, or the keeper was dead. It has been
+  // lying since the USDC vault's auto-rebalance was deliberately disabled as Solend containment.
+  // `autoRebalance` gates whether the keeper may CHANGE targets; deployment to existing targets
+  // continues regardless, which is why "off" still means funds are working — just not re-routed.
+  const autopilotOn = !!primaryVault?.autoRebalance && !primaryVault?.paused;
 
   const usdcVault = vaults.find(v => v.name.toUpperCase().includes("USDC"));
   const solVault  = vaults.find(v => v.name.toUpperCase().includes("SOL"));
@@ -93,19 +115,50 @@ export default function Dashboard() {
   const minutesSinceCompound = lastCompound ? Math.floor((Date.now() - lastCompound.getTime()) / 60000) : null;
   const onChainAllocation = primaryVault?.protocols.filter(p => p.targetBps > 0) || [];
   const topApys = [...apys].filter(a => a.riskScore <= 1).sort((a, b) => b.apyPercent - a.apyPercent).slice(0, 2);
-  const currentAllocation = onChainAllocation.length > 0
-    ? onChainAllocation
-    : topApys.length >= 2
-      ? [{ name: topApys[0].name, targetBps: 8000 }, { name: topApys[1].name, targetBps: 2000 }]
-      : topApys.length === 1
-        ? [{ name: topApys[0].name, targetBps: 10000 }]
-        : [];
+  // Show ONLY the vault's real on-chain targets. This previously fell back to a
+  // FABRICATED [best 80% / runner-up 20%] (or [best 100%]) built from the APY list whenever
+  // a vault had no on-chain allocation — indistinguishable, to the user, from a real one.
+  // That is the same failure that produced Solend's fake 5.10% and Jito's hardcoded 6.5%
+  // base: a made-up number wearing the costume of live state. Render nothing instead.
+  const currentAllocation = onChainAllocation;
 
-  const tierLabel = userGateBalance >= (primaryVault?.goldThreshold ?? 1_000_000) ? "Gold"
+  // Tiers only exist when the vault actually has a gate mint set. `system_program::ID` is
+  // the program's "unset" sentinel, and on an ungated vault `withdraw()` skips tier logic
+  // entirely and falls through to STANDARD_FEE_BPS = 900 (9%) for everyone.
+  //
+  // Without this check the ladder is decided by comparing `userGateBalance` against the
+  // thresholds directly. That is currently harmless ONLY because the balance is always 0
+  // (no gate mint exists on mainnet, so nobody can hold the token). The moment a real
+  // gate mint is set, this would award tiers off a balance the program does not honour —
+  // showing a user "Gold · 0% fee" while the chain charges them 9%. DepositWithdrawPanel
+  // already gates on this; the dashboard did not.
+  const SYSTEM_PROGRAM = "11111111111111111111111111111111";
+  const gatingActive = !!primaryVault?.gateMint
+    && primaryVault.gateMint !== SYSTEM_PROGRAM
+    && primaryVault.gateMint !== "";
+  const tierLabel = !gatingActive ? "Standard"
+    : userGateBalance >= (primaryVault?.goldThreshold ?? 1_000_000) ? "Gold"
     : userGateBalance >= (primaryVault?.silverThreshold ?? 100_000) ? "Silver"
     : userGateBalance >= (primaryVault?.bronzeThreshold ?? 10_000) ? "Bronze"
     : "Standard";
   const tierColor = tierLabel === "Gold" ? "var(--token)" : tierLabel === "Silver" ? "var(--text-mid)" : tierLabel === "Bronze" ? "#CD7F32" : "var(--text-low)";
+
+  // Tier-nudge: how many more $YPILOT to reach the next tier up, and how much
+  // fee that saves. Every tier step saves 3pp (9/6/3/0), but computed via the
+  // real fee map rather than hardcoded, so this stays correct if the fee
+  // ladder itself ever changes (thresholds already can, via update_tier_thresholds).
+  const FEE_BPS_BY_TIER: Record<string, number> = { Gold: 0, Silver: 3, Bronze: 6, Standard: 9 };
+  const NEXT_TIER: Record<string, string> = { Standard: "Bronze", Bronze: "Silver", Silver: "Gold" };
+  const THRESHOLD_BY_TIER: Record<string, number> = {
+    Bronze: primaryVault?.bronzeThreshold ?? 10_000,
+    Silver: primaryVault?.silverThreshold ?? 100_000,
+    Gold: primaryVault?.goldThreshold ?? 1_000_000,
+  };
+  // Suppressed while gating is off: promising a fee saving nobody can unlock is the same
+  // class of claim as the cadence and harvest copy removed in #121/#122.
+  const nextTier = gatingActive ? NEXT_TIER[tierLabel] : undefined;
+  const tokensToNextTier = nextTier ? Math.max(0, THRESHOLD_BY_TIER[nextTier] - userGateBalance) : 0;
+  const nextTierFeeSavingsPct = nextTier ? FEE_BPS_BY_TIER[tierLabel] - FEE_BPS_BY_TIER[nextTier] : 0;
 
   const tabStyle = (t: Tab): React.CSSProperties => ({
     padding: "8px 16px", borderRadius: 7, border: "none", cursor: "pointer",
@@ -143,34 +196,6 @@ export default function Dashboard() {
           <p style={{ color: "var(--text-low)", fontSize: 12, marginTop: 10 }}>Works with Phantom & Solflare</p>
         </div>
 
-        {/* Sample portfolio preview — clearly labeled illustrative, not real data */}
-        <div style={{ width: "100%", background: "var(--ink-800)", border: "1px dashed var(--line)", borderRadius: 16, padding: "24px 28px", marginBottom: 20, position: "relative", zIndex: 1, textAlign: "left" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-low)", textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: "var(--font-mono)" }}>
-              Sample portfolio — illustrative
-            </div>
-            <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 4, background: "var(--ink-700)", color: "var(--text-low)", border: "1px solid var(--line)", fontFamily: "var(--font-mono)" }}>NOT REAL DATA</span>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 20, opacity: 0.75 }}>
-            <div>
-              <div className="mono-num" style={{ fontSize: 26, fontWeight: 500, color: "var(--text-hi)" }}>$5,214.63</div>
-              <div style={{ fontSize: 11, color: "var(--text-low)", marginTop: 3 }}>Position value</div>
-            </div>
-            <div>
-              <div className="mono-num" style={{ fontSize: 26, fontWeight: 500, color: "var(--signal)" }}>+4.29%</div>
-              <div style={{ fontSize: 11, color: "var(--text-low)", marginTop: 3 }}>Return since deposit</div>
-            </div>
-            <div>
-              <div className="mono-num" style={{ fontSize: 26, fontWeight: 500, color: "var(--signal)" }}>+$1.16</div>
-              <div style={{ fontSize: 11, color: "var(--text-low)", marginTop: 3 }}>Yield / day</div>
-            </div>
-            <div>
-              <div className="mono-num" style={{ fontSize: 26, fontWeight: 500, color: "var(--text-hi)" }}>80 / 20</div>
-              <div style={{ fontSize: 11, color: "var(--text-low)", marginTop: 3 }}>Allocation split</div>
-            </div>
-          </div>
-        </div>
-
         <div style={{ width: "100%", background: "var(--ink-800)", border: "1px solid var(--line)", borderRadius: 16, padding: "24px 28px", marginBottom: 32, position: "relative", zIndex: 1 }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-low)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 20, fontFamily: "var(--font-mono)" }}>Live vault stats</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 24 }}>
@@ -201,8 +226,11 @@ export default function Dashboard() {
               <div style={{ fontSize: 12, color: "var(--text-low)", marginTop: 4 }}>Last Compounded</div>
             </div>
             <div style={{ textAlign: "left" }}>
-              <div className="mono-num" style={{ fontSize: 22, fontWeight: 500, color: "var(--warn)" }}>15 min</div>
-              <div style={{ fontSize: 12, color: "var(--text-low)", marginTop: 4 }}>Rebalance Interval</div>
+              {/* "45 min" was wrong: the 45-minute cron expression fires at :00 and :45
+                  (a 45-then-15 split), and Actions delays on top — observed gaps 60-98 min.
+                  See the How-it-works note below. */}
+              <div className="mono-num" style={{ fontSize: 22, fontWeight: 500, color: "var(--warn)" }}>~hourly</div>
+              <div style={{ fontSize: 12, color: "var(--text-low)", marginTop: 4 }}>Rebalance Cadence</div>
             </div>
           </div>
 
@@ -269,11 +297,22 @@ export default function Dashboard() {
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 20, fontSize: 12 }}>
-            <div className="live-dot" style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--signal)" }} />
-            <span style={{ color: "var(--signal)", fontFamily: "var(--font-mono)", fontWeight: 500 }}>AUTOPILOT ENGAGED</span>
+            <div className="live-dot" style={{ width: 6, height: 6, borderRadius: "50%", background: autopilotOn ? "var(--signal)" : "var(--text-low)" }} />
+            <span style={{ color: autopilotOn ? "var(--signal)" : "var(--text-low)", fontFamily: "var(--font-mono)", fontWeight: 500 }}>
+              {primaryVault?.paused ? "VAULT PAUSED" : autopilotOn ? "AUTOPILOT ENGAGED" : "AUTOPILOT OFF"}
+            </span>
             {currentAllocation[0] && <span style={{ color: "var(--text-low)" }}>· Routing to {currentAllocation[0].name}</span>}
-            <span style={{ color: "var(--text-low)" }}>· Next rebalance</span>
-            <Countdown lastCompoundTs={primaryVault?.lastCompoundTs ?? null} />
+            {/* Report when the keeper LAST acted (real, from lastCompoundTs on-chain) rather than
+                predicting when it next will. The old "Next rebalance MM:SS" countdown ignored its
+                own prop and rendered Date.now() % 45min — pure theatre. It can't be made accurate:
+                the keeper runs on a GitHub Actions cron whose OBSERVED gaps are 60-98 minutes
+                (the every-45 cron form actually means :00 and :45, and Actions cron drifts heavily on top). A
+                verifiable "last acted" beats a confident, wrong prediction. */}
+            {minutesSinceCompound !== null && (
+              <span style={{ color: "var(--text-low)" }}>
+                · Last compounded <span className="mono-num" style={{ color: "var(--text-hi)" }}>{minutesSinceCompound}m</span> ago
+              </span>
+            )}
           </div>
 
           {currentAllocation.length > 0 && (
@@ -308,8 +347,10 @@ export default function Dashboard() {
 
           <div style={{ marginTop: 8, paddingTop: 16, borderTop: "1px solid var(--line)", fontSize: 12, color: "var(--text-mid)", lineHeight: 1.7 }}>
             <div>Perf fee: <span className="mono-num" style={{ color: "var(--text-hi)" }}>{tierLabel === "Gold" ? "0%" : tierLabel === "Silver" ? "3%" : tierLabel === "Bronze" ? "6%" : "9%"}</span> on profit</div>
-            {tierLabel !== "Gold" && (
-              <div style={{ marginTop: 4 }}>Hold 1,000,000 $YPILOT → Gold (0% fee)</div>
+            {nextTier && tokensToNextTier > 0 && (
+              <div style={{ marginTop: 4 }}>
+                You're <span className="mono-num" style={{ color: "var(--text-hi)" }}>{tokensToNextTier.toLocaleString()}</span> $YPILOT away from {nextTier} — save {nextTierFeeSavingsPct}% in fees
+              </div>
             )}
           </div>
         </div>
@@ -334,7 +375,7 @@ export default function Dashboard() {
       )}
 
       {/* Tabs */}
-      <div style={{ display: "flex", gap: 4, marginBottom: 20, background: "var(--ink-800)", padding: 4, borderRadius: 10, border: "1px solid var(--line)", width: "fit-content" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 20, background: "var(--ink-800)", padding: 4, borderRadius: 10, border: "1px solid var(--line)", width: "fit-content", maxWidth: "100%" }}>
         {(["overview", "protocols", "deposit", "withdraw"] as Tab[]).map((t) => (
           <button key={t} onClick={() => setActiveTab(t)} style={tabStyle(t)}>
             {t.charAt(0).toUpperCase() + t.slice(1)}
@@ -347,9 +388,18 @@ export default function Dashboard() {
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-            <StatCard label="Total Earned" value={`$${fmt(totalEarned)}`} sub={isProjected && totalEarned > 0 ? "projected" : "all time"} accent="var(--signal)" />
-            <StatCard label="Avg Protocol APY" value={`${fmt(avgApy)}%`} sub="across protocols" accent="var(--token)" />
-            <StatCard label="Best Available" value={`${fmt(bestApy)}%`} sub={bestProtocol ? `${bestProtocol.name} · ${bestProtocol.asset}` : ""} accent="var(--warn)" />
+            {/* Sub-cent earnings are REAL but round to $0.00 at 2dp, which reads as broken.
+                A $12 position at ~6.5% takes ~3 days to clear a cent, so this is the normal
+                early state, not an edge case. Show "<$0.01 · accruing" instead of a
+                confident "$0.00 · projected". */}
+            <StatCard
+              label="Total Earned"
+              value={totalEarned > 0 && totalEarned < 0.005 ? "<$0.01" : `$${fmt(totalEarned)}`}
+              sub={totalEarned >= 0.005 ? "projected · est." : positions.length > 0 ? "accruing" : "—"}
+              accent="var(--signal)"
+            />
+            <StatCard label="Avg Protocol APY" value={hasLiveApys ? `${fmt(avgApy)}%` : "—"} sub={hasLiveApys ? "across protocols" : "rates unavailable"} accent="var(--token)" />
+            <StatCard label="Best Available" value={hasLiveApys ? `${fmt(bestApy)}%` : "—"} sub={bestProtocol ? `${bestProtocol.name} · ${bestProtocol.asset}` : "rates unavailable"} accent="var(--warn)" />
           </div>
 
           <Card>
@@ -444,8 +494,17 @@ export default function Dashboard() {
               <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 16 }}>
                 {[
                   ["1. Deposit", "You deposit tokens into the vault. You receive shares representing your ownership."],
-                  ["2. Auto-optimize", "The keeper bot moves funds to highest-yield protocols every 15 minutes."],
-                  ["3. Auto-compound", "Rewards are harvested and reinvested every hour, growing your position."],
+                  // Cadence: the cron is "*/45", which in cron fires at :00 and :45 — a 45-then-15
+                  // split, NOT "every 45 minutes" — and GitHub Actions cron is best-effort on top.
+                  // Observed gaps between real runs: 60-98 minutes. "~hourly" matches the wording
+                  // already used on the APYs page; do not put a precise number back here.
+                  ["2. Auto-optimize", "The keeper bot checks rates roughly hourly and moves funds when a better rate clears the drift threshold."],
+                  // NOT "harvested and reinvested" — compound() is a no-op on-chain (it updates a
+                  // timestamp and emits an event; it moves no funds). Nothing needs harvesting:
+                  // yield accrues inside each receipt token's exchange rate (mSOL/jitoSOL/kUSDC
+                  // appreciate on their own) and is realized into the vault on recall. Claiming an
+                  // hourly harvest described work the program does not do.
+                  ["3. Auto-compound", "Your yield accrues inside each protocol's receipt token, so it compounds on its own — nothing to harvest or claim."],
                   ["4. Withdraw anytime", "Burn your shares to receive your tokens plus earned yield, minus a small performance fee."],
                 ].map(([title, desc]) => (
                   <div key={title}>
@@ -505,3 +564,7 @@ export default function Dashboard() {
     </div>
   );
 }
+
+
+
+
