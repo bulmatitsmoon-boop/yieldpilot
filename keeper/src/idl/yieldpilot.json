@@ -1675,10 +1675,23 @@
         },
         {
           "name": "position_mint",
-          "writable": true
+          "docs": [
+            "Position NFT mint. Does NOT exist yet - Orca's open_position inits it,",
+            "so this must be an unvalidated Signer, never Account<Mint>. Typing it as",
+            "Account<Mint> made Anchor deserialize it BEFORE the instruction body ran,",
+            "failing with AccountNotInitialized (3012) and making this instruction",
+            "permanently unreachable. Found by the local harness 2026-07-20 on the",
+            "first ever execution of this code path."
+          ],
+          "writable": true,
+          "signer": true
         },
         {
           "name": "position_token_account",
+          "docs": [
+            "by vault_authority. Same reason as above - cannot be Account<TokenAccount>",
+            "because it does not exist when Anchor validates accounts."
+          ],
           "writable": true
         },
         {
@@ -2334,10 +2347,23 @@
         },
         {
           "name": "position_mint",
-          "writable": true
+          "docs": [
+            "Position NFT mint. Does NOT exist yet - Orca's open_position inits it,",
+            "so this must be an unvalidated Signer, never Account<Mint>. Typing it as",
+            "Account<Mint> made Anchor deserialize it BEFORE the instruction body ran,",
+            "failing with AccountNotInitialized (3012) and making this instruction",
+            "permanently unreachable. Found by the local harness 2026-07-20 on the",
+            "first ever execution of this code path."
+          ],
+          "writable": true,
+          "signer": true
         },
         {
           "name": "position_token_account",
+          "docs": [
+            "by vault_authority. Same reason as above - cannot be Account<TokenAccount>",
+            "because it does not exist when Anchor validates accounts."
+          ],
           "writable": true
         },
         {
