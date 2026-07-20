@@ -201,11 +201,12 @@ export default function ApysPage() {
             Protocol rates.
           </h1>
           <h1 style={{ fontFamily: "var(--font-display)", fontSize: 28, fontWeight: 700, letterSpacing: "-0.015em", color: "var(--signal)", marginBottom: 20 }}>
-            Updated every 15 minutes.
+            Updated every 60 seconds.
           </h1>
           <p style={{ color: "var(--text-mid)", fontSize: 14, lineHeight: 1.7, maxWidth: 520 }}>
             YieldPilot monitors these protocols continuously. 80% of vault assets route to the top rate,
-            20% stays in the runner-up. Rates update every 15 minutes; display refreshes every 60 seconds.
+            20% stays in the runner-up. Rates here refresh every 60 seconds; the keeper re-evaluates
+            allocations roughly hourly.
           </p>
         </div>
 
@@ -217,8 +218,13 @@ export default function ApysPage() {
           {[
             { label: "Primary allocation", value: "80%" },
             { label: "Runner-up allocation", value: "20%" },
-            { label: "Rebalance threshold", value: "0.5%" },
-            { label: "Rebalance cycle", value: "15 min" },
+            // 5%, not 0.5% — REBALANCE_THRESHOLD_BPS defaults to 500 bps in rebalancer.ts and the
+            // keeper cron does not override it. The page advertised 0.5% for a 5% trigger: off by 10x.
+            { label: "Rebalance threshold", value: "5% drift" },
+            // "~hourly", not "45 min". The cron is "*/45", which in cron means minutes :00 and :45 —
+            // a 45-then-15 split, NOT "every 45 minutes" — and GitHub Actions cron is best-effort on
+            // top of that. Real observed gaps between scheduled runs: 93, 60, 97, 76, 98, 74 minutes.
+            { label: "Rebalance cycle", value: "~hourly" },
           ].map(({ label, value }) => (
             <div key={label} style={{ background: "var(--ink-800)", padding: "20px 24px" }}>
               <div className="mono-num" style={{ fontSize: 22, fontWeight: 500, color: "var(--text-hi)", marginBottom: 4 }}>
@@ -256,7 +262,7 @@ export default function ApysPage() {
                     fontSize: 12, fontWeight: 600, fontFamily: "var(--font-body)",
                   }}
                 >
-                  {p.name} <span className="mono-num" style={{ marginLeft: 6 }}>{fmt(p.apyPercent)}%</span>
+                  {p.name} <span className="mono-num" style={{ marginLeft: 6 }}>{p.stale ? "—" : `${fmt(p.apyPercent)}%`}</span>
                 </button>
               ))}
             </div>
@@ -397,7 +403,7 @@ export default function ApysPage() {
                   textAlign: "right", fontWeight: 500, fontSize: 15,
                   color: isLP ? "var(--loss)" : (routableRank === 0 ? "var(--signal)" : "var(--text-hi)"),
                 }}>
-                  {fmt(p.apyPercent)}%
+                  {p.stale ? "—" : `${fmt(p.apyPercent)}%`}
                 </span>
                 <span className="mono-num" style={{ textAlign: "right", color: "var(--text-mid)", fontSize: 12 }}>
                   {fmtTvl(p.tvlUsd)}

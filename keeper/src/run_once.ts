@@ -4,6 +4,7 @@ import { fetchAllApys } from "./apyFetcher";
 import { SolanaClient } from "./solanaClient";
 import { computeRebalanceDecision, shouldCompound } from "./rebalancer";
 import { computeLpRepositionDecision, LpVaultRangeState } from "./lpVaultRebalancer";
+import { notifyTelegram } from "./telegramNotify";
 
 /**
  * run_once.ts — single-cycle keeper run for GitHub Actions scheduled workflow.
@@ -32,23 +33,61 @@ async function runApyPollAndRebalance(client: SolanaClient) {
 
   for (const { address, state } of vaults) {
     logger.info(`Checking vault: ${address.slice(0, 8)}... (${state.name})`);
-    if (!state.autoRebalance) {
-      logger.info("  Auto-rebalance off — skipping");
-      continue;
+
+    // auto_rebalance gates whether we CHANGE target allocations — it must NOT gate
+    // deploying idle funds to the targets already set. This previously did `continue`,
+    // so turning auto-rebalance off (e.g. to pin allocations while a protocol is known
+    // broken) silently meant deposits were NEVER deployed and sat idle forever.
+    // Found 2026-07-16 with 5 real USDC stuck idle at kamino target 100%.
+    // `state` was read by fetchAllVaults() BEFORE any rebalance below. rebalance()
+    // writes new targetBps ON-CHAIN, which does NOT update this local object — so
+    // executeRebalance must be given a FRESH read or it deploys against the OLD
+    // allocation. Tracked separately so the re-read only costs an RPC call when a
+    // rebalance actually happened.
+    let currentState = state;
+
+    if (state.autoRebalance) {
+      const decision = computeRebalanceDecision(state, apys);
+      logger.info(`  Rebalance decision: ${decision.reason}`, {
+        current: decision.currentAllocations,
+        proposed: decision.newAllocations,
+        apyImprovementBps: decision.expectedApyImprovement,
+      });
+      if (decision.shouldRebalance) {
+        logger.info("  Sending rebalance transaction...");
+        const sig = await client.rebalance(address, decision.newAllocations);
+        if (sig) {
+          logger.info("  ✓ Target allocations updated", { signature: sig });
+          // MUST re-read: the targets we just wrote are on-chain, but `state` predates
+          // them. Deploying against the stale copy sends funds to the allocation we
+          // just abandoned, and the NEXT cycle then has to recall and re-deploy —
+          // paying real, unrecoverable exit fees to undo work we shouldn't have done.
+          //
+          // Observed live 2026-07-17 on the SOL vault: the keeper correctly rebalanced
+          // to jito 0 / marinade 8000 / kamino-sol 2000, then immediately deployed
+          // 0.018054 SOL to JITO (whose target it had just set to 0) while kamino-sol
+          // — the protocol it had just chosen — received nothing. Latent since PR #101
+          // and masked until now: every earlier rebalance either changed nothing or hit
+          // an empty vault, so the stale copy happened to match the fresh one.
+          currentState = await client.fetchVault(address);
+          await notifyTelegram(
+            `⚡ <b>Rebalanced</b> — ${state.name}
+` +
+            `${decision.reason}
+` +
+            `<a href="https://solscan.io/tx/${sig}">View transaction</a>`
+          );
+        }
+      }
+    } else {
+      logger.info("  Auto-rebalance off — target allocations left unchanged");
     }
-    const decision = computeRebalanceDecision(state, apys);
-    logger.info(`  Rebalance decision: ${decision.reason}`, {
-      current: decision.currentAllocations,
-      proposed: decision.newAllocations,
-      apyImprovementBps: decision.expectedApyImprovement,
-    });
-    if (decision.shouldRebalance) {
-      logger.info("  Sending rebalance transaction...");
-      const sig = await client.rebalance(address, decision.newAllocations);
-      if (sig) logger.info("  ✓ Target allocations updated", { signature: sig });
-    }
+
+    // ALWAYS sync deployment to whatever the current targets are, regardless of
+    // auto_rebalance. With targets pinned (e.g. kamino 100% / solend 0%) this deploys
+    // only to the healthy protocol and sends nothing to the disabled one.
     logger.info("  Syncing fund deployment to current targets...");
-    await client.executeRebalance(address, state);
+    await client.executeRebalance(address, currentState);
   }
 }
 
@@ -61,7 +100,13 @@ async function runCompound(client: SolanaClient) {
     if (compound) {
       logger.info("  Sending compound transaction...");
       const sig = await client.compound(address);
-      if (sig) logger.info("  ✓ Compounded", { signature: sig });
+      if (sig) {
+        logger.info("  ✓ Compounded", { signature: sig });
+        await notifyTelegram(
+          `🔄 <b>Compounded</b> — ${state.name}\n` +
+          `<a href="https://solscan.io/tx/${sig}">View transaction</a>`
+        );
+      }
     }
   }
 }

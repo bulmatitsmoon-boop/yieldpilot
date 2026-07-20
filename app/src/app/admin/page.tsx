@@ -13,9 +13,9 @@ import { useApys } from "@/hooks/useApys";
 import IDL from "@/idl/yieldpilot.mainnet.json";
 
 const PROGRAM_ID = new PublicKey(
-  process.env.NEXT_PUBLIC_PROGRAM_ID || "CVJrJGoKjseTJqiFGctssYde3pLAnPaRZtjAaKXd8pWk"
+  process.env.NEXT_PUBLIC_PROGRAM_ID || "3tAEmHXZ51YVLe9ts8b9cMcgQPgaSamLxLtxR31VpREi"
 );
-const VAULT_ADDRESSES = (process.env.NEXT_PUBLIC_VAULT_ADDRESSES || "F1r513ZZdofz4tjhRfhNAYDK5hsmc8uCZbMmg2tkPJ6e,8KcoRt5DcCbXBaqDVDorEbW2J6GofTrRyy9Afzb8wwaE")
+const VAULT_ADDRESSES = (process.env.NEXT_PUBLIC_VAULT_ADDRESSES || "5XpzWiE8jb53CShYv19UoXcY2AywjeXpfwCff8mgrNYn,7MJGAiZmTre6VmVQXgYRK6vqoQeoMW1jwEL9jEXZgRy3")
   .split(",").map(s => s.trim()).filter(Boolean);
 const ADMIN_WALLET = process.env.NEXT_PUBLIC_ADMIN_WALLET || "8i7kydJHwi3Cdp46Xugyux2vWJmTScYDvnJrBiBihBnP";
 
@@ -33,7 +33,6 @@ export default function AdminPage() {
 
   // Form state
   const [newGateMint, setNewGateMint] = useState("");
-  const [newTreasury, setNewTreasury] = useState("");
   const [pauseVaultIdx, setPauseVaultIdx] = useState(0);
   const [newTvlCap, setNewTvlCap] = useState("");
   const [rebalanceAllocs, setRebalanceAllocs] = useState("8000,2000");
@@ -76,13 +75,6 @@ export default function AdminPage() {
       .accounts({ admin: publicKey!, vault }).rpc();
   });
 
-  const handleSetTreasury = () => wrapTx(async () => {
-    const program = getProgram();
-    const vault = new PublicKey(VAULT_ADDRESSES[0]);
-    return program.methods.setTreasury(new PublicKey(newTreasury))
-      .accounts({ admin: publicKey!, vault }).rpc();
-  });
-
   const handlePause = (paused: boolean) => wrapTx(async () => {
     const program = getProgram();
     const vault = new PublicKey(VAULT_ADDRESSES[pauseVaultIdx]);
@@ -90,11 +82,15 @@ export default function AdminPage() {
       .accounts({ admin: publicKey!, vault }).rpc();
   });
 
-  const handleSetTvlCap = () => wrapTx(async () => {
+  // Real instruction is raise_tvl_cap — one-directional, can only increase.
+  // (set_tvl_cap/set_treasury don't exist on-chain; both were intentionally
+  // removed so the cap can't be weaponized to block deposits and treasury
+  // can't be redirected to steal fees — see lib.rs's comments.)
+  const handleRaiseTvlCap = () => wrapTx(async () => {
     const program = getProgram();
     const vault = new PublicKey(VAULT_ADDRESSES[0]);
     const cap = new anchor.BN(Math.floor(parseFloat(newTvlCap) * 1e6));
-    return program.methods.setTvlCap(cap)
+    return program.methods.raiseTvlCap(cap)
       .accounts({ admin: publicKey!, vault }).rpc();
   });
 
@@ -217,23 +213,6 @@ export default function AdminPage() {
           </div>
         </Card>
 
-        {/* Treasury */}
-        <Card>
-          <CardHeader title="Performance Fee Treasury" />
-          <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 12 }}>
-            <div>
-              <label style={labelStyle}>Treasury Wallet Address</label>
-              <input style={inputStyle} value={newTreasury} onChange={e => setNewTreasury(e.target.value)}
-                placeholder="Wallet that receives perf fees" />
-            </div>
-            <div style={{ background: "var(--bg)", borderRadius: 8, padding: "10px 12px", fontSize: 12, color: "var(--text-muted)" }}>
-              Performance fees are collected on every withdrawal (5% of profit only).
-              Set to your wallet to receive them.
-            </div>
-            <Button onClick={handleSetTreasury} disabled={!newTreasury}>Update Treasury</Button>
-          </div>
-        </Card>
-
         {/* Vault Controls */}
         <Card>
           <CardHeader title="Vault Controls" />
@@ -244,12 +223,15 @@ export default function AdminPage() {
             </div>
             <div style={{ height: 1, background: "var(--border)" }} />
             <div>
-              <label style={labelStyle}>TVL Cap (USDC)</label>
+              <label style={labelStyle}>Raise TVL Cap (USDC) — one-directional, can only increase</label>
               <div style={{ display: "flex", gap: 8 }}>
                 <input style={{ ...inputStyle, flex: 1 }} type="number" value={newTvlCap}
                   onChange={e => setNewTvlCap(e.target.value)} placeholder="e.g. 100000" />
-                <Button onClick={handleSetTvlCap} disabled={!newTvlCap}>Set</Button>
+                <Button onClick={handleRaiseTvlCap} disabled={!newTvlCap}>Raise</Button>
               </div>
+            </div>
+            <div style={{ background: "var(--bg)", borderRadius: 8, padding: "10px 12px", fontSize: 12, color: "var(--text-muted)" }}>
+              Treasury and performance fee tiers are fixed at vault creation and cannot be changed afterward — this is a deliberate on-chain protection, not a missing feature. Performance fees are tiered by gate-token tier (Gold 0% / Silver 3% / Bronze 6% / Standard 9%), charged on profit only.
             </div>
           </div>
         </Card>
@@ -326,7 +308,7 @@ export default function AdminPage() {
                 <span style={{ fontWeight: 600, fontSize: 13 }}>{p.name}</span>
                 <span style={{ color: "var(--text-muted)", fontSize: 12, marginLeft: 8 }}>{p.asset}</span>
               </div>
-              <span style={{ fontFamily: "var(--mono)", color: "var(--green)", fontWeight: 700 }}>{fmt(p.apyPercent)}%</span>
+              <span style={{ fontFamily: "var(--mono)", color: "var(--green)", fontWeight: 700 }}>{p.stale ? "—" : `${fmt(p.apyPercent)}%`}</span>
             </div>
           ))}
         </div>
