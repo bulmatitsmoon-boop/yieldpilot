@@ -233,8 +233,11 @@ pub mod orca_lp {
         )]
         pub lp_vault: Box<Account<'info, LpVault>>,
 
-        /// CHECK: PDA, verified by seeds
-        #[account(seeds = [b"lp_vault_authority", lp_vault.key().as_ref()], bump)]
+        /// CHECK: PDA, verified by seeds. MUST be `mut`: the open_position CPI passes
+        /// this as Orca's `funder` (writable + signer), and a CPI cannot escalate an
+        /// account to writable if the outer instruction declared it read-only.
+        /// Found by the local harness 2026-07-20 ("writable privilege escalated").
+        #[account(mut, seeds = [b"lp_vault_authority", lp_vault.key().as_ref()], bump)]
         pub vault_authority: UncheckedAccount<'info>,
 
         pub token_a_mint: Box<Account<'info, Mint>>,
