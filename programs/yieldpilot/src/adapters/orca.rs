@@ -88,8 +88,7 @@ pub struct OrcaModifyLiquidity<'info> {
 
     /// Vault-owned ATA holding the position NFT (must hold exactly 1 unit).
     #[account(constraint = position_token_account.amount == 1)]
-    /// CHECK: does not exist yet - created by open_position as an ATA.
-    pub position_token_account: AccountInfo<'info>,
+    pub position_token_account: Account<'info, TokenAccount>,
 
     /// Vault's token A (e.g. USDC) staging account.
     #[account(mut)]
@@ -140,8 +139,7 @@ pub struct OrcaClosePosition<'info> {
     pub position_mint: AccountInfo<'info>,
 
     #[account(constraint = position_token_account.amount == 1)]
-    /// CHECK: does not exist yet - created by open_position as an ATA.
-    pub position_token_account: AccountInfo<'info>,
+    pub position_token_account: Account<'info, TokenAccount>,
 
     pub token_program: Program<'info, Token>,
 
