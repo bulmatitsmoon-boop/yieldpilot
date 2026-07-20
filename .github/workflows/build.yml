@@ -66,9 +66,9 @@ jobs:
         run: |
           cd programs/yieldpilot
           if [ "${{ github.event.inputs.network }}" == "mainnet" ]; then
-            cargo-build-sbf --manifest-path Cargo.toml --features mainnet
+            cargo-build-sbf --manifest-path Cargo.toml --features mainnet,no-idl
           else
-            cargo-build-sbf --manifest-path Cargo.toml
+            cargo-build-sbf --manifest-path Cargo.toml --features no-idl
           fi
 
       - name: Generate IDL only (does NOT touch program id / keys)
@@ -147,3 +147,4 @@ jobs:
       - name: Clean up keypairs
         if: always()
         run: rm -f /tmp/deploy-authority.json /tmp/mainnet-program-keypair.json
+
