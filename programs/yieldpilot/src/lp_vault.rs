@@ -767,6 +767,7 @@ pub mod orca_lp {
         let seeds: &[&[u8]] = &[b"lp_vault_authority", lp_vault_key.as_ref(), &[authority_bump]];
 
         let v = &ctx.accounts.lp_vault;
+        let total_shares_before = v.total_shares;
         let liquidity_amount = calculate_withdraw_liquidity(shares, v.total_liquidity, v.total_shares)?;
 
         let vault_a_before = ctx.accounts.vault_token_a_account.amount;
@@ -814,24 +815,36 @@ pub mod orca_lp {
         require!(received_a >= token_min_a, LpVaultError::SlippageExceeded);
         require!(received_b >= token_min_b, LpVaultError::SlippageExceeded);
 
-        if received_a > 0 {
+        // Pro-rata slice of the vault's IDLE tokens (the balance that was already there
+        // before this CPI). Shares represent a claim on the whole vault, not just on the
+        // deployed position — exit parks liquidity here, and without this the difference
+        // is unredeemable. Uses the PRE-burn share count deliberately.
+        let idle_a = vault_a_before
+            .checked_mul(shares).and_then(|x| x.checked_div(total_shares_before)).unwrap_or(0);
+        let idle_b = vault_b_before
+            .checked_mul(shares).and_then(|x| x.checked_div(total_shares_before)).unwrap_or(0);
+        let payout_a = received_a.saturating_add(idle_a);
+        let payout_b = received_b.saturating_add(idle_b);
+        msg!("lp withdraw: position {}/{} + idle {}/{}", received_a, received_b, idle_a, idle_b);
+
+        if payout_a > 0 {
             anchor_spl::token::transfer(
                 CpiContext::new_with_signer(ctx.accounts.token_program.to_account_info(), Transfer {
                     from: ctx.accounts.vault_token_a_account.to_account_info(),
                     to: ctx.accounts.user_token_a_account.to_account_info(),
                     authority: ctx.accounts.vault_authority.to_account_info(),
                 }, &[seeds]),
-                received_a,
+                payout_a,
             )?;
         }
-        if received_b > 0 {
+        if payout_b > 0 {
             anchor_spl::token::transfer(
                 CpiContext::new_with_signer(ctx.accounts.token_program.to_account_info(), Transfer {
                     from: ctx.accounts.vault_token_b_account.to_account_info(),
                     to: ctx.accounts.user_token_b_account.to_account_info(),
                     authority: ctx.accounts.vault_authority.to_account_info(),
                 }, &[seeds]),
-                received_b,
+                payout_b,
             )?;
         }
 
@@ -1645,6 +1658,7 @@ pub mod raydium_lp {
         let seeds: &[&[u8]] = &[b"lp_vault_authority", lp_vault_key.as_ref(), &[authority_bump]];
 
         let v = &ctx.accounts.lp_vault;
+        let total_shares_before = v.total_shares;
         let liquidity_amount = calculate_withdraw_liquidity(shares, v.total_liquidity, v.total_shares)?;
 
         let vault_a_before = ctx.accounts.vault_token_a_account.amount;
@@ -1696,24 +1710,36 @@ pub mod raydium_lp {
         require!(received_a >= token_min_a, LpVaultError::SlippageExceeded);
         require!(received_b >= token_min_b, LpVaultError::SlippageExceeded);
 
-        if received_a > 0 {
+        // Pro-rata slice of the vault's IDLE tokens (the balance that was already there
+        // before this CPI). Shares represent a claim on the whole vault, not just on the
+        // deployed position — exit parks liquidity here, and without this the difference
+        // is unredeemable. Uses the PRE-burn share count deliberately.
+        let idle_a = vault_a_before
+            .checked_mul(shares).and_then(|x| x.checked_div(total_shares_before)).unwrap_or(0);
+        let idle_b = vault_b_before
+            .checked_mul(shares).and_then(|x| x.checked_div(total_shares_before)).unwrap_or(0);
+        let payout_a = received_a.saturating_add(idle_a);
+        let payout_b = received_b.saturating_add(idle_b);
+        msg!("lp withdraw: position {}/{} + idle {}/{}", received_a, received_b, idle_a, idle_b);
+
+        if payout_a > 0 {
             anchor_spl::token::transfer(
                 CpiContext::new_with_signer(ctx.accounts.token_program.to_account_info(), Transfer {
                     from: ctx.accounts.vault_token_a_account.to_account_info(),
                     to: ctx.accounts.user_token_a_account.to_account_info(),
                     authority: ctx.accounts.vault_authority.to_account_info(),
                 }, &[seeds]),
-                received_a,
+                payout_a,
             )?;
         }
-        if received_b > 0 {
+        if payout_b > 0 {
             anchor_spl::token::transfer(
                 CpiContext::new_with_signer(ctx.accounts.token_program.to_account_info(), Transfer {
                     from: ctx.accounts.vault_token_b_account.to_account_info(),
                     to: ctx.accounts.user_token_b_account.to_account_info(),
                     authority: ctx.accounts.vault_authority.to_account_info(),
                 }, &[seeds]),
-                received_b,
+                payout_b,
             )?;
         }
 
