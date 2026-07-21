@@ -1787,6 +1787,12 @@
         },
         {
           "name": "vault_authority",
+          "docs": [
+            "this as the funder (writable + signer), and a CPI cannot escalate an account",
+            "to writable if the outer instruction declared it read-only. Mirrors the Orca",
+            "fix, which was proven on the harness 2026-07-20."
+          ],
+          "writable": true,
           "pda": {
             "seeds": [
               {
