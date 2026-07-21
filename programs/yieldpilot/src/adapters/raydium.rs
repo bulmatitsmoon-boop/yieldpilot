@@ -52,11 +52,13 @@ pub struct RaydiumOpenPosition<'info> {
     /// New position NFT mint (0 decimals, 1 unit ever minted) — fresh
     /// keypair at the client level (Anchor `init` on a Mint).
     #[account(mut)]
-    pub position_nft_mint: Account<'info, Mint>,
+    /// CHECK: does not exist yet — Raydium inits this mint inside open_position.
+    pub position_nft_mint: AccountInfo<'info>,
 
     /// Vault-owned ATA that will hold the position NFT.
     #[account(mut)]
-    pub position_nft_account: Account<'info, TokenAccount>,
+    /// CHECK: does not exist yet — created by open_position as an ATA.
+    pub position_nft_account: AccountInfo<'info>,
 
     /// Metaplex metadata account for the position NFT (PDA, standard
     /// Metaplex seeds: ["metadata", metadata_program, position_nft_mint]).
@@ -227,7 +229,7 @@ pub fn raydium_open_position<'info>(
         AccountMeta::new(ctx.accounts.position_nft_account.key(), false),
         AccountMeta::new(*ctx.accounts.metadata_account.key, false),
         AccountMeta::new(*ctx.accounts.pool_state.key, false),
-        AccountMeta::new_readonly(*ctx.accounts.protocol_position.key, false),
+        AccountMeta::new(*ctx.accounts.protocol_position.key, false),
         AccountMeta::new(*ctx.accounts.tick_array_lower.key, false),
         AccountMeta::new(*ctx.accounts.tick_array_upper.key, false),
         AccountMeta::new(*ctx.accounts.personal_position.key, false),
