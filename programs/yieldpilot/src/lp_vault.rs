@@ -956,11 +956,23 @@ pub mod orca_lp {
         token_max_b: u64,
     ) -> Result<()> {
         require!(liquidity_amount > 0, LpVaultError::ZeroAmount);
-        require!(
-            ctx.accounts.vault_token_a_account.amount >= token_max_a
-                && ctx.accounts.vault_token_b_account.amount >= token_max_b,
-            LpVaultError::InsufficientIdleBalance
-        );
+
+        // CLAMP the slippage caps to what the vault actually holds — do NOT require the
+        // vault to hold the full cap.
+        //
+        // token_max_{a,b} are UPPER BOUNDS ("never spend more than this"), not amounts.
+        // The old guard demanded `idle >= token_max`, so the keeper's reposition failed
+        // for any realistic cap: it would have had to set the cap exactly equal to its
+        // idle balance, which defeats the purpose of a cap. Found by the local harness
+        // 2026-07-20 — the vault held 0.178 USDC and a 500 USDC cap was rejected even
+        // though the redeploy needed a tiny fraction of that.
+        //
+        // The check was also redundant: increase_liquidity fails on its own if it needs
+        // more than the token accounts hold, so clamping is strictly safer AND correct —
+        // the caller's intent (an upper bound) is preserved, and we never ask the pool to
+        // pull more than exists.
+        let token_max_a = token_max_a.min(ctx.accounts.vault_token_a_account.amount);
+        let token_max_b = token_max_b.min(ctx.accounts.vault_token_b_account.amount);
 
         let lp_vault_key = ctx.accounts.lp_vault.key();
         let authority_bump = ctx.accounts.lp_vault.authority_bump;
@@ -1824,11 +1836,23 @@ pub mod raydium_lp {
         token_max_b: u64,
     ) -> Result<()> {
         require!(liquidity_amount > 0, LpVaultError::ZeroAmount);
-        require!(
-            ctx.accounts.vault_token_a_account.amount >= token_max_a
-                && ctx.accounts.vault_token_b_account.amount >= token_max_b,
-            LpVaultError::InsufficientIdleBalance
-        );
+
+        // CLAMP the slippage caps to what the vault actually holds — do NOT require the
+        // vault to hold the full cap.
+        //
+        // token_max_{a,b} are UPPER BOUNDS ("never spend more than this"), not amounts.
+        // The old guard demanded `idle >= token_max`, so the keeper's reposition failed
+        // for any realistic cap: it would have had to set the cap exactly equal to its
+        // idle balance, which defeats the purpose of a cap. Found by the local harness
+        // 2026-07-20 — the vault held 0.178 USDC and a 500 USDC cap was rejected even
+        // though the redeploy needed a tiny fraction of that.
+        //
+        // The check was also redundant: increase_liquidity fails on its own if it needs
+        // more than the token accounts hold, so clamping is strictly safer AND correct —
+        // the caller's intent (an upper bound) is preserved, and we never ask the pool to
+        // pull more than exists.
+        let token_max_a = token_max_a.min(ctx.accounts.vault_token_a_account.amount);
+        let token_max_b = token_max_b.min(ctx.accounts.vault_token_b_account.amount);
 
         let lp_vault_key = ctx.accounts.lp_vault.key();
         let authority_bump = ctx.accounts.lp_vault.authority_bump;
