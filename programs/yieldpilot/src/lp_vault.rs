@@ -1153,7 +1153,10 @@ pub mod raydium_lp {
         #[account(mut, address = lp_vault.pool)]
         pub pool_state: UncheckedAccount<'info>,
         /// CHECK: Raydium program validates (deprecated but still required)
-        #[account(address = lp_vault.protocol_position)]
+        /// CHECK: Raydium validates. MUST be `mut` — every liquidity change writes to
+        /// the protocol position's accumulators; a CPI cannot escalate a read-only
+        /// account to writable.
+        #[account(mut, address = lp_vault.protocol_position)]
         pub protocol_position: UncheckedAccount<'info>,
         /// CHECK: Raydium program validates
         #[account(mut, address = lp_vault.position)]
@@ -1218,7 +1221,10 @@ pub mod raydium_lp {
         #[account(mut, address = lp_vault.pool)]
         pub pool_state: UncheckedAccount<'info>,
         /// CHECK: Raydium program validates (deprecated but still required)
-        #[account(address = lp_vault.protocol_position)]
+        /// CHECK: Raydium validates. MUST be `mut` — every liquidity change writes to
+        /// the protocol position's accumulators; a CPI cannot escalate a read-only
+        /// account to writable.
+        #[account(mut, address = lp_vault.protocol_position)]
         pub protocol_position: UncheckedAccount<'info>,
         /// CHECK: Raydium program validates
         #[account(mut, address = lp_vault.position)]
@@ -1265,7 +1271,10 @@ pub mod raydium_lp {
         #[account(mut, address = lp_vault.pool)]
         pub pool_state: UncheckedAccount<'info>,
         /// CHECK: Raydium program validates (deprecated but still required)
-        #[account(address = lp_vault.protocol_position)]
+        /// CHECK: Raydium validates. MUST be `mut` — every liquidity change writes to
+        /// the protocol position's accumulators; a CPI cannot escalate a read-only
+        /// account to writable.
+        #[account(mut, address = lp_vault.protocol_position)]
         pub protocol_position: UncheckedAccount<'info>,
         /// CHECK: Raydium program validates
         #[account(mut, address = lp_vault.position)]
@@ -1319,7 +1328,10 @@ pub mod raydium_lp {
         /// CHECK: Raydium program validates; must match lp_vault.pool
         #[account(mut, address = lp_vault.pool)]
         pub pool_state: UncheckedAccount<'info>,
-        /// CHECK: Raydium program validates (deprecated but still required)
+        /// CHECK: Raydium program validates (deprecated but still required). MUST be
+        /// `mut`: this is the NEW range's protocol position, which Raydium initializes
+        /// on first use and writes to on every liquidity change.
+        #[account(mut)]
         pub protocol_position: UncheckedAccount<'info>,
         /// CHECK: Raydium program validates (PDA)
         #[account(mut)]
@@ -1378,7 +1390,10 @@ pub mod raydium_lp {
         #[account(mut, address = lp_vault.pool)]
         pub pool_state: UncheckedAccount<'info>,
         /// CHECK: Raydium program validates (deprecated but still required)
-        #[account(address = lp_vault.protocol_position)]
+        /// CHECK: Raydium validates. MUST be `mut` — every liquidity change writes to
+        /// the protocol position's accumulators; a CPI cannot escalate a read-only
+        /// account to writable.
+        #[account(mut, address = lp_vault.protocol_position)]
         pub protocol_position: UncheckedAccount<'info>,
         /// CHECK: Raydium program validates
         #[account(mut, address = lp_vault.position)]
