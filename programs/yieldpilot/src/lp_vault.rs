@@ -460,8 +460,15 @@ pub mod orca_lp {
 
     #[derive(Accounts)]
     pub struct OpenNewOrcaLpPosition<'info> {
-        #[account(constraint = admin.key() == lp_vault.admin @ LpVaultError::Unauthorized)]
-        pub admin: Signer<'info>,
+        /// Either the admin or the keeper. The keeper MUST be able to open a position:
+        /// it is the thing that exits on a reposition, and if it cannot re-enter the
+        /// vault sits in cash until a human intervenes.
+        #[account(
+            mut,
+            constraint = authority.key() == lp_vault.admin || authority.key() == lp_vault.keeper
+                @ LpVaultError::Unauthorized
+        )]
+        pub authority: Signer<'info>,
 
         #[account(mut, constraint = !lp_vault.position_active @ LpVaultError::PositionStillActive)]
         pub lp_vault: Box<Account<'info, LpVault>>,
@@ -1317,8 +1324,15 @@ pub mod raydium_lp {
 
     #[derive(Accounts)]
     pub struct OpenNewRaydiumLpPosition<'info> {
-        #[account(constraint = admin.key() == lp_vault.admin @ LpVaultError::Unauthorized)]
-        pub admin: Signer<'info>,
+        /// Either the admin or the keeper. The keeper MUST be able to open a position:
+        /// it is the thing that exits on a reposition, and if it cannot re-enter the
+        /// vault sits in cash until a human intervenes.
+        #[account(
+            mut,
+            constraint = authority.key() == lp_vault.admin || authority.key() == lp_vault.keeper
+                @ LpVaultError::Unauthorized
+        )]
+        pub authority: Signer<'info>,
 
         #[account(mut, constraint = !lp_vault.position_active @ LpVaultError::PositionStillActive)]
         pub lp_vault: Box<Account<'info, LpVault>>,
