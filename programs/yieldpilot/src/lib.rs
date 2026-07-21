@@ -1426,8 +1426,8 @@ pub mod yieldpilot {
         deposit_raydium_lp_handler(ctx, liquidity_amount, token_max_a, token_max_b, acknowledge_impermanent_loss)
     }
 
-    pub fn withdraw_raydium_lp(
-        ctx: Context<WithdrawRaydiumLp>,
+    pub fn withdraw_raydium_lp<'info>(
+        ctx: Context<'_, '_, '_, 'info, WithdrawRaydiumLp<'info>>,
         shares: u64,
         token_min_a: u64,
         token_min_b: u64,
@@ -1437,7 +1437,9 @@ pub mod yieldpilot {
 
     /// Fully exit the current Raydium position (decrease all liquidity,
     /// close the position).
-    pub fn exit_raydium_lp_position(ctx: Context<ExitRaydiumLpPosition>) -> Result<()> {
+    pub fn exit_raydium_lp_position<'info>(
+        ctx: Context<'_, '_, '_, 'info, ExitRaydiumLpPosition<'info>>,
+    ) -> Result<()> {
         exit_raydium_lp_position_handler(ctx)
     }
 
