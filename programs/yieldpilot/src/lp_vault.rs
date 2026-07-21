@@ -668,9 +668,57 @@ pub mod orca_lp {
             seeds,
         )?;
 
-        // TODO: any leftover in vault_token_{a,b}_account after the CPI (Orca
-        // won't consume more than needed for `liquidity_amount`) should be
-        // refunded to the user rather than left idle — not yet implemented.
+        // Refund the unconsumed remainder to the user.
+        //
+        // `token_max_a`/`token_max_b` are slippage CAPS, not amounts: we transfer the
+        // full cap in up front because Orca pulls from the vault's staging accounts,
+        // but increase_liquidity consumes only what `liquidity_amount` actually needs.
+        // Without this refund the difference is stranded in the vault with NO shares
+        // minted against it — shares are calculated from `liquidity_amount`, so the
+        // leftover belongs to nobody and withdraw (which only redeems from the
+        // Whirlpool position) can never return it.
+        //
+        // Measured on the harness before this fix: depositing 2 SOL + 500 USDC with
+        // generous caps put 0.000000523 SOL + 0.000851 USDC into the position and
+        // stranded the rest; burning 100% of shares returned almost nothing.
+        //
+        // The staging accounts are pure pass-through, so refunding their ENTIRE
+        // post-CPI balance is correct and self-healing: they always end at zero.
+        ctx.accounts.vault_token_a_account.reload()?;
+        ctx.accounts.vault_token_b_account.reload()?;
+
+        let refund_a = ctx.accounts.vault_token_a_account.amount;
+        if refund_a > 0 {
+            anchor_spl::token::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.token_program.to_account_info(),
+                    Transfer {
+                        from: ctx.accounts.vault_token_a_account.to_account_info(),
+                        to: ctx.accounts.user_token_a_account.to_account_info(),
+                        authority: ctx.accounts.vault_authority.to_account_info(),
+                    },
+                    &[seeds],
+                ),
+                refund_a,
+            )?;
+        }
+
+        let refund_b = ctx.accounts.vault_token_b_account.amount;
+        if refund_b > 0 {
+            anchor_spl::token::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.token_program.to_account_info(),
+                    Transfer {
+                        from: ctx.accounts.vault_token_b_account.to_account_info(),
+                        to: ctx.accounts.user_token_b_account.to_account_info(),
+                        authority: ctx.accounts.vault_authority.to_account_info(),
+                    },
+                    &[seeds],
+                ),
+                refund_b,
+            )?;
+        }
+        msg!("deposit_orca_lp: refunded {} token_a / {} token_b to user", refund_a, refund_b);
 
         let v = &mut ctx.accounts.lp_vault;
         let shares_to_mint = calculate_deposit_shares(liquidity_amount, v.total_liquidity, v.total_shares)?;
@@ -971,8 +1019,11 @@ pub mod raydium_lp {
         )]
         pub lp_vault: Box<Account<'info, LpVault>>,
 
-        /// CHECK: PDA, verified by seeds
-        #[account(seeds = [b"lp_vault_authority", lp_vault.key().as_ref()], bump)]
+        /// CHECK: PDA, verified by seeds. MUST be `mut`: the open_position CPI passes
+        /// this as the funder (writable + signer), and a CPI cannot escalate an account
+        /// to writable if the outer instruction declared it read-only. Mirrors the Orca
+        /// fix, which was proven on the harness 2026-07-20.
+        #[account(mut, seeds = [b"lp_vault_authority", lp_vault.key().as_ref()], bump)]
         pub vault_authority: UncheckedAccount<'info>,
 
         pub token_a_mint: Box<Account<'info, Mint>>,
@@ -1466,6 +1517,46 @@ pub mod raydium_lp {
             token_max_b,
             seeds,
         )?;
+
+        // Refund the unconsumed remainder — see deposit_orca_lp_handler for full
+        // reasoning. token_max_{a,b} are slippage CAPS, not amounts; without this the
+        // difference is stranded in the vault with no shares against it, and withdraw
+        // (which only redeems from the position) can never return it.
+        ctx.accounts.vault_token_a_account.reload()?;
+        ctx.accounts.vault_token_b_account.reload()?;
+
+        let refund_a = ctx.accounts.vault_token_a_account.amount;
+        if refund_a > 0 {
+            anchor_spl::token::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.token_program.to_account_info(),
+                    Transfer {
+                        from: ctx.accounts.vault_token_a_account.to_account_info(),
+                        to: ctx.accounts.user_token_a_account.to_account_info(),
+                        authority: ctx.accounts.vault_authority.to_account_info(),
+                    },
+                    &[seeds],
+                ),
+                refund_a,
+            )?;
+        }
+
+        let refund_b = ctx.accounts.vault_token_b_account.amount;
+        if refund_b > 0 {
+            anchor_spl::token::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.token_program.to_account_info(),
+                    Transfer {
+                        from: ctx.accounts.vault_token_b_account.to_account_info(),
+                        to: ctx.accounts.user_token_b_account.to_account_info(),
+                        authority: ctx.accounts.vault_authority.to_account_info(),
+                    },
+                    &[seeds],
+                ),
+                refund_b,
+            )?;
+        }
+        msg!("deposit_raydium_lp: refunded {} token_a / {} token_b to user", refund_a, refund_b);
 
         let v = &mut ctx.accounts.lp_vault;
         let shares_to_mint = calculate_deposit_shares(liquidity_amount, v.total_liquidity, v.total_shares)?;
