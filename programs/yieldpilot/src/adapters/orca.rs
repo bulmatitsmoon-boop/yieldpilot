@@ -249,7 +249,7 @@ fn invoke_modify_liquidity<'info>(
     authority_seeds: &[&[u8]],
 ) -> Result<()> {
     let metas = vec![
-        AccountMeta::new_readonly(*ctx.accounts.whirlpool.key, false),
+        AccountMeta::new(*ctx.accounts.whirlpool.key, false),
         AccountMeta::new_readonly(*ctx.accounts.token_program.key, false),
         AccountMeta::new_readonly(*ctx.accounts.position_authority.key, true),
         AccountMeta::new(*ctx.accounts.position.key, false),
