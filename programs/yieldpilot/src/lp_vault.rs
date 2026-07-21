@@ -1046,10 +1046,16 @@ pub mod raydium_lp {
         pub lp_shares_mint: Box<Account<'info, Mint>>,
 
         // ── Raydium open_position accounts (see adapters::raydium::RaydiumOpenPosition) ──
+        /// Position NFT mint. Does NOT exist yet — Raydium's open_position inits it,
+        /// so it must be an unvalidated Signer. Typing it Account<Mint> makes Anchor
+        /// deserialize it before the body runs (AccountNotInitialized 3012) AND leaves
+        /// isSigner=false so the outer tx cannot carry the signature Raydium needs.
+        /// Identical to the Orca bug proven on the harness 2026-07-20.
         #[account(mut)]
-        pub position_nft_mint: Box<Account<'info, Mint>>,
+        pub position_nft_mint: Signer<'info>,
+        /// CHECK: created by the open_position CPI; does not exist at validation time.
         #[account(mut)]
-        pub position_nft_account: Box<Account<'info, TokenAccount>>,
+        pub position_nft_account: UncheckedAccount<'info>,
         /// CHECK: Metaplex program validates + initializes
         #[account(mut)]
         pub metadata_account: UncheckedAccount<'info>,
@@ -1057,7 +1063,10 @@ pub mod raydium_lp {
         #[account(mut)]
         pub pool_state: UncheckedAccount<'info>,
         /// CHECK: Raydium program validates (deprecated but still required —
-        /// see adapters/raydium.rs PDA seed notes)
+        /// see adapters/raydium.rs PDA seed notes). MUST be `mut`: open_position
+        /// initializes it on first use for a tick range, and every liquidity change
+        /// writes to it.
+        #[account(mut)]
         pub protocol_position: UncheckedAccount<'info>,
         /// CHECK: Raydium program validates (PDA)
         #[account(mut)]
