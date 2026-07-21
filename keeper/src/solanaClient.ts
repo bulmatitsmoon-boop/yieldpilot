@@ -1278,6 +1278,121 @@ export class SolanaClient {
     }, label);
   }
 
+  /**
+   * Open a NEW position at `tickLower`/`tickUpper` and move the vault's idle tokens into
+   * it. This is the second half of a reposition — without it the keeper can only exit,
+   * and the vault sits in cash until a human intervenes.
+   *
+   * Returns { openSig, redeploySig, liquidity } so the caller can log what happened.
+   *
+   * ON SIZING: the client does not replicate Orca/Raydium's liquidity math. It asks for
+   * the liquidity the vault held before the exit and, if the pool rejects it on slippage
+   * (the required token amounts exceed what the idle balance can cover at the NEW price),
+   * halves the request and retries. That converges on close-to-maximum deployment within
+   * a few attempts without a second implementation of the AMM math to get wrong. It is
+   * deliberately approximate — replicating the quote math on-chain or in the client is
+   * the exact byte-offset/precision territory that has cost this project the most.
+   */
+  async repositionLpVault(
+    lpVaultAddress: string,
+    tickLower: number,
+    tickUpper: number,
+    targetLiquidity: anchor.BN
+  ): Promise<{ openSig: string | null; redeploySig: string | null; liquidity: string } | null> {
+    const lpVaultPubkey = new PublicKey(lpVaultAddress);
+    const vault = await this.fetchLpVault(lpVaultAddress);
+    const isRaydium = "raydium" in (vault.protocol as any);
+    if (isRaydium) {
+      logger.warn("  Raydium reposition not wired yet — Orca only for now");
+      return null;
+    }
+
+    const [vaultAuthorityPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("lp_vault_authority"), lpVaultPubkey.toBuffer()],
+      this.program.programId
+    );
+
+    // A fresh position NFT mint. It does not exist yet, so it must sign.
+    const positionMint = Keypair.generate();
+    const [position] = PublicKey.findProgramAddressSync(
+      [Buffer.from("position"), positionMint.publicKey.toBuffer()],
+      WHIRLPOOL_PROGRAM_ID
+    );
+    const positionTokenAccount = getAssociatedTokenAddressSync(
+      positionMint.publicKey, vaultAuthorityPda, true
+    );
+
+    const openSig = await this.sendWithRetry(
+      () =>
+        this.program.methods
+          .openNewOrcaLpPosition(tickLower, tickUpper)
+          .accountsPartial({
+            authority: this.keeper.publicKey,
+            lpVault: lpVaultPubkey,
+            vaultAuthority: vaultAuthorityPda,
+            position,
+            positionMint: positionMint.publicKey,
+            positionTokenAccount,
+            whirlpool: vault.pool,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
+            rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+            whirlpoolProgram: WHIRLPOOL_PROGRAM_ID,
+          })
+          .signers([positionMint])
+          .rpc(),
+      `openNewOrcaLpPosition(${lpVaultAddress.slice(0, 8)}...)`
+    );
+    if (!openSig) return { openSig: null, redeploySig: null, liquidity: "0" };
+
+    const poolInfo = await this.connection.getAccountInfo(vault.pool);
+    if (!poolInfo) throw new Error("pool vanished mid-reposition");
+    const { tickSpacing } = await this.readPoolTickCurrent(vault);
+    const { tokenVaultA, tokenVaultB } = this.readWhirlpoolVaults(poolInfo.data);
+    const { tickArrayLower, tickArrayUpper } = getPositionTickArrays(
+      vault.pool, tickLower, tickUpper, tickSpacing, WHIRLPOOL_PROGRAM_ID
+    );
+
+    // Halving ladder — see note above.
+    let liquidity = targetLiquidity;
+    for (let attempt = 0; attempt < 6; attempt++) {
+      try {
+        const sig = await this.program.methods
+          .redeployOrcaLpLiquidity(liquidity, new anchor.BN("18446744073709551615"), new anchor.BN("18446744073709551615"))
+          .accountsPartial({
+            keeper: this.keeper.publicKey,
+            lpVault: lpVaultPubkey,
+            vaultAuthority: vaultAuthorityPda,
+            vaultTokenAAccount: vault.vaultTokenAAccount,
+            vaultTokenBAccount: vault.vaultTokenBAccount,
+            whirlpool: vault.pool,
+            position,
+            positionTokenAccount,
+            tokenVaultA,
+            tokenVaultB,
+            tickArrayLower,
+            tickArrayUpper,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            whirlpoolProgram: WHIRLPOOL_PROGRAM_ID,
+          })
+          .rpc();
+        logger.info(`  Redeployed ${liquidity.toString()} liquidity (attempt ${attempt + 1})`);
+        return { openSig, redeploySig: sig, liquidity: liquidity.toString() };
+      } catch (err: any) {
+        const msg = err.message || "";
+        // 0x1781 = 6017 PriceSlippageCheck — asked for more than the idle can back.
+        if (!/1781|PriceSlippage|SlippageExceeded/i.test(msg)) throw err;
+        liquidity = liquidity.divn(2);
+        if (liquidity.isZero()) break;
+        logger.warn(`  Redeploy too large, halving to ${liquidity.toString()}`);
+      }
+    }
+
+    logger.error("  Could not redeploy any liquidity — vault is left IDLE, will retry next run");
+    return { openSig, redeploySig: null, liquidity: "0" };
+  }
+
   async exitLpPosition(lpVaultAddress: string): Promise<string | null> {
     const lpVaultPubkey = new PublicKey(lpVaultAddress);
     const vault = await this.fetchLpVault(lpVaultAddress);
