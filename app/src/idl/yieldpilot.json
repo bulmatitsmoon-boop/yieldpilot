@@ -1076,7 +1076,12 @@
           "writable": true
         },
         {
-          "name": "protocol_position"
+          "name": "protocol_position",
+          "docs": [
+            "the protocol position's accumulators; a CPI cannot escalate a read-only",
+            "account to writable."
+          ],
+          "writable": true
         },
         {
           "name": "personal_position",
@@ -1352,7 +1357,12 @@
           "writable": true
         },
         {
-          "name": "protocol_position"
+          "name": "protocol_position",
+          "docs": [
+            "the protocol position's accumulators; a CPI cannot escalate a read-only",
+            "account to writable."
+          ],
+          "writable": true
         },
         {
           "name": "personal_position",
@@ -2507,7 +2517,12 @@
           "writable": true
         },
         {
-          "name": "protocol_position"
+          "name": "protocol_position",
+          "docs": [
+            "`mut`: this is the NEW range's protocol position, which Raydium initializes",
+            "on first use and writes to on every liquidity change."
+          ],
+          "writable": true
         },
         {
           "name": "tick_array_lower",
@@ -3317,7 +3332,12 @@
           "writable": true
         },
         {
-          "name": "protocol_position"
+          "name": "protocol_position",
+          "docs": [
+            "the protocol position's accumulators; a CPI cannot escalate a read-only",
+            "account to writable."
+          ],
+          "writable": true
         },
         {
           "name": "personal_position",
@@ -4061,7 +4081,12 @@
           "writable": true
         },
         {
-          "name": "protocol_position"
+          "name": "protocol_position",
+          "docs": [
+            "the protocol position's accumulators; a CPI cannot escalate a read-only",
+            "account to writable."
+          ],
+          "writable": true
         },
         {
           "name": "personal_position",
