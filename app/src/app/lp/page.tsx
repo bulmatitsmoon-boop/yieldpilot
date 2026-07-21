@@ -1,10 +1,15 @@
 "use client";
 
 /**
- * LP vault page — Phase 2 groundwork, deliberately NOT linked from Header's
- * nav (desktop or mobile menu) or anywhere else in the app yet. Reachable
- * only by direct URL, and non-functional until the LP vault instructions
- * are actually deployed (see useLpVault.ts's top-of-file note).
+ * LP vault page — Phase 2. GATED BEHIND NEXT_PUBLIC_LP_ENABLED.
+ *
+ * Phase 2 gets deployed on-chain before it is announced: the plan is to run real
+ * mainnet LP trials quietly, then reveal when volume slows. Until the flag is "true"
+ * this route returns a 404 — not a "coming soon" page, because a teaser invites people
+ * to poke at a vault that is still being tested with real money.
+ *
+ * Not linked from the header nav either (desktop or mobile), so with the flag off the
+ * page is unreachable and undiscoverable.
  *
  * Token A/B amounts are human decimal input (e.g. "12.5"), converted via
  * parseDecimalToBaseUnits using each mint's REAL decimals (fetched from the
@@ -13,6 +18,7 @@
  * in initialize_orca_lp_vault_handler).
  */
 import { useState } from "react";
+import { notFound } from "next/navigation";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import * as anchor from "@coral-xyz/anchor";
@@ -44,6 +50,12 @@ interface WithdrawQuoteDisplay {
 }
 
 export default function LpVaultPage() {
+  // Phase 2 is deployed on-chain before it is announced. With the flag off this page
+  // does not exist as far as users are concerned.
+  if (process.env.NEXT_PUBLIC_LP_ENABLED !== "true") {
+    notFound();
+  }
+
   const { connected } = useWallet();
   const { setVisible } = useWalletModal();
   const {
