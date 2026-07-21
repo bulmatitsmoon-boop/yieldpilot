@@ -2332,7 +2332,13 @@
       ],
       "accounts": [
         {
-          "name": "admin",
+          "name": "authority",
+          "docs": [
+            "Either the admin or the keeper. The keeper MUST be able to open a position:",
+            "it is the thing that exits on a reposition, and if it cannot re-enter the",
+            "vault sits in cash until a human intervenes."
+          ],
+          "writable": true,
           "signer": true
         },
         {
@@ -2452,7 +2458,13 @@
       ],
       "accounts": [
         {
-          "name": "admin",
+          "name": "authority",
+          "docs": [
+            "Either the admin or the keeper. The keeper MUST be able to open a position:",
+            "it is the thing that exits on a reposition, and if it cannot re-enter the",
+            "vault sits in cash until a human intervenes."
+          ],
+          "writable": true,
           "signer": true
         },
         {
