@@ -1446,6 +1446,12 @@
         },
         {
           "name": "vault_authority",
+          "docs": [
+            "this as Orca's `funder` (writable + signer), and a CPI cannot escalate an",
+            "account to writable if the outer instruction declared it read-only.",
+            "Found by the local harness 2026-07-20 (\"writable privilege escalated\")."
+          ],
+          "writable": true,
           "pda": {
             "seeds": [
               {
