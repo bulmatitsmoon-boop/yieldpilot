@@ -324,9 +324,9 @@ fn invoke_modify_liquidity<'info>(
         // Raydium's own Anchor struct — UncheckedAccount doesn't get an
         // auto-generated mutability hint, but the runtime writes to it, so
         // the client must mark it writable regardless of what the IDL says.
+        AccountMeta::new(*ctx.accounts.pool_state.key, false),
         AccountMeta::new(*ctx.accounts.protocol_position.key, false),
         AccountMeta::new(*ctx.accounts.personal_position.key, false),
-        AccountMeta::new(*ctx.accounts.pool_state.key, false),
         AccountMeta::new(*ctx.accounts.tick_array_lower.key, false),
         AccountMeta::new(*ctx.accounts.tick_array_upper.key, false),
         AccountMeta::new(ctx.accounts.token_account_0.key(), false),
