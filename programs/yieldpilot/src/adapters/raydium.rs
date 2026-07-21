@@ -355,26 +355,43 @@ fn invoke_modify_liquidity<'info>(
         ]
     };
 
+    // Forward any remaining accounts. decrease_liquidity collects reward emissions in
+    // the same instruction and takes the reward vault + recipient pairs here; it
+    // validates the count against the pool's initialized rewards and fails
+    // InvalidRewardInputAccountNumber (6030) if they are missing. Without this the
+    // adapter can only ever withdraw from a pool with zero active rewards.
+    let mut metas = metas;
+    for acc in ctx.remaining_accounts.iter() {
+        metas.push(if acc.is_writable {
+            AccountMeta::new(*acc.key, false)
+        } else {
+            AccountMeta::new_readonly(*acc.key, false)
+        });
+    }
+
+    let mut infos = vec![
+        ctx.accounts.vault_authority.clone(),
+        ctx.accounts.nft_account.to_account_info(),
+        ctx.accounts.protocol_position.clone(),
+        ctx.accounts.personal_position.clone(),
+        ctx.accounts.pool_state.clone(),
+        ctx.accounts.tick_array_lower.clone(),
+        ctx.accounts.tick_array_upper.clone(),
+        ctx.accounts.token_account_0.to_account_info(),
+        ctx.accounts.token_account_1.to_account_info(),
+        ctx.accounts.token_vault_0.clone(),
+        ctx.accounts.token_vault_1.clone(),
+        ctx.accounts.token_program.to_account_info(),
+    ];
+    infos.extend(ctx.remaining_accounts.iter().cloned());
+
     anchor_lang::solana_program::program::invoke_signed(
         &anchor_lang::solana_program::instruction::Instruction {
             program_id: *ctx.accounts.raydium_program.key,
             accounts: metas,
             data,
         },
-        &[
-            ctx.accounts.vault_authority.clone(),
-            ctx.accounts.nft_account.to_account_info(),
-            ctx.accounts.protocol_position.clone(),
-            ctx.accounts.personal_position.clone(),
-            ctx.accounts.pool_state.clone(),
-            ctx.accounts.tick_array_lower.clone(),
-            ctx.accounts.tick_array_upper.clone(),
-            ctx.accounts.token_account_0.to_account_info(),
-            ctx.accounts.token_account_1.to_account_info(),
-            ctx.accounts.token_vault_0.clone(),
-            ctx.accounts.token_vault_1.clone(),
-            ctx.accounts.token_program.to_account_info(),
-        ],
+        &infos,
         &[authority_seeds],
     )?;
     Ok(())
