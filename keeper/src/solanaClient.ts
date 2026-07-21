@@ -7,7 +7,16 @@ import {
   SYSVAR_INSTRUCTIONS_PUBKEY,
 } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
-import { Transaction, SystemProgram } from "@solana/web3.js";
+import {
+  Transaction,
+  SystemProgram,
+  AddressLookupTableAccount,
+  TransactionMessage,
+  VersionedTransaction,
+  ComputeBudgetProgram,
+  TransactionInstruction,
+  AccountMeta,
+} from "@solana/web3.js";
 import { notifyTelegram } from "./telegramNotify";
 import fs from "fs";
 import os from "os";
@@ -1163,6 +1172,112 @@ export class SolanaClient {
    * silently trying to sign an instruction the keeper key isn't authorized
    * for (see index.ts's runLpVaultCheck).
    */
+  /**
+   * Decode a Raydium CLMM pool's reward slots.
+   *
+   * Layout comes from Raydium's ON-CHAIN IDL, not guesswork: PoolState.reward_infos
+   * sits at offset 397 with a 169-byte stride, and within each RewardInfo
+   * reward_state@0, token_mint@57, token_vault@89.
+   *
+   * decrease_liquidity (used by withdraw AND exit) collects reward emissions in the
+   * same instruction and validates
+   *   remaining_accounts.len() == initialized_reward_count * 2
+   * failing InvalidRewardInputAccountNumber (6030) otherwise. A slot counts as
+   * initialized whenever reward_state != 0 — "Ended" (3) still counts.
+   */
+  readRaydiumRewards(poolData: Buffer): { mint: PublicKey; vault: PublicKey }[] {
+    const BASE = 397, STRIDE = 169, STATE = 0, MINT = 57, VAULT = 89;
+    const out: { mint: PublicKey; vault: PublicKey }[] = [];
+    for (let i = 0; i < 3; i++) {
+      const o = BASE + i * STRIDE;
+      if (o + STRIDE > poolData.length) break;
+      if (poolData[o + STATE] === 0) continue;
+      out.push({
+        mint: new PublicKey(poolData.subarray(o + MINT, o + MINT + 32)),
+        vault: new PublicKey(poolData.subarray(o + VAULT, o + VAULT + 32)),
+      });
+    }
+    return out;
+  }
+
+  /**
+   * Build the remaining accounts decrease_liquidity expects, plus any idempotent ATA
+   * creations needed so the recipients exist. The recipient is an ATA owned by the
+   * vault authority for each reward mint; if it does not exist the CPI fails.
+   */
+  buildRaydiumRewardAccounts(
+    rewards: { mint: PublicKey; vault: PublicKey }[],
+    vaultAuthority: PublicKey
+  ): { remaining: AccountMeta[]; preIxs: TransactionInstruction[] } {
+    const remaining: AccountMeta[] = [];
+    const preIxs: TransactionInstruction[] = [];
+    for (const r of rewards) {
+      const recipient = getAssociatedTokenAddressSync(r.mint, vaultAuthority, true);
+      preIxs.push(
+        createAssociatedTokenAccountIdempotentInstruction(
+          this.keeper.publicKey, recipient, vaultAuthority, r.mint
+        )
+      );
+      remaining.push({ pubkey: r.vault, isSigner: false, isWritable: true });
+      remaining.push({ pubkey: recipient, isSigner: false, isWritable: true });
+    }
+    return { remaining, preIxs };
+  }
+
+  /**
+   * Send instructions as a VERSIONED (v0) transaction, optionally through an Address
+   * Lookup Table.
+   *
+   * Raydium LP instructions do not fit a legacy transaction: initialize_raydium_lp_vault
+   * is 1245 bytes against the 1232 limit once the required compute-budget instruction is
+   * included, and there is no combination that fits without an ALT (measured on the local
+   * harness — with an ALT the same transaction is 878 bytes). They also exceed the 200k
+   * default compute budget, because open_position additionally creates Metaplex metadata.
+   *
+   * Set LP_ADDRESS_LOOKUP_TABLE to the published table. Without it this still sends a v0
+   * transaction, which is fine for the smaller instructions but WILL fail on
+   * initialize_raydium_lp_vault.
+   */
+  async sendV0(
+    instructions: TransactionInstruction[],
+    label: string,
+    opts: { computeUnits?: number; extraSigners?: Keypair[] } = {}
+  ): Promise<string | null> {
+    const lookupTables: AddressLookupTableAccount[] = [];
+    const altAddr = process.env.LP_ADDRESS_LOOKUP_TABLE;
+    if (altAddr) {
+      const fetched = await this.connection.getAddressLookupTable(new PublicKey(altAddr));
+      if (fetched.value) lookupTables.push(fetched.value);
+      else logger.warn(`LP_ADDRESS_LOOKUP_TABLE ${altAddr} not found on chain — sending without it`);
+    }
+
+    const ixs = [
+      ComputeBudgetProgram.setComputeUnitLimit({ units: opts.computeUnits ?? 600_000 }),
+      ...instructions,
+    ];
+
+    return this.sendWithRetry(async () => {
+      const { blockhash } = await this.connection.getLatestBlockhash();
+      const msg = new TransactionMessage({
+        payerKey: this.keeper.publicKey,
+        recentBlockhash: blockhash,
+        instructions: ixs,
+      }).compileToV0Message(lookupTables);
+      const tx = new VersionedTransaction(msg);
+      tx.sign([this.keeper, ...(opts.extraSigners ?? [])]);
+      const size = tx.serialize().length;
+      if (size > 1232) {
+        throw new Error(
+          `${label}: transaction is ${size} bytes, over the 1232 limit. ` +
+          `Set LP_ADDRESS_LOOKUP_TABLE to a published lookup table.`
+        );
+      }
+      const sig = await this.connection.sendTransaction(tx);
+      await this.connection.confirmTransaction(sig, "confirmed");
+      return sig;
+    }, label);
+  }
+
   async exitLpPosition(lpVaultAddress: string): Promise<string | null> {
     const lpVaultPubkey = new PublicKey(lpVaultAddress);
     const vault = await this.fetchLpVault(lpVaultAddress);
@@ -1183,30 +1298,42 @@ export class SolanaClient {
         vault.pool, vault.tickLowerIndex, vault.tickUpperIndex, tickSpacing, RAYDIUM_CLMM_PROGRAM_ID
       );
 
-      return this.sendWithRetry(
-        () =>
-          this.program.methods
-            .exitRaydiumLpPosition()
-            .accountsPartial({
-              keeper: this.keeper.publicKey,
-              lpVault: lpVaultPubkey,
-              vaultAuthority: vaultAuthorityPda,
-              vaultTokenAAccount: vault.vaultTokenAAccount,
-              vaultTokenBAccount: vault.vaultTokenBAccount,
-              positionNftAccount: vault.positionTokenAccount,
-              poolState: vault.pool,
-              protocolPosition: vault.protocolPosition,
-              personalPosition: vault.position,
-              positionNftMint: vault.positionMint,
-              tickArrayLower,
-              tickArrayUpper,
-              tokenVault0: tokenVaultA,
-              tokenVault1: tokenVaultB,
-              systemProgram: SystemProgram.programId,
-              tokenProgram: TOKEN_PROGRAM_ID,
-              raydiumProgram: RAYDIUM_CLMM_PROGRAM_ID,
-            })
-            .rpc(),
+      // Raydium's decrease_liquidity collects reward emissions in the same instruction
+      // and validates the remaining-account count against the pool's initialized
+      // rewards. Passing none fails InvalidRewardInputAccountNumber (6030) — proven on
+      // the local harness. Recipients must already exist, hence the idempotent ATA
+      // creations sent ahead of the exit in the same transaction.
+      const rewards = this.readRaydiumRewards(poolInfo.data);
+      const { remaining, preIxs } = this.buildRaydiumRewardAccounts(rewards, vaultAuthorityPda);
+      logger.info(`  Raydium rewards: ${rewards.length} initialized -> ${remaining.length} remaining accounts`);
+
+      const exitIx = await this.program.methods
+        .exitRaydiumLpPosition()
+        .accountsPartial({
+          keeper: this.keeper.publicKey,
+          lpVault: lpVaultPubkey,
+          vaultAuthority: vaultAuthorityPda,
+          vaultTokenAAccount: vault.vaultTokenAAccount,
+          vaultTokenBAccount: vault.vaultTokenBAccount,
+          positionNftAccount: vault.positionTokenAccount,
+          poolState: vault.pool,
+          protocolPosition: vault.protocolPosition,
+          personalPosition: vault.position,
+          positionNftMint: vault.positionMint,
+          tickArrayLower,
+          tickArrayUpper,
+          tokenVault0: tokenVaultA,
+          tokenVault1: tokenVaultB,
+          systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          raydiumProgram: RAYDIUM_CLMM_PROGRAM_ID,
+        })
+        .remainingAccounts(remaining)
+        .instruction();
+
+      // v0 + ALT: Raydium LP instructions do not fit a legacy transaction.
+      return this.sendV0(
+        [...preIxs, exitIx],
         `exitRaydiumLpPosition(${lpVaultAddress.slice(0, 8)}...)`
       );
     }

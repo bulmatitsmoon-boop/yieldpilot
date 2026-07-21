@@ -18,8 +18,23 @@
 import { useCallback, useState } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import * as anchor from "@coral-xyz/anchor";
-import { PublicKey } from "@solana/web3.js";
-import { getAssociatedTokenAddress, getMint, TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import {
+  PublicKey,
+  Connection,
+  TransactionInstruction,
+  TransactionMessage,
+  VersionedTransaction,
+  AddressLookupTableAccount,
+  ComputeBudgetProgram,
+  Transaction,
+  AccountMeta,
+} from "@solana/web3.js";
+import {
+  getAssociatedTokenAddress,
+  getMint,
+  TOKEN_PROGRAM_ID,
+  createAssociatedTokenAccountIdempotentInstruction,
+} from "@solana/spl-token";
 import IDL from "@/idl/yieldpilot.mainnet.json";
 
 // Real Orca quote math (WASM) — NOT hand-rolled. Concentrated-liquidity
@@ -38,6 +53,85 @@ import IDL from "@/idl/yieldpilot.mainnet.json";
 // clean `npm run build` was confirmed after that fix. Type-only imports are
 // erased at compile time and stay static safely (see below).
 import type { IncreaseLiquidityQuote, DecreaseLiquidityQuote } from "@orca-so/whirlpools-core";
+
+/**
+ * Raydium CLMM pool reward slots.
+ *
+ * Layout is from Raydium's ON-CHAIN IDL, not guesswork: PoolState.reward_infos at
+ * offset 397, 169-byte stride; within each RewardInfo reward_state@0, token_mint@57,
+ * token_vault@89. A slot counts as initialized whenever reward_state != 0 — "Ended"
+ * still counts.
+ *
+ * decrease_liquidity (withdraw AND exit) collects rewards in the same instruction and
+ * validates remaining_accounts.len() == initialized_rewards * 2, failing
+ * InvalidRewardInputAccountNumber (6030) otherwise.
+ */
+export function readRaydiumRewards(poolData: Buffer | Uint8Array): { mint: PublicKey; vault: PublicKey }[] {
+  const b = Buffer.from(poolData);
+  const BASE = 397, STRIDE = 169, STATE = 0, MINT = 57, VAULT = 89;
+  const out: { mint: PublicKey; vault: PublicKey }[] = [];
+  for (let i = 0; i < 3; i++) {
+    const o = BASE + i * STRIDE;
+    if (o + STRIDE > b.length) break;
+    if (b[o + STATE] === 0) continue;
+    out.push({
+      mint: new PublicKey(b.subarray(o + MINT, o + MINT + 32)),
+      vault: new PublicKey(b.subarray(o + VAULT, o + VAULT + 32)),
+    });
+  }
+  return out;
+}
+
+/**
+ * Send instructions as a VERSIONED (v0) transaction through the Address Lookup Table.
+ *
+ * Raydium LP instructions do not fit a legacy transaction — initialize_raydium_lp_vault
+ * is 1245 bytes against the 1232 limit once the required compute-budget instruction is
+ * added, and dropping that instruction makes it run out of compute inside Metaplex
+ * instead. With an ALT the same transaction is 878 bytes (measured on the local harness).
+ *
+ * Set NEXT_PUBLIC_LP_ADDRESS_LOOKUP_TABLE to the published table.
+ */
+export async function sendLpV0(
+  connection: Connection,
+  wallet: {
+    publicKey: PublicKey;
+    signTransaction: <T extends Transaction | VersionedTransaction>(tx: T) => Promise<T>;
+  },
+  instructions: TransactionInstruction[],
+  computeUnits = 600_000
+): Promise<string> {
+  const lookupTables: AddressLookupTableAccount[] = [];
+  const altAddr = process.env.NEXT_PUBLIC_LP_ADDRESS_LOOKUP_TABLE;
+  if (altAddr) {
+    const fetched = await connection.getAddressLookupTable(new PublicKey(altAddr));
+    if (fetched.value) lookupTables.push(fetched.value);
+  }
+
+  const { blockhash } = await connection.getLatestBlockhash();
+  const msg = new TransactionMessage({
+    payerKey: wallet.publicKey,
+    recentBlockhash: blockhash,
+    instructions: [
+      ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnits }),
+      ...instructions,
+    ],
+  }).compileToV0Message(lookupTables);
+
+  const tx = new VersionedTransaction(msg);
+  const signed = await wallet.signTransaction(tx);
+  const size = signed.serialize().length;
+  if (size > 1232) {
+    throw new Error(
+      `Transaction is ${size} bytes, over the 1232 limit. ` +
+      `Set NEXT_PUBLIC_LP_ADDRESS_LOOKUP_TABLE to a published lookup table.`
+    );
+  }
+  const sig = await connection.sendTransaction(signed);
+  await connection.confirmTransaction(sig, "confirmed");
+  return sig;
+}
+
 
 const PROGRAM_ID = new PublicKey(
   process.env.NEXT_PUBLIC_PROGRAM_ID || "CVJrJGoKjseTJqiFGctssYde3pLAnPaRZtjAaKXd8pWk"
@@ -727,6 +821,21 @@ export function useLpVault() {
         const userTokenBAccount = await getAssociatedTokenAddress(tokenBMint, publicKey);
         const userSharesAccount = await getAssociatedTokenAddress(sharesMint, publicKey);
 
+        // Reward recipients must EXIST before decrease_liquidity runs, so create them
+        // idempotently in the same transaction.
+        const poolAcct = await connection.getAccountInfo(poolStatePubkey);
+        const rewards = poolAcct ? readRaydiumRewards(poolAcct.data) : [];
+        const rewardRemaining: AccountMeta[] = [];
+        const rewardPreIxs: TransactionInstruction[] = [];
+        for (const r of rewards) {
+          const recipient = await getAssociatedTokenAddress(r.mint, vaultAuthorityPda, true);
+          rewardPreIxs.push(
+            createAssociatedTokenAccountIdempotentInstruction(publicKey, recipient, vaultAuthorityPda, r.mint)
+          );
+          rewardRemaining.push({ pubkey: r.vault, isSigner: false, isWritable: true });
+          rewardRemaining.push({ pubkey: recipient, isSigner: false, isWritable: true });
+        }
+
         return program.methods
           .withdrawRaydiumLp(shares, quote.tokenMinA, quote.tokenMinB)
           .accountsPartial({
@@ -751,10 +860,17 @@ export function useLpVault() {
             tokenProgram: TOKEN_PROGRAM_ID,
             raydiumProgram: RAYDIUM_CLMM_PROGRAM_ID,
           })
-          .rpc();
+          // Raydium collects reward emissions inside decrease_liquidity and validates
+          // the remaining-account count against the pool's initialized rewards; passing
+          // none fails InvalidRewardInputAccountNumber (6030).
+          .remainingAccounts(rewardRemaining)
+          .instruction()
+          .then((ix) =>
+            sendLpV0(connection, { publicKey, signTransaction: signTransaction! }, [...rewardPreIxs, ix])
+          );
       });
     },
-    [publicKey, wrapTx, fetchRaydiumLpDepositContext]
+    [publicKey, signTransaction, connection, wrapTx, fetchRaydiumLpDepositContext]
   );
 
   return {
