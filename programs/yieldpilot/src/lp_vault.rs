@@ -1630,8 +1630,8 @@ pub mod raydium_lp {
         Ok(())
     }
 
-    pub fn withdraw_raydium_lp_handler(
-        ctx: Context<WithdrawRaydiumLp>,
+    pub fn withdraw_raydium_lp_handler<'info>(
+        ctx: Context<'_, '_, '_, 'info, WithdrawRaydiumLp<'info>>,
         shares: u64,
         token_min_a: u64,
         token_min_b: u64,
@@ -1729,7 +1729,9 @@ pub mod raydium_lp {
         Ok(())
     }
 
-    pub fn exit_raydium_lp_position_handler(ctx: Context<ExitRaydiumLpPosition>) -> Result<()> {
+    pub fn exit_raydium_lp_position_handler<'info>(
+        ctx: Context<'_, '_, '_, 'info, ExitRaydiumLpPosition<'info>>,
+    ) -> Result<()> {
         let lp_vault_key = ctx.accounts.lp_vault.key();
         let authority_bump = ctx.accounts.lp_vault.authority_bump;
         let seeds: &[&[u8]] = &[b"lp_vault_authority", lp_vault_key.as_ref(), &[authority_bump]];
