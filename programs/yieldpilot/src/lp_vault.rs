@@ -1294,9 +1294,13 @@ pub mod raydium_lp {
         pub vault_authority: UncheckedAccount<'info>,
 
         #[account(mut)]
-        pub position_nft_mint: Box<Account<'info, Mint>>,
+        /// Fresh position NFT mint for the NEW position — does not exist yet; Raydium's
+        /// open_position inits it. Must be a Signer for the same reason as the init
+        /// handler (AccountNotInitialized 3012, and isSigner must be true).
+        pub position_nft_mint: Signer<'info>,
         #[account(mut)]
-        pub position_nft_account: Box<Account<'info, TokenAccount>>,
+        /// CHECK: created by the open_position CPI; does not exist at validation time.
+        pub position_nft_account: UncheckedAccount<'info>,
         /// CHECK: Metaplex program validates + initializes
         #[account(mut)]
         pub metadata_account: UncheckedAccount<'info>,
@@ -1409,8 +1413,8 @@ pub mod raydium_lp {
                 ctx.accounts.raydium_program.to_account_info(),
                 RaydiumOpenPosition {
                     vault_authority:          ctx.accounts.vault_authority.to_account_info(),
-                    position_nft_mint:        (*ctx.accounts.position_nft_mint).clone(),
-                    position_nft_account:     (*ctx.accounts.position_nft_account).clone(),
+                    position_nft_mint:        ctx.accounts.position_nft_mint.to_account_info(),
+                    position_nft_account:     ctx.accounts.position_nft_account.to_account_info(),
                     metadata_account:         ctx.accounts.metadata_account.to_account_info(),
                     pool_state:               ctx.accounts.pool_state.to_account_info(),
                     protocol_position:        ctx.accounts.protocol_position.to_account_info(),
@@ -1769,8 +1773,8 @@ pub mod raydium_lp {
                 ctx.accounts.raydium_program.to_account_info(),
                 RaydiumOpenPosition {
                     vault_authority:          ctx.accounts.vault_authority.to_account_info(),
-                    position_nft_mint:        (*ctx.accounts.position_nft_mint).clone(),
-                    position_nft_account:     (*ctx.accounts.position_nft_account).clone(),
+                    position_nft_mint:        ctx.accounts.position_nft_mint.to_account_info(),
+                    position_nft_account:     ctx.accounts.position_nft_account.to_account_info(),
                     metadata_account:         ctx.accounts.metadata_account.to_account_info(),
                     pool_state:               ctx.accounts.pool_state.to_account_info(),
                     protocol_position:        ctx.accounts.protocol_position.to_account_info(),
