@@ -290,7 +290,7 @@ pub fn raydium_increase_liquidity<'info>(
     data.extend_from_slice(&amount_0_max.to_le_bytes());
     data.extend_from_slice(&amount_1_max.to_le_bytes());
 
-    invoke_modify_liquidity(&ctx, data, authority_seeds)?;
+    invoke_modify_liquidity(&ctx, data, authority_seeds, true)?;
     msg!("raydium_increase_liquidity: {} liquidity", liquidity);
     Ok(())
 }
@@ -307,7 +307,7 @@ pub fn raydium_decrease_liquidity<'info>(
     data.extend_from_slice(&amount_0_min.to_le_bytes());
     data.extend_from_slice(&amount_1_min.to_le_bytes());
 
-    invoke_modify_liquidity(&ctx, data, authority_seeds)?;
+    invoke_modify_liquidity(&ctx, data, authority_seeds, false)?;
     msg!("raydium_decrease_liquidity: {} liquidity", liquidity);
     Ok(())
 }
@@ -316,25 +316,44 @@ fn invoke_modify_liquidity<'info>(
     ctx: &CpiContext<'_, '_, '_, 'info, RaydiumModifyLiquidity<'info>>,
     data: Vec<u8>,
     authority_seeds: &[&[u8]],
+    increase: bool,
 ) -> Result<()> {
-    let metas = vec![
-        AccountMeta::new_readonly(*ctx.accounts.vault_authority.key, true),
-        AccountMeta::new_readonly(ctx.accounts.nft_account.key(), false),
-        // protocol_position marked mut on-chain despite no #[account(mut)] in
-        // Raydium's own Anchor struct — UncheckedAccount doesn't get an
-        // auto-generated mutability hint, but the runtime writes to it, so
-        // the client must mark it writable regardless of what the IDL says.
-        AccountMeta::new(*ctx.accounts.pool_state.key, false),
-        AccountMeta::new(*ctx.accounts.protocol_position.key, false),
-        AccountMeta::new(*ctx.accounts.personal_position.key, false),
-        AccountMeta::new(*ctx.accounts.tick_array_lower.key, false),
-        AccountMeta::new(*ctx.accounts.tick_array_upper.key, false),
-        AccountMeta::new(ctx.accounts.token_account_0.key(), false),
-        AccountMeta::new(ctx.accounts.token_account_1.key(), false),
-        AccountMeta::new(*ctx.accounts.token_vault_0.key, false),
-        AccountMeta::new(*ctx.accounts.token_vault_1.key, false),
-        AccountMeta::new_readonly(*ctx.accounts.token_program.key, false),
-    ];
+    // protocol_position is written by the runtime even though Raydium's own Anchor
+    // struct has no #[account(mut)] on it (UncheckedAccount gets no auto mutability
+    // hint), so the client must mark it writable regardless of the IDL.
+    //
+    // NOTE: increase and decrease take DIFFERENT account orders. Do not merge these.
+    let metas = if increase {
+        vec![
+            AccountMeta::new_readonly(*ctx.accounts.vault_authority.key, true),
+            AccountMeta::new_readonly(ctx.accounts.nft_account.key(), false),
+            AccountMeta::new(*ctx.accounts.pool_state.key, false),
+            AccountMeta::new(*ctx.accounts.protocol_position.key, false),
+            AccountMeta::new(*ctx.accounts.personal_position.key, false),
+            AccountMeta::new(*ctx.accounts.tick_array_lower.key, false),
+            AccountMeta::new(*ctx.accounts.tick_array_upper.key, false),
+            AccountMeta::new(ctx.accounts.token_account_0.key(), false),
+            AccountMeta::new(ctx.accounts.token_account_1.key(), false),
+            AccountMeta::new(*ctx.accounts.token_vault_0.key, false),
+            AccountMeta::new(*ctx.accounts.token_vault_1.key, false),
+            AccountMeta::new_readonly(*ctx.accounts.token_program.key, false),
+        ]
+    } else {
+        vec![
+            AccountMeta::new_readonly(*ctx.accounts.vault_authority.key, true),
+            AccountMeta::new_readonly(ctx.accounts.nft_account.key(), false),
+            AccountMeta::new(*ctx.accounts.personal_position.key, false),
+            AccountMeta::new(*ctx.accounts.pool_state.key, false),
+            AccountMeta::new(*ctx.accounts.protocol_position.key, false),
+            AccountMeta::new(*ctx.accounts.token_vault_0.key, false),
+            AccountMeta::new(*ctx.accounts.token_vault_1.key, false),
+            AccountMeta::new(*ctx.accounts.tick_array_lower.key, false),
+            AccountMeta::new(*ctx.accounts.tick_array_upper.key, false),
+            AccountMeta::new(ctx.accounts.token_account_0.key(), false),
+            AccountMeta::new(ctx.accounts.token_account_1.key(), false),
+            AccountMeta::new_readonly(*ctx.accounts.token_program.key, false),
+        ]
+    };
 
     anchor_lang::solana_program::program::invoke_signed(
         &anchor_lang::solana_program::instruction::Instruction {
