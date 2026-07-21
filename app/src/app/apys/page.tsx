@@ -127,13 +127,13 @@ function ILRiskModal({ onAccept, onDecline }: { onAccept: () => void; onDecline:
   );
 }
 
-const LP_PROTOCOL_IDS = new Set(["raydium-usdc-sol", "orca-usdc-eth"]);
+const LP_PROTOCOL_IDS = new Set(["raydium-usdc-sol", "orca-sol-usdc"]);
 
 // Purely a display grouping for the type-filter tabs — not a routability signal.
 const PROTOCOL_TYPE: Record<string, "Lending" | "Liquid stake" | "LP"> = {
   "kamino-usdc": "Lending", "kamino-sol": "Lending", "solend-usdc": "Lending", "drift-sol": "Lending",
   "marinade-sol": "Liquid stake", "jito-sol": "Liquid stake",
-  "raydium-usdc-sol": "LP", "orca-usdc-eth": "LP",
+  "raydium-usdc-sol": "LP", "orca-sol-usdc": "LP",
 };
 
 type TypeFilter = "All" | "Lending" | "Liquid stake";

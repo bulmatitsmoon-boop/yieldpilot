@@ -4,7 +4,7 @@ import { Pill, fmtTvl, fmt } from "@/components/ui";
 import type { ProtocolApy } from "@/hooks/useApys";
 
 const RISK_LABEL = ["", "Low", "Medium", "High"];
-const LP_IDS = new Set(["raydium-usdc-sol", "orca-usdc-eth"]);
+const LP_IDS = new Set(["raydium-usdc-sol", "orca-sol-usdc"]);
 
 interface Props {
   apys: ProtocolApy[];

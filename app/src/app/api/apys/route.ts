@@ -47,14 +47,18 @@ const META = [
   { protocolId: "marinade-sol",     name: "Marinade", asset: "SOL",      riskScore: 1, tvlUsd: 181_896_238 },
   { protocolId: "kamino-usdc",      name: "Kamino",   asset: "USDC",     riskScore: 1, tvlUsd:  23_525_228 },
   { protocolId: "solend-usdc",      name: "Solend",   asset: "USDC",     riskScore: 1, tvlUsd:   7_143_891 },
-  { protocolId: "raydium-usdc-sol", name: "Raydium",  asset: "USDC-SOL", riskScore: 3, tvlUsd: 190_000_000 },
-  { protocolId: "orca-usdc-eth",    name: "Orca",     asset: "USDC-ETH", riskScore: 3, tvlUsd: 120_000_000 },
+  // LP pools. TVL is NOT hardcoded here — both fetchers return live TVL, and the
+  // placeholder that used to sit here claimed $190M/$120M against a real ~$6M/~$26M.
+  // Orca is the SOL/USDC Whirlpool we would actually route to (Czfq3xZZ…), not a
+  // USDC-ETH pool we have no integration with.
+  { protocolId: "raydium-usdc-sol", name: "Raydium",  asset: "USDC-SOL", riskScore: 3 },
+  { protocolId: "orca-sol-usdc",    name: "Orca",     asset: "SOL-USDC", riskScore: 3 },
 ];
 
 const COLORS: Record<string, string> = {
   "kamino-usdc": "#3FE0A0", "kamino-sol": "#22B37E", "jito-sol": "#10B981",
   "marinade-sol": "#06B6D4", "drift-sol": "#14B8A6", "solend-usdc": "#34D399",
-  "raydium-usdc-sol": "#EF4444", "orca-usdc-eth": "#EF4444",
+  "raydium-usdc-sol": "#EF4444", "orca-sol-usdc": "#EF4444",
 };
 
 /** A rate is only believable inside this band. Outside it we treat the source as broken. */
@@ -179,18 +183,50 @@ async function fetchJito(): Promise<Live | null> {
   } catch { return null; }
 }
 
+// Raydium CLMM SOL/USDC — the pool the LP adapter targets.
+//
+// The old v2 endpoint (api.raydium.io/v2/ammV3/ammPools) returned the ENTIRE pool list:
+// 216 MB, ~16s. It timed out in the serverless function every time, which is why
+// Raydium rendered "—" while looking like it had a working fetcher. v3 answers a
+// targeted query in ~7 KB.
+//
+// `day.apr` is already a percentage (29.65 = 29.65%), NOT a fraction — the old code
+// multiplied by 100 and would have shown 2965% had it ever returned.
+const RAYDIUM_SOL_USDC_POOL = "3ucNos4NbumPLZNWztqGHNFFgkHeRMBQAVemeeomsUxv";
+
 async function fetchRaydium(): Promise<Live | null> {
   try {
-    const data = await tryFetch("https://api.raydium.io/v2/ammV3/ammPools");
-    const pools: any[] = data?.data || [];
-    const pool = pools
-      .filter((p: any) =>
-        (p.mintA?.symbol === "USDC" && p.mintB?.symbol === "SOL") ||
-        (p.mintA?.symbol === "SOL"  && p.mintB?.symbol === "USDC"))
-      .sort((a: any, b: any) => (b.tvl || 0) - (a.tvl || 0))[0];
+    const data = await tryFetch(
+      `https://api-v3.raydium.io/pools/info/ids?ids=${RAYDIUM_SOL_USDC_POOL}`
+    );
+    const pool = (data?.data || [])[0];
     if (!pool) return null;
-    const apy = parseFloat(pool.day?.apr || pool.apr || "0") * 100;
-    return sane(apy) ? { apyPercent: apy, tvlUsd: parseFloat(pool.tvl || "0") || undefined } : null;
+    const apy = Number(pool.day?.apr);
+    const tvl = Number(pool.tvl);
+    return sane(apy) ? { apyPercent: apy, tvlUsd: Number.isFinite(tvl) ? tvl : undefined } : null;
+  } catch { return null; }
+}
+
+// Orca Whirlpool SOL/USDC — the exact pool the LP adapter opens positions in.
+//
+// Orca publishes no APR field, so derive it from first-party numbers: 24h fees over TVL,
+// annualised. stats["24h"].yieldOverTvl is a DAILY fraction (0.000937 = 0.0937%/day),
+// so x365 gives ~34% APR. The v1 whirlpool/list endpoint is 18 MB — use the v2 token
+// query (~170 KB) and pick our pool by address.
+const ORCA_SOL_USDC_WHIRLPOOL = "Czfq3xZZDmsdGdUyrNLtRhGc47cXcZtLG4crryfu44zE";
+
+async function fetchOrca(): Promise<Live | null> {
+  try {
+    const data = await tryFetch(
+      "https://api.orca.so/v2/solana/pools?token=So11111111111111111111111111111111111111112"
+    );
+    const pool = (data?.data || []).find((p: any) => p.address === ORCA_SOL_USDC_WHIRLPOOL);
+    if (!pool) return null;
+    const daily = Number(pool.stats?.["24h"]?.yieldOverTvl ?? pool.yieldOverTvl);
+    if (!Number.isFinite(daily)) return null;
+    const apy = daily * 365 * 100;
+    const tvl = Number(pool.tvlUsdc);
+    return sane(apy) ? { apyPercent: apy, tvlUsd: Number.isFinite(tvl) ? tvl : undefined } : null;
   } catch { return null; }
 }
 
@@ -218,8 +254,8 @@ async function writeKnown(id: string, k: Known) {
 }
 
 export async function GET(_req: NextRequest) {
-  const [kamino, marinade, solend, jito, raydium] = await Promise.all([
-    fetchKamino(), fetchMarinade(), fetchSolend(), fetchJito(), fetchRaydium(),
+  const [kamino, marinade, solend, jito, raydium, orca] = await Promise.all([
+    fetchKamino(), fetchMarinade(), fetchSolend(), fetchJito(), fetchRaydium(), fetchOrca(),
   ]);
 
   const live: Record<string, Live | null> = {
@@ -229,7 +265,7 @@ export async function GET(_req: NextRequest) {
     "solend-usdc":      solend,
     "jito-sol":         jito,
     "raydium-usdc-sol": raydium,
-    "orca-usdc-eth":    null, // no first-party source wired; shows "—"
+    "orca-sol-usdc":    orca,
   };
 
   const now = new Date().toISOString();
