@@ -1669,7 +1669,11 @@ pub mod raydium_lp {
                     raydium_program:   ctx.accounts.raydium_program.to_account_info(),
                 },
                 &[seeds],
-            ),
+            )
+            // Raydium validates remaining_accounts against the pool's initialized
+            // reward count; a CpiContext only carries them if the caller attaches
+            // them, so forward this instruction's own.
+            .with_remaining_accounts(ctx.remaining_accounts.to_vec()),
             liquidity_amount,
             token_min_a,
             token_min_b,
@@ -1751,7 +1755,11 @@ pub mod raydium_lp {
                         raydium_program:   ctx.accounts.raydium_program.to_account_info(),
                     },
                     &[seeds],
-                ),
+                )
+                // Raydium validates remaining_accounts against the pool's initialized
+                // reward count; a CpiContext only carries them if the caller attaches
+                // them, so forward this instruction's own.
+                .with_remaining_accounts(ctx.remaining_accounts.to_vec()),
                 total_liquidity,
                 0,
                 0,
