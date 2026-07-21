@@ -61,11 +61,31 @@ const COLORS: Record<string, string> = {
   "raydium-usdc-sol": "#EF4444", "orca-sol-usdc": "#EF4444",
 };
 
-/** A rate is only believable inside this band. Outside it we treat the source as broken. */
+/**
+ * A rate is only believable inside this band; outside it we treat the source as broken.
+ *
+ * The ceiling has to differ by protocol type. For LENDING, 25% is a good tripwire — a
+ * pool that normally pays 3% suddenly reporting 40% is a broken feed, and that guard is
+ * what has caught fake rates before.
+ *
+ * But concentrated-liquidity FEE APRs legitimately run far higher: measured live
+ * 2026-07-21, Raydium SOL/USDC was 29.5% and Orca SOL/USDC ~34%. The single 25% ceiling
+ * silently rejected both, so the LP rows rendered "—" while the fetchers were working
+ * perfectly — the guard was throwing the right answers away.
+ *
+ * 300% for LP is still a real tripwire (a fee APR above that is a data error, not a
+ * pool), just one set for the right instrument.
+ */
 const MIN_SANE_APY = 0.05;
-const MAX_SANE_APY = 25;
-const sane = (v: unknown): v is number =>
-  typeof v === "number" && Number.isFinite(v) && v >= MIN_SANE_APY && v <= MAX_SANE_APY;
+const MAX_SANE_APY = 25;      // lending
+const MAX_SANE_LP_APY = 300;  // concentrated-liquidity fee APR
+
+const inBand = (v: unknown, max: number): v is number =>
+  typeof v === "number" && Number.isFinite(v) && v >= MIN_SANE_APY && v <= max;
+
+const sane = (v: unknown): v is number => inBand(v, MAX_SANE_APY);
+/** Use for LP pools only — see the note above on why the ceiling differs. */
+const saneLp = (v: unknown): v is number => inBand(v, MAX_SANE_LP_APY);
 
 async function tryFetch(url: string, timeout = 8000): Promise<any> {
   const controller = new AbortController();
@@ -203,7 +223,7 @@ async function fetchRaydium(): Promise<Live | null> {
     if (!pool) return null;
     const apy = Number(pool.day?.apr);
     const tvl = Number(pool.tvl);
-    return sane(apy) ? { apyPercent: apy, tvlUsd: Number.isFinite(tvl) ? tvl : undefined } : null;
+    return saneLp(apy) ? { apyPercent: apy, tvlUsd: Number.isFinite(tvl) ? tvl : undefined } : null;
   } catch { return null; }
 }
 
@@ -226,7 +246,7 @@ async function fetchOrca(): Promise<Live | null> {
     if (!Number.isFinite(daily)) return null;
     const apy = daily * 365 * 100;
     const tvl = Number(pool.tvlUsdc);
-    return sane(apy) ? { apyPercent: apy, tvlUsd: Number.isFinite(tvl) ? tvl : undefined } : null;
+    return saneLp(apy) ? { apyPercent: apy, tvlUsd: Number.isFinite(tvl) ? tvl : undefined } : null;
   } catch { return null; }
 }
 
