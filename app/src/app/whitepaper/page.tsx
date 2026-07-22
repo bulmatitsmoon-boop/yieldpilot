@@ -156,8 +156,8 @@ export default function Whitepaper() {
             </h1>
             <p style={{ color: "var(--text-mid)", fontSize: 16, lineHeight: 1.7 }}>
               A non-custodial protocol that automatically routes deposits across Solana&apos;s
-              highest-yielding lending and liquid staking protocols, compounding returns and
-              rebalancing every 45 minutes.
+              highest-yielding lending and liquid staking protocols, re-evaluating
+              allocations roughly hourly.
             </p>
             {!IS_MAINNET && (
               <div style={{
@@ -180,9 +180,9 @@ export default function Whitepaper() {
             <P>Most users either leave money idle in a single protocol, or spend hours manually chasing rates. YieldPilot solves this by automating the entire process.</P>
             <Table rows={[
               ["", "Manual Yield Farming", "YieldPilot"],
-              ["Rate monitoring", "Manual, time-consuming", "Automated every 45 min"],
+              ["Rate monitoring", "Manual, time-consuming", "Automated, ~hourly"],
               ["Rebalancing", "Manual transactions", "Automated keeper bot"],
-              ["Compounding", "Manual harvest required", "Hourly auto-compound"],
+              ["Compounding", "Manual harvest required", "Automatic — accrues in-kind"],
               ["Custody", "Protocol-held funds", "Non-custodial vault shares"],
             ]} />
           </Section>
@@ -190,10 +190,10 @@ export default function Whitepaper() {
           <Section id="how-it-works" title="3. How YieldPilot Works">
             <H3>3.1 Deposit</H3>
             <P>Users deposit USDC or SOL into a YieldPilot vault. Vault shares are minted proportional to the current share price — total vault assets divided by total shares outstanding. Each depositor owns an exact, verifiable fraction of the pool.</P>
-            <H3>3.2 Winner-Takes-Most Routing</H3>
-            <P>When the keeper bot identifies the highest-yielding protocol, it routes 80% of vault assets there and keeps 20% in the runner-up. This captures most upside while maintaining diversification. Rebalancing only triggers when the APY spread exceeds 0.5%, preventing unnecessary churn from minor fluctuations.</P>
-            <H3>3.3 Auto-Compound</H3>
-            <P>Every hour, the keeper bot harvests accrued rewards and reinvests them back into the vault. This compounds returns continuously, improving long-term yield versus protocols that require manual harvest.</P>
+            <H3>3.2 Winner-Takes-All Routing</H3>
+            <P>When the keeper bot identifies the highest-yielding protocol, it routes 100% of vault assets there. Capital parked in a second-best rate is yield you are not earning, so the vault does not hold a runner-up position. Reallocation triggers only when allocation drifts more than 5% AND the expected gain still exceeds the cost of exiting the current protocol — so the vault does not churn on minor fluctuations. The tradeoff is deliberate: concentrating in one venue maximises yield and concentrates protocol risk, which is why only audited, established lending and staking protocols are ever eligible.</P>
+            <H3>3.3 Compounding</H3>
+            <P>Yield compounds automatically — but not because a bot harvests it. Vault deposits are held as protocol receipt tokens (kUSDC, mSOL, jitoSOL), and those tokens appreciate against the underlying asset as interest and staking rewards accrue. The growth is in the exchange rate, so there is no reward to claim and no harvest step that could be missed or delayed. The on-chain <code>compound</code> instruction records a periodic checkpoint and emits an event for tracking; it does not move funds, and no yield depends on it running.</P>
             <H3>3.4 Withdrawal</H3>
             <P>Users burn their vault shares at any time to receive their proportional share of vault assets. The redemption value reflects principal plus all earned yield. A tiered performance fee is deducted from profits only — the rate depends on your $YPILOT holdings. No fee is charged if no profit was earned.</P>
           </Section>
@@ -206,7 +206,7 @@ export default function Whitepaper() {
               ["deposit", "Mint shares in exchange for tokens", "Any user"],
               ["withdraw", "Burn shares, receive tokens + yield", "Any user"],
               ["rebalance", "Update protocol target allocations", "Keeper"],
-              ["compound", "Harvest and reinvest rewards", "Keeper"],
+              ["compound", "Record a compound checkpoint + emit event (moves no funds — see 3.3)", "Keeper"],
               ["deploy_to_* / recall_from_*", "Move funds to/from a protocol", "Keeper"],
               ["set_paused", "Pause / unpause new deposits", "Admin"],
               ["raise_tvl_cap", "Raise the vault's maximum TVL (one-way only, cannot decrease)", "Admin"],
