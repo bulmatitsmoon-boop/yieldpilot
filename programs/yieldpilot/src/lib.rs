@@ -603,6 +603,39 @@ pub mod yieldpilot {
         Ok(())
     }
 
+    /// Change where performance fees are routed.
+    ///
+    /// WHY THIS EXISTS: `treasury` was previously written once in `initialize_vault` and
+    /// had no setter, making it immutable for the life of a vault. Round 8 shipped with
+    /// `treasury == admin` on both vaults, which meant (a) fee revenue accrued to the same
+    /// wallet that holds the upgrade authority and the deploy SOL, and (b) the perf-fee
+    /// routing fixed in PR #64 could never be VERIFIED — the fee and the user's payout
+    /// landed in the same account, so the two were indistinguishable. Fixing that required
+    /// this instruction, hence the upgrade.
+    ///
+    /// One-step, unlike the admin handover (`propose_admin`/`accept_admin`): a wrong
+    /// treasury is recoverable — the admin simply calls this again — whereas a wrong admin
+    /// is permanent loss of control. It is NOT harmless, though: `withdraw()` enforces
+    /// `treasury_acct.owner == v.treasury` and refuses to pay out when a non-zero fee has
+    /// nowhere to go (`TreasuryRequired`), so pointing this at an address whose token
+    /// account doesn't exist BRICKS every PROFITABLE withdrawal until it's corrected.
+    /// Principal-only withdrawals (perf_fee == 0) are unaffected. Set this to a wallet you
+    /// control and create its ATA for the vault's mint before any profitable withdrawal.
+    pub fn set_treasury(ctx: Context<AdminOnly>, new_treasury: Pubkey) -> Result<()> {
+        // system_program::ID is this codebase's "unset" sentinel — it IS Pubkey::default()
+        // (32 zero bytes), and gate_mint uses it the same way. Accepting it here would
+        // silently point fees at an address nobody controls and brick profitable
+        // withdrawals, so reject it rather than allow a treasury to be "unset".
+        require!(
+            new_treasury != anchor_lang::solana_program::system_program::ID,
+            VaultError::InvalidTreasury
+        );
+        // No-op guard: re-setting the same treasury is pointless but harmless; allow it
+        // rather than error, so idempotent admin scripts don't need special-casing.
+        ctx.accounts.vault.treasury = new_treasury;
+        Ok(())
+    }
+
     pub fn propose_admin(ctx: Context<AdminOnly>, new_admin: Pubkey) -> Result<()> {
         ctx.accounts.vault.pending_admin = new_admin;
         Ok(())
@@ -2142,4 +2175,10 @@ pub enum VaultError {
     #[msg("Deploy would breach minimum idle buffer (10%)")]    IdleBufferBreach,
     #[msg("Non-keeper recall must be paired with a withdraw instruction for the same user and vault in the same transaction")] RecallRequiresPairedWithdraw,
     #[msg("Invalid instructions sysvar account")] InvalidInstructionsSysvar,
+    // APPEND ONLY — Anchor assigns error codes positionally (6000 + index). Inserting a
+    // variant above this line silently renumbers every code after it, and real code
+    // depends on the current numbering (InsufficientIdle = 6012, FirstDepositTooSmall =
+    // 6015, RecallRequiresPairedWithdraw = 6030 are all observed/relied on). New variants
+    // go at the BOTTOM, always.
+    #[msg("Treasury cannot be the zero address")] InvalidTreasury,
 }
