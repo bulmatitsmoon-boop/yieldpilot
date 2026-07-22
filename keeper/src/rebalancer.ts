@@ -243,11 +243,39 @@ function computeOptimalAllocations(
     return allocations.map((_, i) => i === 0 ? equal + (BPS_DENOM - equal * n) : equal);
   }
 
-  // Winner takes all. eligible[] is sorted by APY descending, so [0] is the
-  // highest live rate. Everything else — including any LP protocol, which is
-  // never eligible — stays at 0.
-  allocations[eligible[0].i] = BPS_DENOM;
-  return allocations;
+  // Winner takes all — but the winner is the one with the best NET gain, not the
+  // highest headline APY.
+  //
+  // WHY THIS IS NOT JUST eligible[0]. Proposing only the top-APY protocol and letting
+  // the caller reject it on cost means that when the best rate is unreachable, the
+  // keeper does NOTHING — even if moving somewhere else is clearly profitable.
+  //
+  // Observed live 2026-07-22 on the SOL vault (jito 2000 / marinade 8000):
+  //   -> psol-sol      gross +22.5bps, exit 26.0 (must leave BOTH legs)  = NET  -3.5
+  //   -> marinade-sol  gross +17.4bps, exit  2.0 (only jito's 20% moves) = NET +15.4
+  // psol had the higher rate, so it was the only candidate considered, it failed the
+  // cost check, and the vault sat at 5.900% while 6.074% was available for 2bps.
+  // Leaving 15.4bps on the table indefinitely is the opposite of the goal.
+  //
+  // So: score EVERY eligible destination net of what it actually costs to get there,
+  // and pick the best. Exit cost depends on where the funds currently sit, which is
+  // why the top rate is not automatically the right move.
+  const currentApy = computeWeightedApy(currentAllocations, protocolApys);
+  let best: { alloc: number[]; net: number } | null = null;
+
+  for (const cand of eligible) {
+    const proposed = Array(n).fill(0);
+    proposed[cand.i] = BPS_DENOM;
+    const gross = (computeWeightedApy(proposed, protocolApys) - currentApy) * 100; // bps
+    const net = gross - computeExitCost(currentAllocations, proposed, protocolIds);
+    if (!best || net > best.net) best = { alloc: proposed, net };
+  }
+
+  // If no destination is profitable after costs, stay put. Returning the current
+  // allocation makes drift zero, so the caller's threshold check will not fire —
+  // the keeper holds rather than churning for a loss.
+  if (!best || best.net <= 0) return [...currentAllocations];
+  return best.alloc;
 }
 
 function computeWeightedApy(allocations: number[], apys: number[]): number {
