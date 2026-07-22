@@ -1,0 +1,44 @@
+# Fail the build when the site claims something the code does not do.
+#
+# WHY THIS EXISTS: on 2026-07-21 six false user-facing claims were found in one sitting —
+# "the keeper harvests rewards hourly" (compound() moves no funds), "every 45 minutes"
+# (the cron fires at :00 and :45), a "0.5% threshold" that is really 5%, and an 80/20
+# split the optimizer no longer performs. None were written to deceive: each described
+# what the product was going to do, the code then changed, and the copy did not.
+#
+# That drift is structural, so it needs a check rather than vigilance. A manual sweep the
+# same day still MISSED HowItWorksStepper.tsx — this script caught it.
+#
+# It runs on changes to BOTH sides deliberately. Copy going stale is the obvious case;
+# the dangerous one is a CODE change silently invalidating copy nobody thought to reread.
+name: Claim Audit
+
+on:
+  pull_request:
+    paths:
+      - "app/src/**"
+      - "keeper/src/rebalancer.ts"
+      - "programs/yieldpilot/src/lib.rs"
+      - ".github/workflows/keeper-cron.yml"
+      - "scripts/audit-claims.mjs"
+  push:
+    branches: [main]
+    paths:
+      - "app/src/**"
+      - "keeper/src/rebalancer.ts"
+      - "programs/yieldpilot/src/lib.rs"
+
+jobs:
+  audit:
+    name: site copy matches code
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      # No dependencies on purpose — the audit reads source with node:fs only, so it
+      # cannot be broken by an install failure in a package it does not need.
+      - name: Audit user-facing claims against code
+        run: node scripts/audit-claims.mjs
