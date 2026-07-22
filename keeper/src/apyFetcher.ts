@@ -46,7 +46,15 @@ const KAMINO_RESERVE: Record<string, string> = {
   "kamino-sol":  "d4A2prbA2whesmvHaL88BH6Ewn5N4bTSU2Ze8P6Bc4Q",
 };
 const SOLEND_USDC_RESERVE = "BgxfHJDzm44T7XG68MYKx7YisTjZu73tVovyZSjJMpmw";
-const JITO_POOL = "Jito4APyf642JPZPx3hGc6WWJ8zPKtRbRs4P815Awbb";
+// SPL stake pools we read directly. Adding another LST is one entry here plus one line
+// in META and one in rebalancer.ts's SAFE_PROTOCOLS — no new fetch logic, because every
+// standard SPL stake pool exposes yield the same way (exchange-rate growth per epoch).
+// Both verified on-chain 2026-07-21 to be owned by the standard SPL Stake Pool program
+// (SPoo1Ku8...), which is what makes one reader work for all of them.
+const SPL_STAKE_POOLS: Record<string, string> = {
+  "jito-sol": "Jito4APyf642JPZPx3hGc6WWJ8zPKtRbRs4P815Awbb",
+  "psol-sol": "pSPcvR8GmG9aKDUbn9nbKYjkxt9hxMS7kF1qqKJaPqJ", // Phantom Staked SOL
+};
 
 /** Static display metadata only — never a rate. */
 const META: Record<string, { name: string; asset: string; riskScore: number; tvlUsd: number }> = {
@@ -55,6 +63,9 @@ const META: Record<string, { name: string; asset: string; riskScore: number; tvl
   "marinade-sol": { name: "Marinade", asset: "SOL",  riskScore: 1, tvlUsd: 181_896_238 },
   "solend-usdc":  { name: "Solend",   asset: "USDC", riskScore: 1, tvlUsd:   7_143_891 },
   "jito-sol":     { name: "Jito",     asset: "SOL",  riskScore: 1, tvlUsd: 762_417_675 },
+  // Phantom Staked SOL. Identity verified on-chain: pool mint pSo1f9nQ… resolves to
+  // "Phantom Staked SOL" with metadata served from assets.phantom.app.
+  "psol-sol":     { name: "Phantom",  asset: "SOL",  riskScore: 1, tvlUsd: 125_000_000 },
 };
 
 // A rate is only believable inside this band. Outside it we treat the source as broken
@@ -158,13 +169,32 @@ function findLastEpochRate(d: Buffer, supplyNow: number, lamportsNow: number, ra
   return matches.length === 1 ? matches[0] : null;
 }
 
-async function fetchJito(): Promise<number | null> {
+/** Reads any standard SPL stake pool. Was fetchJito(); generalised 2026-07-21 when PSOL
+ *  was added, since the mechanism is identical for every pool on the standard program. */
+/** Epochs per year, measured. slotsInEpoch from the cluster, slot time from recent
+ *  performance samples — both first-party RPC, no assumed constants. */
+async function epochsPerYear(rpc: string): Promise<number> {
+  try {
+    const call = async (method: string, params: any[] = []) =>
+      (await axios.post(rpc, { jsonrpc: "2.0", id: 1, method, params }, { timeout: TIMEOUT })).data?.result;
+    const [info, samples] = await Promise.all([call("getEpochInfo"), call("getRecentPerformanceSamples", [30])]);
+    const slots = Number(info?.slotsInEpoch);
+    const arr: any[] = Array.isArray(samples) ? samples : [];
+    if (!slots || !arr.length) return 174.8;
+    const slotSec = arr.reduce((a, p) => a + p.samplePeriodSecs / p.numSlots, 0) / arr.length;
+    const perYear = 31_557_600 / (slots * slotSec);
+    // Sanity: Solana epochs are ~2-3 days. Outside that, the probe is wrong, not the chain.
+    return perYear > 100 && perYear < 250 ? perYear : 174.8;
+  } catch { return 174.8; }
+}
+
+async function fetchSplStakePool(protocolId: string, pool: string): Promise<number | null> {
   try {
     const rpc = process.env.RPC_URL;
-    if (!rpc) { logger.warn("Jito APY: RPC_URL unset"); return null; }
+    if (!rpc) { logger.warn(`${protocolId} APY: RPC_URL unset`); return null; }
     const { data } = await axios.post(rpc, {
       jsonrpc: "2.0", id: 1, method: "getAccountInfo",
-      params: [JITO_POOL, { encoding: "base64", commitment: "confirmed" }],
+      params: [pool, { encoding: "base64", commitment: "confirmed" }],
     }, { timeout: TIMEOUT });
 
     const b64 = data?.result?.value?.data?.[0];
@@ -180,15 +210,20 @@ async function fetchJito(): Promise<number | null> {
 
     const rateLast = findLastEpochRate(d, supplyNow, lamportsNow, rateNow);
     if (rateLast === null) {
-      logger.warn("Jito APY: could not uniquely identify last-epoch fields — holding");
+      logger.warn(`${protocolId} APY: could not uniquely identify last-epoch fields — holding`);
       return null;
     }
 
-    const EPOCHS_PER_YEAR = 182.5; // ~2 epochs/day
+    // 182.5 assumed exactly 400ms slots (432000 slots = 2.000 days). Real slot time runs
+    // ~418ms, so an epoch is ~2.09 days and there are ~175 per year — the old constant
+    // overstated every stake-pool APY by ~4%. Same for all pools, so it never changed a
+    // ranking, but it is a number users see. Derived, not re-hardcoded, so it tracks any
+    // future change in slot time; falls back to the measured figure if the probe fails.
+    const EPOCHS_PER_YEAR = await epochsPerYear(rpc);
     const apy = (Math.pow(rateNow / rateLast, EPOCHS_PER_YEAR) - 1) * 100;
     return sane(apy) ? apy : null;
   } catch (err: any) {
-    logger.warn("Jito APY fetch failed", { error: err.message });
+    logger.warn(`${protocolId} APY fetch failed`, { error: err.message });
     return null;
   }
 }
@@ -200,8 +235,10 @@ async function fetchJito(): Promise<number | null> {
 export async function fetchAllApys(): Promise<ProtocolApy[]> {
   logger.info("Fetching APYs from first-party sources...");
 
-  const [kamino, marinade, solend, jito] = await Promise.all([
-    fetchKamino(), fetchMarinade(), fetchSolend(), fetchJito(),
+  const [kamino, marinade, solend, jito, psol] = await Promise.all([
+    fetchKamino(), fetchMarinade(), fetchSolend(),
+    fetchSplStakePool("jito-sol", SPL_STAKE_POOLS["jito-sol"]),
+    fetchSplStakePool("psol-sol", SPL_STAKE_POOLS["psol-sol"]),
   ]);
 
   const live: Record<string, number | null> = {
@@ -210,6 +247,7 @@ export async function fetchAllApys(): Promise<ProtocolApy[]> {
     "marinade-sol": marinade,
     "solend-usdc":  solend,
     "jito-sol":     jito,
+    "psol-sol":     psol,
   };
 
   const now = new Date();
