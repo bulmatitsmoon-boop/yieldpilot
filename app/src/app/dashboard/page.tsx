@@ -363,7 +363,7 @@ export default function Dashboard() {
             value={primaryVault.autoCompound}
             onChange={() => updateSettings(primaryVault.address, !primaryVault.autoCompound, primaryVault.autoRebalance)}
             label="Auto-Compound"
-            sub="Reinvests rewards hourly"
+            sub="Emits a compound checkpoint (yield accrues in-kind)"
           />
           <Toggle
             value={primaryVault.autoRebalance}
