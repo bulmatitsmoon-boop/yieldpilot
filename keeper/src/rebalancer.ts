@@ -17,6 +17,11 @@ const EXIT_COST_BPS: Record<string, number> = {
   "solend-usdc":      0,
   "marinade-sol":     30, // ~0.3% liquid unstake fee
   "jito-sol":         10, // ~0.1% DEX swap slippage to exit jitoSOL
+  // 10 bps read FIRST-PARTY from PSOL's own stake pool account (sol_withdrawal_fee =
+  // 10/10000). Cross-validated: the same field on Jito's pool reads 1/1000 = 10 bps,
+  // matching the hand-set jito-sol value above — which is what makes the offset
+  // interpretation trustworthy rather than a guess.
+  "psol-sol":         10,
 };
 
 export interface RebalanceDecision {
@@ -207,6 +212,12 @@ const SAFE_PROTOCOLS = new Set([
   "solend-usdc",
   "marinade-sol",
   "jito-sol",
+  // Phantom Staked SOL. Added 2026-07-21 for candidate variety: under winner-takes-all,
+  // a wider eligible set means more chances the top rate in any given hour is genuinely
+  // the best one available. Measured on-chain at 6.14% vs Marinade ~6.0% and Jito 5.22% —
+  // close enough to Marinade that it is NOT a guaranteed upgrade, which is exactly why it
+  // belongs in the candidate set rather than being hardwired as the destination.
+  "psol-sol",
 ]);
 
 function computeOptimalAllocations(
