@@ -36,8 +36,9 @@ use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, Token, TokenAccount, Transfer};
 
 use crate::adapters::orca::{
-    OrcaClosePosition, OrcaModifyLiquidity, OrcaOpenPosition, WHIRLPOOL_PROGRAM_ID,
-    orca_close_position, orca_decrease_liquidity, orca_increase_liquidity, orca_open_position,
+    OrcaClosePosition, OrcaCollectFees, OrcaModifyLiquidity, OrcaOpenPosition, WHIRLPOOL_PROGRAM_ID,
+    orca_close_position, orca_collect_fees, orca_decrease_liquidity, orca_increase_liquidity,
+    orca_open_position,
 };
 use crate::adapters::raydium::{
     METADATA_PROGRAM_ID, RAYDIUM_CLMM_PROGRAM_ID, RaydiumClosePosition, RaydiumModifyLiquidity,
@@ -900,6 +901,41 @@ pub mod orca_lp {
                 seeds,
             )?;
         }
+
+        // Orca gates close_position on `is_position_empty`, which requires
+        // fee_owed_a == 0 && fee_owed_b == 0 — NOT just zero liquidity. Any position
+        // that earned fees would therefore refuse to close, stranding the exit and
+        // leaving the vault's funds idle. Sweep the fees into the vault's token
+        // accounts first; they are then redeployed with the principal on re-entry,
+        // which is what makes LP yield actually compound.
+        //
+        // Unconditional on purpose: fees can be owed even when total_liquidity is 0
+        // (earned before an earlier full withdraw), and collecting zero is a no-op.
+        //
+        // Rewards are the other half of `is_position_empty`. The SOL/USDC whirlpool
+        // has emissions DISABLED (emissions_per_second = 0, active = false, checked
+        // 2026-07-21), so reward_amount_owed stays 0 and close succeeds. If Orca ever
+        // re-enables emissions this will start failing the same way — the fix is a
+        // matching collect_reward CPI per active reward slot.
+        orca_collect_fees(
+            CpiContext::new_with_signer(
+                ctx.accounts.whirlpool_program.to_account_info(),
+                OrcaCollectFees {
+                    whirlpool:              ctx.accounts.whirlpool.to_account_info(),
+                    position_authority:     ctx.accounts.vault_authority.to_account_info(),
+                    position:               ctx.accounts.position.to_account_info(),
+                    position_token_account: (*ctx.accounts.position_token_account).clone(),
+                    token_owner_account_a:  (*ctx.accounts.vault_token_a_account).clone(),
+                    token_vault_a:          ctx.accounts.token_vault_a.to_account_info(),
+                    token_owner_account_b:  (*ctx.accounts.vault_token_b_account).clone(),
+                    token_vault_b:          ctx.accounts.token_vault_b.to_account_info(),
+                    token_program:          ctx.accounts.token_program.clone(),
+                    whirlpool_program:      ctx.accounts.whirlpool_program.to_account_info(),
+                },
+                &[seeds],
+            ),
+            seeds,
+        )?;
 
         orca_close_position(
             CpiContext::new_with_signer(
