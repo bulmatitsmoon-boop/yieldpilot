@@ -59,6 +59,58 @@ fn verify_paired_withdraw<'info>(
     err!(VaultError::RecallRequiresPairedWithdraw)
 }
 
+
+/// Settle a recall's accounting for one protocol slot.
+///
+/// `received`          — underlying actually returned to the vault by the CPI
+/// `receipt_remaining` — receipt/LST units STILL held after the CPI (0 == we fully exited)
+///
+/// Three cases:
+///   * `received > deployed`   — the protocol returned MORE than the principal we recorded
+///     (accrued yield). Realize the excess into `total_deposits`.
+///   * `receipt_remaining == 0` — we exited the protocol ENTIRELY, so by definition nothing
+///     is deployed there any more. Whatever didn't come back is an exit fee that is GONE:
+///     book it as a realized LOSS and zero the slot.
+///   * otherwise — a partial recall; the remainder is genuinely still deployed.
+///
+/// WHY THE MIDDLE CASE EXISTS (added 2026-07-17). It previously fell into the last branch,
+/// so the fee stayed in `deployed_balance` as PHANTOM deployed capital — the vault went on
+/// claiming money it had already paid away. Proven on mainnet: after a full recall the
+/// receipt account read **0** while `deployed_balance` still claimed 0.000154 SOL, exactly
+/// the fees Marinade and Jito had charged. There was no code path anywhere that could
+/// recognise a realized LOSS; only gains were ever booked.
+///
+/// Why it mattered, both real:
+///   1. `withdraw()` values a share against `idle + total_deployed()`, so the phantom
+///      inflated total_value above the recoverable amount and `require!(idle >= amount_out)`
+///      rejected ANY withdrawal within a fee's width of 100%. Nobody could fully exit; the
+///      frontend had to cap MAX below the ceiling to compensate.
+///   2. It accumulated on ABANDONED protocols specifically. A slot the router rotates away
+///      from is never redeployed, so nothing overwrites the residue — whereas an active slot
+///      "self-heals" the moment the next deploy re-backs it with real receipts. A yield
+///      router abandons venues for a living, so this grew precisely where nobody was looking.
+///
+/// Deliberately keyed on the RECEIPT balance rather than comparing amounts: only "do we
+/// still hold a claim on that protocol?" distinguishes a partial recall from a full exit.
+/// Sizes can't — a fee and a partial withdrawal both just look like `received < deployed`.
+fn settle_recall(v: &mut Vault, idx: usize, received: u64, receipt_remaining: u64) -> Result<()> {
+    let deployed = v.protocols[idx].deployed_balance;
+    if received > deployed {
+        let gain = received - deployed;
+        v.total_deposits = v.total_deposits.checked_add(gain).ok_or(VaultError::MathOverflow)?;
+        v.protocols[idx].deployed_balance = 0;
+    } else if receipt_remaining == 0 {
+        // Fully exited. saturating_sub: a loss can never take total_deposits below zero,
+        // and under-reporting the loss is safer than underflowing the whole vault's value.
+        let loss = deployed - received;
+        v.total_deposits = v.total_deposits.saturating_sub(loss);
+        v.protocols[idx].deployed_balance = 0;
+    } else {
+        v.protocols[idx].deployed_balance = deployed.saturating_sub(received);
+    }
+    Ok(())
+}
+
 // WSOL mint — used to recreate the vault's SOL token account after a full
 // unwrap-for-Marinade cycle (see deploy_to_marinade).
 const WSOL_MINT: Pubkey = pubkey!("So11111111111111111111111111111111111111112");
@@ -477,10 +529,42 @@ pub mod yieldpilot {
         )?;
 
         // Update state.
-        // total_deposits tracks cost-basis (not vault balance), so subtract cost_basis not amount_out.
-        // amount_out >= cost_basis when there is profit; subtracting cost_basis avoids saturating
-        // to zero while other users still hold shares backed by real funds.
-        v.total_deposits = v.total_deposits.saturating_sub(cost_basis);
+        //
+        // Subtract amount_out (the value that actually LEFT the vault), not cost_basis.
+        //
+        // The old comment here claimed "total_deposits tracks cost-basis (not vault balance)",
+        // but nothing else in the program agrees with that:
+        //   * recall's settle_recall ADDS realized yield to total_deposits, so it is not a
+        //     cost basis the moment any yield is realized;
+        //   * every deploy guard computes idle as `total_deposits - total_deployed()`, which
+        //     is only meaningful if total_deposits is vault VALUE;
+        //   * min_idle, the TVL cap, and the UI's share price all read it as value.
+        // So value went IN via recall but only cost-basis came OUT here, and the difference was
+        // stranded permanently.
+        //
+        // Observed live 2026-07-17: after withdrawing 100% of shares the USDC vault read
+        // total_shares = 0 but total_deposits = 148 — precisely the realized yield, owned by
+        // nobody. With shares at 0 the UI's `shares * total_deposits / total_shares` then
+        // misprices the next depositor's position.
+        //
+        // The old comment's fear was backwards. Take A and B each depositing 5 (total_deposits
+        // 10, shares 10) and 2 of yield realized (total_deposits 12). A withdraws 5 shares, so
+        // amount_out = 5*12/10 = 6 and cost_basis = 5:
+        //   subtract cost_basis -> total_deposits 7, shares 5 -> price 1.4, but the vault holds
+        //                          only 6. B's position OVER-states, which is the actual hazard.
+        //   subtract amount_out -> total_deposits 6, shares 5 -> price 1.2. Correct.
+        // Subtracting amount_out cannot strand value and cannot over-credit the remaining holders.
+        //
+        // amount_out (gross), not amount_after_fee: perf_fee is transferred to the treasury just
+        // above, so BOTH legs leave the vault and the vault's value drops by the full amount_out.
+        //
+        // Fees are unaffected: they are computed from pos.deposited_amount (the per-user basis),
+        // never from total_deposits. cost_basis is still used for pos.deposited_amount below.
+        //
+        // saturating_sub is kept: a donation directly into vault_token_account can push real
+        // value above the accounted total, making amount_out exceed total_deposits. Saturating is
+        // the safe direction (MIN_FIRST_DEPOSIT is the actual donation-attack guard).
+        v.total_deposits = v.total_deposits.saturating_sub(amount_out);
         v.total_shares   = v.total_shares.saturating_sub(shares);
         pos.shares           = pos.shares.saturating_sub(shares);
         pos.deposited_amount = pos.deposited_amount.saturating_sub(cost_basis);
@@ -622,6 +706,45 @@ pub mod yieldpilot {
         Ok(())
     }
 
+    /// Snap total_deposits back to what the vault ACTUALLY holds: idle + deployed principal.
+    ///
+    /// WHY THIS IS SAFE TO EXPOSE (and could even be permissionless): it writes NOTHING it
+    /// doesn't already read from THIS vault's own on-chain state — the vault_token_account
+    /// balance and total_deployed(), both of which any instruction here already trusts. It
+    /// does NOT decode Kamino/Marinade/Jito state, does NOT read an exchange rate, invents
+    /// no number. So it cannot over-value a share: the value it computes is the same
+    /// conservative floor withdraw() already uses (see the long note in withdraw() — "idle +
+    /// total_deployed is a conservative floor... it never over-values a share, so it can
+    /// never drain the vault"). It can only ever make total_deposits MORE accurate.
+    ///
+    /// WHAT IT FIXES: withdraw() subtracts amount_out and recall books realized gains/losses,
+    /// but rounding and the historical cost-basis bug can leave total_deposits drifted a few
+    /// units off the real (idle + deployed) value — "orphaned" accounting with no funds
+    /// behind it. Observed live 2026-07-17: after a full withdrawal the USDC vault read
+    /// total_shares = 0 with total_deposits = 148. Because the UI prices positions as
+    /// shares * total_deposits / total_shares, that drift misprices the next depositor.
+    /// reconcile() clears it and makes the accounting self-healing against any future drift.
+    ///
+    /// Kept KeeperOnly (not permissionless) only for symmetry with compound/rebalance and to
+    /// keep the admin surface legible; there is no security reason it must be gated, since it
+    /// can only move total_deposits toward the truth. Allowed while paused: reconciling a
+    /// halted vault is strictly safe and may be exactly what an operator wants mid-incident.
+    pub fn reconcile(ctx: Context<Reconcile>) -> Result<()> {
+        let idle = ctx.accounts.vault_token_account.amount;
+        let v = &mut ctx.accounts.vault;
+        require!(
+            ctx.accounts.vault_token_account.key() == v.vault_token_account,
+            VaultError::InvalidTokenAccount
+        );
+        let true_value = idle
+            .checked_add(v.total_deployed())
+            .ok_or(VaultError::MathOverflow)?;
+        let old = v.total_deposits;
+        v.total_deposits = true_value;
+        emit!(Reconciled { vault: v.key(), old_total_deposits: old, new_total_deposits: true_value });
+        Ok(())
+    }
+
     // ── Protocol deployment ───────────────────────────────────────────────────
 
     pub fn deploy_to_kamino<'info>(
@@ -753,14 +876,12 @@ pub mod yieldpilot {
         // its own underlying-token accounting.
         ctx.accounts.vault_token_account.reload()?;
         let received = ctx.accounts.vault_token_account.amount.saturating_sub(underlying_before);
-        let deployed = v.protocols[idx].deployed_balance;
-        if received > deployed {
-            let gain = received - deployed;
-            v.total_deposits = v.total_deposits.checked_add(gain).ok_or(VaultError::MathOverflow)?;
-            v.protocols[idx].deployed_balance = 0;
-        } else {
-            v.protocols[idx].deployed_balance = deployed.saturating_sub(received);
-        }
+        // Reload the RECEIPT account before settling: whether we still hold receipt units
+        // is the only thing that distinguishes "partially recalled, remainder still
+        // deployed" from "fully exited, and the shortfall is a fee we already paid".
+        ctx.accounts.vault_collateral_account.reload()?;
+        let receipt_remaining = ctx.accounts.vault_collateral_account.amount;
+        settle_recall(v, idx, received, receipt_remaining)?;
 
         emit!(FundsRecalled { vault: v.key(), protocol_index, collateral_amount });
         Ok(())
@@ -973,14 +1094,12 @@ pub mod yieldpilot {
         // total_deposits instead of discarding it. Previously decremented by
         // msol_amount (mSOL units), a unit mismatch against underlying-token
         // accounting.
-        let deployed = v.protocols[idx].deployed_balance;
-        if received > deployed {
-            let gain = received - deployed;
-            v.total_deposits = v.total_deposits.checked_add(gain).ok_or(VaultError::MathOverflow)?;
-            v.protocols[idx].deployed_balance = 0;
-        } else {
-            v.protocols[idx].deployed_balance = deployed.saturating_sub(received);
-        }
+        // Reload the RECEIPT account before settling: whether we still hold receipt units
+        // is the only thing that distinguishes "partially recalled, remainder still
+        // deployed" from "fully exited, and the shortfall is a fee we already paid".
+        ctx.accounts.vault_msol_account.reload()?;
+        let receipt_remaining = ctx.accounts.vault_msol_account.amount;
+        settle_recall(v, idx, received, receipt_remaining)?;
 
         emit!(FundsRecalled { vault: v.key(), protocol_index, collateral_amount: msol_amount });
         Ok(())
@@ -1180,14 +1299,12 @@ pub mod yieldpilot {
         }
 
         // Same unit-mismatch fix as recall_from_marinade — see its comments.
-        let deployed = v.protocols[idx].deployed_balance;
-        if received > deployed {
-            let gain = received - deployed;
-            v.total_deposits = v.total_deposits.checked_add(gain).ok_or(VaultError::MathOverflow)?;
-            v.protocols[idx].deployed_balance = 0;
-        } else {
-            v.protocols[idx].deployed_balance = deployed.saturating_sub(received);
-        }
+        // Reload the RECEIPT account before settling: whether we still hold receipt units
+        // is the only thing that distinguishes "partially recalled, remainder still
+        // deployed" from "fully exited, and the shortfall is a fee we already paid".
+        ctx.accounts.vault_lst_account.reload()?;
+        let receipt_remaining = ctx.accounts.vault_lst_account.amount;
+        settle_recall(v, idx, received, receipt_remaining)?;
 
         emit!(FundsRecalled { vault: v.key(), protocol_index, collateral_amount: lst_amount });
         Ok(())
@@ -1318,14 +1435,12 @@ pub mod yieldpilot {
         // Same unit-mismatch fix as recall_from_kamino — see its comments.
         ctx.accounts.vault_token_account.reload()?;
         let received = ctx.accounts.vault_token_account.amount.saturating_sub(underlying_before);
-        let deployed = v.protocols[idx].deployed_balance;
-        if received > deployed {
-            let gain = received - deployed;
-            v.total_deposits = v.total_deposits.checked_add(gain).ok_or(VaultError::MathOverflow)?;
-            v.protocols[idx].deployed_balance = 0;
-        } else {
-            v.protocols[idx].deployed_balance = deployed.saturating_sub(received);
-        }
+        // Reload the RECEIPT account before settling: whether we still hold receipt units
+        // is the only thing that distinguishes "partially recalled, remainder still
+        // deployed" from "fully exited, and the shortfall is a fee we already paid".
+        ctx.accounts.vault_collateral_account.reload()?;
+        let receipt_remaining = ctx.accounts.vault_collateral_account.amount;
+        settle_recall(v, idx, received, receipt_remaining)?;
         emit!(FundsRecalled { vault: v.key(), protocol_index, collateral_amount });
         Ok(())
     }
@@ -1504,6 +1619,17 @@ pub struct KeeperOnly<'info> {
     pub keeper: Signer<'info>,
     #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
     pub vault: Account<'info, Vault>,
+}
+
+#[derive(Accounts)]
+pub struct Reconcile<'info> {
+    pub keeper: Signer<'info>,
+    #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
+    pub vault: Account<'info, Vault>,
+    // Read-only: only its .amount (idle balance) is used. Constrained to the vault's own
+    // token account in the handler so a caller can't substitute a different balance.
+    #[account(constraint = vault_token_account.key() == vault.vault_token_account @ VaultError::InvalidTokenAccount)]
+    pub vault_token_account: Account<'info, TokenAccount>,
 }
 
 #[derive(Accounts)]
@@ -1975,6 +2101,7 @@ pub struct RecallFromSolend<'info> {
 #[event] pub struct Withdrawn         { pub vault: Pubkey, pub user: Pubkey, pub shares_burned: u64, pub amount_out: u64, pub perf_fee: u64 }
 #[event] pub struct Rebalanced        { pub vault: Pubkey, pub allocations: Vec<u64>, pub ts: i64 }
 #[event] pub struct Compounded        { pub vault: Pubkey, pub ts: i64 }
+#[event] pub struct Reconciled        { pub vault: Pubkey, pub old_total_deposits: u64, pub new_total_deposits: u64 }
 #[event] pub struct FundsDeployed     { pub vault: Pubkey, pub protocol_index: u8, pub amount: u64 }
 #[event] pub struct FundsRecalled     { pub vault: Pubkey, pub protocol_index: u8, pub collateral_amount: u64 }
 #[event] pub struct PauseToggled      { pub vault: Pubkey, pub paused: bool }
