@@ -225,25 +225,18 @@ export default function Home() {
             {/* Flight-path routing visual */}
             <RoutingVisual bestName={best?.name ?? null} bestApy={best?.apyPercent ?? null} runnerUpName={runnerUp?.name ?? null} />
 
-            {/* 80/20 allocation gauge */}
+            {/* Allocation gauge — a single full bar. The 80/20 split was removed 2026-07-21. */}
             {best && (
               <div>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text-mid)", marginBottom: 6, fontFamily: "var(--font-mono)" }}>
-                  <span>{best.name} 80%</span>
-                  {runnerUp && <span>{runnerUp.name} 20%</span>}
+                  <span>{best.name} 100%</span>
                 </div>
                 <div style={{ display: "flex", height: 6, borderRadius: 3, overflow: "hidden", background: "var(--ink-700)" }}>
                   <motion.div
                     initial={{ width: 0 }}
-                    animate={{ width: "80%" }}
+                    animate={{ width: "100%" }}
                     transition={{ duration: 0.9, delay: 0.5, ease: [0.22, 1, 0.36, 1] }}
                     style={{ background: "var(--signal)" }}
-                  />
-                  <motion.div
-                    initial={{ width: 0 }}
-                    animate={{ width: "20%" }}
-                    transition={{ duration: 0.9, delay: 0.5, ease: [0.22, 1, 0.36, 1] }}
-                    style={{ background: "var(--signal-dim)", opacity: 0.5 }}
                   />
                 </div>
               </div>
@@ -308,14 +301,6 @@ export default function Home() {
                         border: "1px solid rgba(63,224,160,0.25)", letterSpacing: "0.04em",
                         fontFamily: "var(--font-mono)",
                       }}>ROUTING HERE</span>
-                    )}
-                    {i === 1 && (
-                      <span style={{
-                        fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4,
-                        background: "rgba(34,179,126,0.1)", color: "var(--signal-dim)",
-                        border: "1px solid rgba(34,179,126,0.2)", letterSpacing: "0.04em",
-                        fontFamily: "var(--font-mono)",
-                      }}>20% HERE</span>
                     )}
                   </div>
                   <span className="mono-num" style={{ textAlign: "right", color: "var(--text-mid)", fontSize: 12 }}>
@@ -433,7 +418,7 @@ export default function Home() {
               {[
                 ["Is this non-custodial?", "Yes. Funds are held in on-chain smart contracts governed by the program. No one — including us — can access your funds outside the defined instructions."],
                 ["What are the fees?", "Performance fees are tiered by how much $YPILOT you hold: Gold (1,000,000+) pays 0%, Silver (100,000+) pays 3%, Bronze (10,000+) pays 6%, and holding none still works at 9%. Fees apply on profits only, collected at withdrawal. Nothing on deposits or idle balances."],
-                ["How does routing work?", "A keeper bot fetches live APY data roughly once an hour. When a better rate exists beyond a 0.5% threshold, it rebalances — 80% to the top protocol, 20% to the runner-up."],
+                ["How does routing work?", "A keeper bot fetches live APY data roughly once an hour and routes 100% of the vault to the single highest rate. It only moves when allocation drifts more than 5% and the gain still beats the cost of exiting — so it does not churn on small fluctuations."],
                 ["Can I withdraw anytime?", "Yes. Withdrawals are always available, even if the vault is paused for deposits. You receive your principal plus all earned yield, minus the tiered performance fee on profits (9% base, down to 0% for Gold)."],
                 ["Has the code been audited?", `Not yet — the team is validating real product interest before commissioning a paid audit. The on-chain program ID is publicly verifiable on Solscan at any time${IS_MAINNET ? "" : ", and the protocol is currently running on devnet while integrations are being finalized"}.`],
               ].map(([q, a], i) => (

@@ -176,7 +176,27 @@ function computeExitCost(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Allocation optimizer
-// Strategy: 80% to top protocol, 20% to runner-up (as advertised).
+// Strategy: 100% to the highest live rate.
+//
+// This replaced a hardcoded 80/20 split (top protocol / runner-up) on
+// 2026-07-21. That split had no risk model behind it — its own comment
+// justified it as "matches what we advertise to users", i.e. the number came
+// from the marketing copy rather than from any calculation. Parking 20% in a
+// second-best rate is simply yield the user does not earn: at the rates that
+// day (Marinade 6.08%, Jito 5.17%) the split cost 18bps for nothing anyone
+// had chosen.
+//
+// Churn is already handled and does NOT need the split to damp it: a
+// reallocation only fires when the drift exceeds REBALANCE_THRESHOLD_BPS AND
+// the gain still beats computeExitCost() — which weights each protocol's exit
+// fee by the fraction of allocation actually being moved. Concentration makes
+// that cost bigger and therefore the guard stricter, not weaker.
+//
+// The tradeoff accepted here is single-protocol exposure: 100% in one venue
+// means an exploit there takes everything. That is a deliberate product call —
+// maximise what users earn, and express risk through which protocols are
+// eligible at all (SAFE_PROTOCOLS) rather than through an arbitrary constant.
+//
 // Never routes to Raydium/Orca LP positions — impermanent loss risk is
 // incompatible with principal safety.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -212,16 +232,10 @@ function computeOptimalAllocations(
     return allocations.map((_, i) => i === 0 ? equal + (BPS_DENOM - equal * n) : equal);
   }
 
-  if (eligible.length === 1) {
-    allocations[eligible[0].i] = BPS_DENOM;
-    return allocations;
-  }
-
-  // 80/20 split — matches what we advertise to users
-  allocations[eligible[0].i] = 8000;
-  allocations[eligible[1].i] = 2000;
-
-  // Any remaining ineligible protocols (LP) stay at 0
+  // Winner takes all. eligible[] is sorted by APY descending, so [0] is the
+  // highest live rate. Everything else — including any LP protocol, which is
+  // never eligible — stays at 0.
+  allocations[eligible[0].i] = BPS_DENOM;
   return allocations;
 }
 
