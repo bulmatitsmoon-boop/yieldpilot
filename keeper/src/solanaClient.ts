@@ -57,6 +57,30 @@ const JITOSOL_MINT = new PublicKey("J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn
 const JITO_PROGRAM = new PublicKey("SPoo1Ku8WFXoNDMHPsrGSTSG1Y47rzgn41SLUNakuHy");
 const JITO_POOL = new PublicKey("Jito4APyf642JPZPx3hGc6WWJ8zPKtRbRs4P815Awbb"); // withdraw auth = 6iQKfEyh...
 
+// Phantom Staked SOL. Runs on the SAME program as jitoSOL — SPoo1Ku8… is the standard SPL
+// Stake Pool program, not a Jito fork (the JITO_PROGRAM comment above is wrong: verified
+// on-chain 2026-07-21 that this program owns both jitoSOL's and PSOL's pools).
+const PSOL_MINT = new PublicKey("pSo1f9nQXWgXibFtKf7NWYxb5enAM4qfP6UJSiXRQfL");
+const PSOL_POOL = new PublicKey("pSPcvR8GmG9aKDUbn9nbKYjkxt9hxMS7kF1qqKJaPqJ");
+
+/**
+ * Every SPL stake pool the keeper can route to, keyed by the vault's protocol LABEL.
+ *
+ * WHY THIS EXISTS: deployToSolLst/recallFromSolLst were always generic — they take a pool
+ * config as a parameter — but the only producer was getJitoPoolConfig(), which hardcoded
+ * JITO_POOL, and both dispatch sites matched on the literal string "jito-sol". So
+ * registering a second stake pool on the vault (psol-sol, 2026-07-21) created a live
+ * hazard: the rebalancer would name it the winner, executeRebalance would RECALL funds out
+ * of Marinade to fund the move, then fall through to `No deploy handler` and leave the
+ * vault sitting in cash. Idle funds are the one outcome this product exists to prevent.
+ *
+ * Adding another SPL stake pool is now one entry here — no new dispatch branch.
+ */
+const SPL_STAKE_POOLS: Record<string, { pool: PublicKey; program: PublicKey }> = {
+  "jito-sol": { pool: JITO_POOL, program: JITO_PROGRAM },
+  "psol-sol": { pool: PSOL_POOL, program: JITO_PROGRAM },
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Solend mainnet constants
 // ─────────────────────────────────────────────────────────────────────────────
@@ -228,6 +252,7 @@ export class SolanaClient {
       { mint: KAMINO_SOL_COLLATERAL_MINT,    label: "kSOL (Kamino SOL collateral)" },
       { mint: MSOL_MINT,                     label: "mSOL (Marinade)" },
       { mint: JITOSOL_MINT,                  label: "jitoSOL (Jito)" },
+      { mint: PSOL_MINT,                     label: "PSOL (Phantom)" },
       { mint: SOLEND_USDC_COLLATERAL_MINT,   label: "cUSDC (Solend collateral)" },
     ];
 
@@ -861,24 +886,40 @@ export class SolanaClient {
 
   // ── Jito pool config (decoded from on-chain stake pool state) ─────────────
 
-  async getJitoPoolConfig() {
-    const data = (await this.connection.getAccountInfo(JITO_POOL))?.data;
-    if (!data || data.length < 226) throw new Error("Jito pool account not found or too small");
-    const reserveStake = new PublicKey(data.slice(130, 162));
+  /** Decode any SPL stake pool's account into the config deployToSolLst/recallFromSolLst
+   *  need. Offsets are fixed in the SPL StakePool layout and all three are verified:
+   *  reserveStake@130 and managerFeeAccount@194 are proven by the live jitoSOL CPIs, and
+   *  poolMint@162 was confirmed independently (decoding PSOL's pool at 162 yields
+   *  pSo1f9nQ…, and jitoSOL's yields J1toso1u…).
+   *
+   *  poolMint is READ FROM THE CHAIN rather than taken from a constant — one less place
+   *  for a per-pool value to be wrong. */
+  async getSplStakePoolConfig(label: string) {
+    const entry = SPL_STAKE_POOLS[label];
+    if (!entry) throw new Error(`No SPL stake pool registered for label "${label}"`);
+    const data = (await this.connection.getAccountInfo(entry.pool))?.data;
+    if (!data || data.length < 226) throw new Error(`${label}: stake pool account not found or too small`);
+    const reserveStake      = new PublicKey(data.slice(130, 162));
+    const poolMint          = new PublicKey(data.slice(162, 194));
     const managerFeeAccount = new PublicKey(data.slice(194, 226));
     const [withdrawAuthority] = PublicKey.findProgramAddressSync(
-      [JITO_POOL.toBuffer(), Buffer.from("withdraw")],
-      JITO_PROGRAM
+      [entry.pool.toBuffer(), Buffer.from("withdraw")],
+      entry.program
     );
     return {
-      stakePool: JITO_POOL,
+      stakePool: entry.pool,
       withdrawAuthority,
       reserveStake,
       managerFeeAccount,
-      poolMint: JITOSOL_MINT,
-      lstMint: JITOSOL_MINT,
-      stakePoolProgram: JITO_PROGRAM,
+      poolMint,
+      lstMint: poolMint,
+      stakePoolProgram: entry.program,
     };
+  }
+
+  /** @deprecated use getSplStakePoolConfig("jito-sol") */
+  async getJitoPoolConfig() {
+    return this.getSplStakePoolConfig("jito-sol");
   }
 
   // ── Execute rebalance: move funds to match target allocations ─────────────
@@ -968,8 +1009,8 @@ export class SolanaClient {
           sig = await this.recallFromKaminoSol(vaultAddress, d.index, receiptToWithdraw);
         } else if (d.label === "marinade-sol") {
           sig = await this.recallFromMarinade(vaultAddress, d.index, receiptToWithdraw);
-        } else if (d.label === "jito-sol") {
-          const cfg = await this.getJitoPoolConfig();
+        } else if (SPL_STAKE_POOLS[d.label]) {
+          const cfg = await this.getSplStakePoolConfig(d.label);
           sig = await this.recallFromSolLst(vaultAddress, d.index, receiptToWithdraw, cfg);
         } else if (d.label === "solend-usdc") {
           sig = await this.recallFromSolend(vaultAddress, d.index, receiptToWithdraw);
@@ -1023,8 +1064,8 @@ export class SolanaClient {
           sig = await this.deployToKaminoSol(vaultAddress, d.index, amount);
         } else if (d.label === "marinade-sol") {
           sig = await this.deployToMarinade(vaultAddress, d.index, amount);
-        } else if (d.label === "jito-sol") {
-          const cfg = await this.getJitoPoolConfig();
+        } else if (SPL_STAKE_POOLS[d.label]) {
+          const cfg = await this.getSplStakePoolConfig(d.label);
           sig = await this.deployToSolLst(vaultAddress, d.index, amount, cfg);
         } else if (d.label === "solend-usdc") {
           sig = await this.deployToSolend(vaultAddress, d.index, amount);
