@@ -11,6 +11,7 @@ const OPEN_POSITION_IX:      [u8; 8] = [135, 128, 47, 77, 15, 152, 240, 49];
 const INCREASE_LIQUIDITY_IX: [u8; 8] = [46, 156, 243, 118, 13, 205, 251, 178];
 const DECREASE_LIQUIDITY_IX: [u8; 8] = [160, 38, 208, 111, 104, 91, 44, 1];
 const CLOSE_POSITION_IX:     [u8; 8] = [123, 134, 81, 0, 49, 68, 98, 98];
+const COLLECT_FEES_IX:       [u8; 8] = [164, 152, 207, 99, 30, 186, 19, 182];
 
 // ── Account contexts ──────────────────────────────────────────────────────────
 //
@@ -140,6 +141,50 @@ pub struct OrcaClosePosition<'info> {
 
     #[account(constraint = position_token_account.amount == 1)]
     pub position_token_account: Account<'info, TokenAccount>,
+
+    pub token_program: Program<'info, Token>,
+
+    /// CHECK: program ID verified by constraint
+    #[account(address = WHIRLPOOL_PROGRAM_ID)]
+    pub whirlpool_program: AccountInfo<'info>,
+}
+
+/// Accounts for Orca's `collect_fees`.
+///
+/// NOTE the account order in `orca_collect_fees` is NOT the same as
+/// `ModifyLiquidity`: CollectFees interleaves owner/vault
+/// (owner_a, vault_a, owner_b, vault_b) where ModifyLiquidity groups them
+/// (owner_a, owner_b, vault_a, vault_b). Verified against orca-so/whirlpools
+/// `instructions/collect_fees.rs`, 2026-07-21. Copying the ModifyLiquidity
+/// meta order here silently swaps two accounts and the CPI fails.
+#[derive(Accounts)]
+pub struct OrcaCollectFees<'info> {
+    /// CHECK: Whirlpool program validates (position has_one = whirlpool)
+    pub whirlpool: AccountInfo<'info>,
+
+    /// Vault PDA, signing as the position owner.
+    /// CHECK: seeds verified in parent
+    pub position_authority: AccountInfo<'info>,
+
+    /// CHECK: Whirlpool program validates
+    #[account(mut)]
+    pub position: AccountInfo<'info>,
+
+    #[account(constraint = position_token_account.amount == 1)]
+    pub position_token_account: Account<'info, TokenAccount>,
+
+    /// Vault's token A account — fees land here.
+    #[account(mut)]
+    pub token_owner_account_a: Account<'info, TokenAccount>,
+    /// CHECK: Whirlpool validates against whirlpool.token_vault_a
+    #[account(mut)]
+    pub token_vault_a: AccountInfo<'info>,
+    /// Vault's token B account — fees land here.
+    #[account(mut)]
+    pub token_owner_account_b: Account<'info, TokenAccount>,
+    /// CHECK: Whirlpool validates against whirlpool.token_vault_b
+    #[account(mut)]
+    pub token_vault_b: AccountInfo<'info>,
 
     pub token_program: Program<'info, Token>,
 
@@ -283,6 +328,61 @@ fn invoke_modify_liquidity<'info>(
         ],
         &[authority_seeds],
     )?;
+    Ok(())
+}
+
+/// Sweep accrued swap fees out of the position and into the vault's token accounts.
+///
+/// This is REQUIRED before `close_position`: Orca gates closing on
+/// `is_position_empty`, which demands `fee_owed_a == 0 && fee_owed_b == 0` (and
+/// zero rewards owed) as well as zero liquidity. Without this, exiting a position
+/// that has earned even one lamport of fees reverts — which means a reposition
+/// can never complete and the vault's funds sit idle.
+///
+/// Unlike Raydium, whose `decrease_liquidity` collects fees automatically, Orca
+/// keeps fees owed on the position until this instruction is called explicitly.
+///
+/// Call AFTER decreasing liquidity: `decrease_liquidity` updates the position's
+/// accrued-fee counters, so collecting last captures fees earned right up to exit.
+pub fn orca_collect_fees<'info>(
+    ctx: CpiContext<'_, '_, '_, 'info, OrcaCollectFees<'info>>,
+    authority_seeds: &[&[u8]],
+) -> Result<()> {
+    let data = COLLECT_FEES_IX.to_vec();
+
+    let metas = vec![
+        AccountMeta::new_readonly(*ctx.accounts.whirlpool.key, false),
+        AccountMeta::new_readonly(*ctx.accounts.position_authority.key, true),
+        AccountMeta::new(*ctx.accounts.position.key, false),
+        AccountMeta::new_readonly(ctx.accounts.position_token_account.key(), false),
+        AccountMeta::new(ctx.accounts.token_owner_account_a.key(), false),
+        AccountMeta::new(*ctx.accounts.token_vault_a.key, false),
+        AccountMeta::new(ctx.accounts.token_owner_account_b.key(), false),
+        AccountMeta::new(*ctx.accounts.token_vault_b.key, false),
+        AccountMeta::new_readonly(*ctx.accounts.token_program.key, false),
+    ];
+
+    anchor_lang::solana_program::program::invoke_signed(
+        &anchor_lang::solana_program::instruction::Instruction {
+            program_id: *ctx.accounts.whirlpool_program.key,
+            accounts: metas,
+            data,
+        },
+        &[
+            ctx.accounts.whirlpool.clone(),
+            ctx.accounts.position_authority.clone(),
+            ctx.accounts.position.clone(),
+            ctx.accounts.position_token_account.to_account_info(),
+            ctx.accounts.token_owner_account_a.to_account_info(),
+            ctx.accounts.token_vault_a.clone(),
+            ctx.accounts.token_owner_account_b.to_account_info(),
+            ctx.accounts.token_vault_b.clone(),
+            ctx.accounts.token_program.to_account_info(),
+        ],
+        &[authority_seeds],
+    )?;
+
+    msg!("orca_collect_fees");
     Ok(())
 }
 
