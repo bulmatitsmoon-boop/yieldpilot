@@ -190,8 +190,8 @@ export default function Whitepaper() {
           <Section id="how-it-works" title="3. How YieldPilot Works">
             <H3>3.1 Deposit</H3>
             <P>Users deposit USDC or SOL into a YieldPilot vault. Vault shares are minted proportional to the current share price — total vault assets divided by total shares outstanding. Each depositor owns an exact, verifiable fraction of the pool.</P>
-            <H3>3.2 Winner-Takes-Most Routing</H3>
-            <P>When the keeper bot identifies the highest-yielding protocol, it routes 80% of vault assets there and keeps 20% in the runner-up. This captures most upside while maintaining diversification. Rebalancing only triggers when the APY spread exceeds 0.5%, preventing unnecessary churn from minor fluctuations.</P>
+            <H3>3.2 Winner-Takes-All Routing</H3>
+            <P>When the keeper bot identifies the highest-yielding protocol, it routes 100% of vault assets there. Capital parked in a second-best rate is yield you are not earning, so the vault does not hold a runner-up position. Reallocation triggers only when allocation drifts more than 5% AND the expected gain still exceeds the cost of exiting the current protocol — so the vault does not churn on minor fluctuations. The tradeoff is deliberate: concentrating in one venue maximises yield and concentrates protocol risk, which is why only audited, established lending and staking protocols are ever eligible.</P>
             <H3>3.3 Auto-Compound</H3>
             <P>Every hour, the keeper bot harvests accrued rewards and reinvests them back into the vault. This compounds returns continuously, improving long-term yield versus protocols that require manual harvest.</P>
             <H3>3.4 Withdrawal</H3>
