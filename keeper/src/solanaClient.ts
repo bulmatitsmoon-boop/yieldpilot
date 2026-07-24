@@ -166,9 +166,28 @@ export class SolanaClient {
 
   constructor() {
     const rpcUrl = process.env.RPC_URL || "https://api.devnet.solana.com";
+
+    // web3.js derives its websocket endpoint by swapping https:// for wss:// — and in
+    // doing so it DROPS THE QUERY STRING. For a provider that authenticates via
+    // `?api-key=…` (Helius, QuickNode) the socket therefore connects unauthenticated and
+    // is rejected with 429, once per confirmTransaction, forever.
+    //
+    // Nothing breaks: confirmTransaction falls back to HTTP polling, which is why the
+    // keeper kept succeeding while logging `ws error: Unexpected server response: 429`.
+    // But every confirmation then waits on polling instead of a push notification, and
+    // the noise masks real rate-limit problems — which is exactly what it did when the
+    // QuickNode subscription lapsed 2026-07-24: genuine 429s were indistinguishable
+    // from this permanent one.
+    //
+    // Carrying the query string over keeps the socket authenticated.
+    const wsEndpoint = rpcUrl.startsWith("http")
+      ? rpcUrl.replace(/^http/, "ws")
+      : undefined;
+
     this.connection = new Connection(rpcUrl, {
       commitment: "confirmed",
       confirmTransactionInitialTimeout: 60_000,
+      ...(wsEndpoint ? { wsEndpoint } : {}),
     });
 
     // Load keeper keypair
