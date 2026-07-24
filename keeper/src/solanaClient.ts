@@ -1128,6 +1128,33 @@ export class SolanaClient {
    * duplicated here for the same "no shared internal library today" reason
    * documented elsewhere in this codebase.
    */
+  /**
+   * Raw balances sitting in the LP vault's own token accounts.
+   *
+   * Used to pick a FUNDABLE range when redeploying: a vault that drifted out of range
+   * holds almost entirely one token, and a centred range needs both. Returns raw
+   * amounts (no decimal scaling) because the caller compares them against the pool
+   * price in raw units, where 1.0001^tick is already decimals-adjusted.
+   *
+   * Missing accounts read as 0 rather than throwing — an uninitialised side is
+   * genuinely a zero balance, and failing here would block recovery entirely.
+   */
+  async readLpVaultIdle(vault: LpVaultState): Promise<{ amountA: number; amountB: number }> {
+    const read = async (acct: PublicKey): Promise<number> => {
+      try {
+        const b = await this.connection.getTokenAccountBalance(acct);
+        return Number(b.value.amount) || 0;
+      } catch {
+        return 0;
+      }
+    };
+    const [amountA, amountB] = await Promise.all([
+      read(vault.vaultTokenAAccount),
+      read(vault.vaultTokenBAccount),
+    ]);
+    return { amountA, amountB };
+  }
+
   async readPoolTickCurrent(vault: LpVaultState): Promise<{ tickCurrent: number; tickSpacing: number }> {
     const info = await this.connection.getAccountInfo(vault.pool);
     if (!info) throw new Error(`Pool account not found: ${vault.pool.toBase58()}`);
