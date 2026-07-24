@@ -224,11 +224,38 @@ async function runLpIdleRecovery(client: SolanaClient, addresses: string[]) {
       logger.error("  Could not read pool tick — skipping", { error: err.message });
       continue;
     }
-    // Centre a fresh range on spot, snapped to the pool's tick spacing.
+    // Pick a range the vault can actually FUND. A blind centred range needs both
+    // tokens, and a vault that is sitting idle usually got there by drifting out of
+    // range — which converts it almost entirely into ONE token. Proposing a centred
+    // range then fails to redeploy and the vault stays idle, so "recovery" would
+    // loop forever without recovering anything.
+    //
+    // Here the balances are genuinely knowable (the funds ARE in the token accounts,
+    // unlike at reposition-decision time), so read them and pass them in.
+    let idleAmountA: number | undefined, idleAmountB: number | undefined;
+    try {
+      ({ amountA: idleAmountA, amountB: idleAmountB } = await client.readLpVaultIdle(state));
+    } catch (err: any) {
+      logger.warn("  Could not read idle balances — falling back to a centred range", { error: err.message });
+    }
+
     const halfWidth = tickSpacing * 32;
-    const snap = (t: number) => Math.round(t / tickSpacing) * tickSpacing;
-    const lower = snap(tickCurrent - halfWidth);
-    const upper = snap(tickCurrent + halfWidth);
+    const decision = computeLpRepositionDecision(
+      {
+        // Synthesise the "current range" as the width we want to reopen at; the
+        // vault has no active position, so its stored range is only a width hint.
+        tickLowerIndex: tickCurrent - halfWidth,
+        tickUpperIndex: tickCurrent + halfWidth,
+        tickSpacing,
+        positionActive: false,
+        idleAmountA,
+        idleAmountB,
+      },
+      tickCurrent
+    );
+    const lower = decision.newTickLowerIndex;
+    const upper = decision.newTickUpperIndex;
+    logger.info(`  Recovery range ${decision.rangeShape} [${lower}, ${upper}]`, { idleAmountA, idleAmountB });
 
     const result = await client.repositionLpVault(address, lower, upper, state.totalLiquidity);
     if (result?.redeploySig) {
