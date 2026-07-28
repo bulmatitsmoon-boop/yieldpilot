@@ -5,7 +5,10 @@ export PATH=$HOME/.local/share/solana/install/active_release/bin:$PATH
 cd /root/localval || exit 1
 SO="${1:?need .so path}"
 LEDGER="${2:-/root/localval/ledger_fee}"
-RPC="https://mainnet.helius-rpc.com/?api-key=c5cc86a6-3215-4e3a-969a-801c5da56835"
+# RPC endpoint is read from the environment, never hardcoded. Set MAINNET_RPC before
+# running: export MAINNET_RPC="https://mainnet.helius-rpc.com/?api-key=<your-key>"
+# (an earlier version had a live key baked in here — scrubbed in the pre-public audit).
+RPC="${MAINNET_RPC:?set MAINNET_RPC to your mainnet RPC endpoint before running}"
 exec solana-test-validator \
   --url "$RPC" \
   --bpf-program 8c7Boyk91MWkn5jabf5CnYD8DrG6p4hYm9eDdAAWXEKH "$SO" \
