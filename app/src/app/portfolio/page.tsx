@@ -29,6 +29,7 @@ import {
   LpVaultInfo,
   parseDecimalToBaseUnits,
 } from "@/hooks/useLpVault";
+import { blendedApy, estYearly, planLegs } from "@/lib/splitDeposit.mjs";
 
 const VAULT_ADDRESSES = (process.env.NEXT_PUBLIC_VAULT_ADDRESSES ?? "")
   .split(",")
@@ -82,8 +83,8 @@ export default function PortfolioPage() {
   // Plan amount is a preview figure the user types once; each leg still confirms its own
   // real input below. Kept in dollars for the blended-yield display only.
   const [planUsd, setPlanUsd] = useState(2000);
-  const blendedApy = (safeApy * safePct + lpApy * lpPct) / 100;
-  const estYearly = Math.round((planUsd * blendedApy) / 100);
+  const blended = blendedApy(safePct, safeApy, lpApy);
+  const yearly = estYearly(planUsd, blended);
 
   // ── Real deposit inputs (one per leg — the LP leg brings the pair) ──
   const [safeAmount, setSafeAmount] = useState("");
@@ -128,11 +129,19 @@ export default function PortfolioPage() {
   }
 
   async function depositBoth() {
+    // Which legs actually fire is decided by the shared, tested logic (planLegs) — the
+    // same rules the verify:split-deposit check asserts: no zero deposits, and the LP leg
+    // never fires without a loaded vault + a positive amount + the IL acknowledgement.
+    const legs = planLegs({ safeAmount, lpReady: !!lpInfo, lpAmountA, ackIl });
+    if (!legs.runSafe && !legs.runLp) {
+      setError(legs.reason);
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
-      if (safeAmount) await depositSafe();
-      if (lpInfo && lpAmountA && ackIl) await depositLpLeg();
+      if (legs.runSafe) await depositSafe();
+      if (legs.runLp) await depositLpLeg();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -187,11 +196,11 @@ export default function PortfolioPage() {
       <div style={{ display: "flex", gap: 12, marginBottom: 24 }}>
         <div style={statCard}>
           <div style={statLabel}>Blended APY</div>
-          <div style={statValue}>{blendedApy.toFixed(1)}%</div>
+          <div style={statValue}>{blended.toFixed(1)}%</div>
         </div>
         <div style={statCard}>
           <div style={statLabel}>Est. yearly</div>
-          <div style={statValue}>${estYearly.toLocaleString()}</div>
+          <div style={statValue}>${yearly.toLocaleString()}</div>
         </div>
       </div>
 
