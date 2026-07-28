@@ -1,0 +1,39 @@
+# Pure-logic checks for the app that don't need a build, a wallet, or a browser.
+#
+# WHY THIS EXISTS: the split-deposit /portfolio flow ends in two wallet-signed
+# transactions, which CI cannot drive (no wallet in CI). But the NEW logic it adds — the
+# blended-APY preview and the "which legs fire" orchestration, including the honesty
+# constraints (no zero deposits, LP blocked without the IL acknowledgement) — is pure and
+# fully testable. verify-split-deposit.mjs imports the SAME module the page ships, so the
+# test can't drift from the component. verify-lp-math.mjs is the existing sibling.
+#
+# No install step on purpose for split-deposit: it imports only src/lib/splitDeposit.mjs
+# and node:assert, so it cannot be broken by a dependency install failure.
+name: App Logic
+
+on:
+  pull_request:
+    paths:
+      - "app/src/lib/**"
+      - "app/scripts/verify-split-deposit.mjs"
+      - "app/src/app/portfolio/**"
+      - ".github/workflows/app-logic.yml"
+  push:
+    branches: [main]
+    paths:
+      - "app/src/lib/**"
+      - "app/scripts/verify-split-deposit.mjs"
+
+jobs:
+  split-deposit:
+    name: split-deposit logic
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: verify split-deposit logic
+        working-directory: app
+        run: node scripts/verify-split-deposit.mjs
