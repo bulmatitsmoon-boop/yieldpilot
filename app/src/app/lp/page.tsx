@@ -23,6 +23,7 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import * as anchor from "@coral-xyz/anchor";
 import { useLpVault, LpVaultInfo, parseDecimalToBaseUnits, formatBaseUnitsToDecimal } from "@/hooks/useLpVault";
+import { usePhase2Gate } from "@/hooks/usePhase2Gate";
 
 const DEFAULT_SLIPPAGE_BPS = 100; // 1%
 // LP shares mint is always created with mint::decimals = 9 — see
@@ -50,14 +51,17 @@ interface WithdrawQuoteDisplay {
 }
 
 export default function LpVaultPage() {
-  // Phase 2 is deployed on-chain before it is announced. With the flag off this page
-  // does not exist as far as users are concerned.
-  if (process.env.NEXT_PUBLIC_LP_ENABLED !== "true") {
-    notFound();
-  }
-
   const { connected } = useWallet();
   const { setVisible } = useWalletModal();
+
+  // Public users see a 404 with the flag off; the admin wallet gets a preview so they can
+  // see the real UI before reveal. See usePhase2Gate / phase2Access.mjs -- a client preview
+  // gate, not a security boundary, and only safe while the LP vaults don't exist on mainnet.
+  const { visible, adminPreview, deciding } = usePhase2Gate();
+  if (!visible) {
+    if (deciding) return null;
+    notFound();
+  }
   const {
     txStatus, txError, fetchLpVault,
     getDepositQuote, depositLp, getWithdrawQuote, withdrawLp,
@@ -172,6 +176,11 @@ export default function LpVaultPage() {
 
   return (
     <div style={{ maxWidth: 640, margin: "0 auto", padding: "48px 24px 120px" }}>
+      {adminPreview && (
+        <div style={{ border: "0.5px solid var(--line, #444)", borderRadius: 8, padding: "8px 12px", marginBottom: 16, fontSize: 13, color: "var(--text-mid, #888)" }}>
+          Admin preview - LP is not public yet. Only your wallet sees this.
+        </div>
+      )}
       <div style={{
         marginBottom: 8, fontSize: 11, fontWeight: 600, letterSpacing: "0.08em",
         textTransform: "uppercase", color: "var(--warn)", fontFamily: "var(--font-mono)",

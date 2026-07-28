@@ -30,6 +30,7 @@ import {
   parseDecimalToBaseUnits,
 } from "@/hooks/useLpVault";
 import { blendedApy, estYearly, planLegs } from "@/lib/splitDeposit.mjs";
+import { usePhase2Gate } from "@/hooks/usePhase2Gate";
 
 const VAULT_ADDRESSES = (process.env.NEXT_PUBLIC_VAULT_ADDRESSES ?? "")
   .split(",")
@@ -43,13 +44,19 @@ const LP_VAULT_ADDRESS = (process.env.NEXT_PUBLIC_LP_VAULT_ADDRESS ?? "").trim()
 const DEFAULT_SLIPPAGE_BPS = 100; // 1%, matching /lp
 
 export default function PortfolioPage() {
-  // Phase 2 gate — identical to /lp. With the flag off this route does not exist.
-  if (process.env.NEXT_PUBLIC_LP_ENABLED !== "true") {
-    notFound();
-  }
-
   const { publicKey, connected } = useWallet();
   const { setVisible } = useWalletModal();
+
+  // Phase 2 gate. Visible when the reveal flag is on OR the connected wallet is the admin
+  // (preview mode). While autoConnect is still settling we render nothing rather than flash
+  // a 404 at a reconnecting admin; once settled, a non-admin with the flag off gets a real
+  // 404. See usePhase2Gate / phase2Access.mjs — this is a preview gate, not a security
+  // boundary, and is only safe while the LP vaults don't exist on mainnet.
+  const { visible, adminPreview, deciding } = usePhase2Gate();
+  if (!visible) {
+    if (deciding) return null;
+    notFound();
+  }
 
   const { vaults, deposit } = useYieldPilot(VAULT_ADDRESSES);
   const { apys } = useApys();
@@ -163,6 +170,14 @@ export default function PortfolioPage() {
 
   return (
     <main style={{ maxWidth: 640, margin: "0 auto", padding: "2.5rem 1.5rem" }}>
+      {adminPreview && (
+        <div style={{
+          border: "0.5px solid var(--line, #444)", borderRadius: 8, padding: "8px 12px",
+          marginBottom: 16, fontSize: 13, color: "var(--text-mid, #888)",
+        }}>
+          Admin preview — LP is not public yet. Only your wallet sees this.
+        </div>
+      )}
       <h1 style={{ fontSize: 22, fontWeight: 500, marginBottom: 4 }}>Split deposit</h1>
       <p style={{ color: "var(--text-mid, #888)", marginBottom: 24, fontSize: 14 }}>
         The dial previews how a deposit splits. Each vault is funded separately — the LP vault

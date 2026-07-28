@@ -15,8 +15,11 @@ on:
   pull_request:
     paths:
       - "app/src/lib/**"
+      - "app/src/hooks/usePhase2Gate.ts"
       - "app/scripts/verify-split-deposit.mjs"
       - "app/src/app/portfolio/**"
+      - "app/src/app/lp/**"
+      - "app/src/components/Header.tsx"
       - ".github/workflows/app-logic.yml"
   push:
     branches: [main]
