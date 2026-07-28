@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "next lint",
     "type-check": "tsc --noEmit",
-    "verify:lp-math": "node scripts/verify-lp-math.mjs"
+    "verify:lp-math": "node scripts/verify-lp-math.mjs",
+    "verify:split-deposit": "node scripts/verify-split-deposit.mjs"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.31.0",
