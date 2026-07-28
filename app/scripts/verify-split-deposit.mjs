@@ -11,6 +11,7 @@
  */
 import assert from "node:assert/strict";
 import { blendedApy, splitAmounts, estYearly, planLegs } from "../src/lib/splitDeposit.mjs";
+import { phase2Visible } from "../src/lib/phase2Access.mjs";
 
 let passed = 0;
 function check(name, fn) {
@@ -90,6 +91,25 @@ check("zero and negative amounts are never deposited", () => {
 });
 check("non-numeric amount is not deposited", () => {
   assert.equal(planLegs({ safeAmount: "abc", lpReady: true, lpAmountA: "x", ackIl: true }).runSafe, false);
+});
+
+// ── phase 2 visibility (admin preview gate) ────────────────────────────────────
+const ADMIN = "8i7kydJHwi3Cdp46Xugyux2vWJmTScYDvnJrBiBihBnP";
+check("flag on = visible to everyone, not a preview", () => {
+  assert.deepEqual(phase2Visible(null, true, ADMIN), { visible: true, adminPreview: false });
+  assert.deepEqual(phase2Visible("anyone", true, ADMIN), { visible: true, adminPreview: false });
+});
+check("flag off + admin = visible, adminPreview", () => {
+  assert.deepEqual(phase2Visible(ADMIN, false, ADMIN), { visible: true, adminPreview: true });
+});
+check("flag off + non-admin = hidden", () => {
+  assert.deepEqual(phase2Visible("someoneElse", false, ADMIN), { visible: false, adminPreview: false });
+});
+check("flag off + disconnected = hidden", () => {
+  assert.deepEqual(phase2Visible(null, false, ADMIN), { visible: false, adminPreview: false });
+});
+check("no admin configured = never a preview", () => {
+  assert.deepEqual(phase2Visible(ADMIN, false, undefined), { visible: false, adminPreview: false });
 });
 
 console.log(`\n${passed} checks passed`);
