@@ -15,10 +15,16 @@ export function Header() {
 
   const isMainnet = process.env.NEXT_PUBLIC_SOLANA_NETWORK === "mainnet-beta";
 
+  // Phase 2 (LP + split-deposit) links appear when it's publicly revealed OR when the admin
+  // is connected (preview before reveal). Mirrors the Admin-link pattern below. The pages
+  // enforce the same rule via usePhase2Gate, so a hand-typed URL still 404s for the public.
+  const phase2Visible = process.env.NEXT_PUBLIC_LP_ENABLED === "true" || isAdmin;
+
   const navLinks: [string, string][] = [
     ["Home", "/"],
     ["Dashboard", "/dashboard"],
     ["Live Rates", "/apys"],
+    ...(phase2Visible ? [["Portfolio", "/portfolio"] as [string, string], ["LP", "/lp"] as [string, string]] : []),
     ["Whitepaper", "/whitepaper"],
     ...(isAdmin ? [["Admin", "/admin"] as [string, string]] : []),
   ];
