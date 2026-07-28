@@ -116,6 +116,11 @@ jobs:
           retention-days: 7
 
       - name: Write deploy authority keypair from base58 secret
+        # Only materialise the deploy key when actually deploying (push to main or a
+        # workflow_dispatch). On pull_request there is nothing to deploy, so the key
+        # should never touch disk. GitHub already withholds secrets from fork PRs, but
+        # gating the step removes it from collaborator-PR runs too. Defense in depth.
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         env:
           SOLANA_DEPLOY_KEY: ${{ secrets.SOLANA_DEPLOY_KEY }}
         run: |
