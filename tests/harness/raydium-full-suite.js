@@ -7,9 +7,22 @@
 //   - personal_position:  ["position", position_nft_mint]
 //   - open_position mints an NFT WITH Metaplex metadata
 const anchor = require("@coral-xyz/anchor");
-const { Connection, Keypair, PublicKey, SystemProgram, SYSVAR_RENT_PUBKEY, Transaction } = require("@solana/web3.js");
+const { Connection, Keypair, PublicKey, SystemProgram, SYSVAR_RENT_PUBKEY, Transaction, TransactionInstruction } = require("@solana/web3.js");
 const { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } = require("@solana/spl-token");
+const crypto = require("crypto");
 const fs = require("fs"), path = require("path"), os = require("os");
+
+// Raydium CLMM swap, for generating real fee volume. Verified against
+// raydium-io/raydium-clmm instructions/swap.rs: disc = sha256("global:swap")[..8];
+// accounts payer, amm_config, pool(mut), in_user(mut), out_user(mut), in_vault(mut),
+// out_vault(mut), observation(mut), token_program, tick_array(mut), then extra tick
+// arrays as remaining accounts; args amount u64, threshold u64, sqrt_limit u128, is_base_input bool.
+const RAY_AMM_CONFIG = new PublicKey("3h2e43PunVA5K34vwKCLHWhZF4aZpyaC9RmxvshGAQpL");
+const RAY_OBSERVATION = new PublicKey("3Y695CuQ8AP4anbwAqiEBeQF9KxqHFr8piEwvw3UePnQ");
+const RAY_SWAP_DISC = crypto.createHash("sha256").update("global:swap").digest().subarray(0, 8);
+const RAY_MIN_SQRT = 4295048016n, RAY_MAX_SQRT = 79226673515401279992447579055n;
+const rayTickOf = (poolData) => poolData.readInt32LE(8 + 1 + 32 * 7 + 1 + 1 + 2 + 16 + 16);
+const beI32b = (n) => { const b = Buffer.alloc(4); b.writeInt32BE(n); return b; };
 
 const RPC = "http://127.0.0.1:8899";
 const PROGRAM_ID = new PublicKey("8c7Boyk91MWkn5jabf5CnYD8DrG6p4hYm9eDdAAWXEKH");
@@ -263,6 +276,68 @@ const arrayStart = (t) => Math.floor(t / SPAN) * SPAN;
       const lg = e.logs || (e.transactionLogs || []);
       if (lg.length) console.error("\n=== LOGS ===\n" + lg.slice(-14).join("\n"));
       return;
+    }
+
+    // ── GENERATE TRADING VOLUME so the paths below face accrued fees ───────────
+    // This is what the old Raydium suite never did. Without swaps, fees_owed stays 0
+    // and withdraw/exit run against a position that has earned nothing.
+    {
+      const pd0 = (await connection.getAccountInfo(POOL)).data;
+      const mint0 = new PublicKey(pd0.subarray(73, 105));
+      const vault0 = new PublicKey(pd0.subarray(137, 169));
+      const vault1 = new PublicKey(pd0.subarray(169, 201));
+      const token0IsSol = mint0.equals(SOL_MINT);
+      let swaps = 0;
+      for (let i = 0; i < 6; i++) {
+        const zeroForOne = i % 2 === 0;
+        const pd = (await connection.getAccountInfo(POOL)).data;
+        const tickNow = rayTickOf(pd);
+        const aS = (t) => Math.floor(t / 60) * 60;
+        const arrays = [aS(tickNow), aS(tickNow) - 60, aS(tickNow) + 60].map((st) =>
+          PublicKey.findProgramAddressSync([Buffer.from("tick_array"), POOL.toBuffer(), beI32b(st)], CLMM)[0]);
+        const inVault = zeroForOne ? vault0 : vault1;
+        const outVault = zeroForOne ? vault1 : vault0;
+        const solIsInput = zeroForOne ? token0IsSol : !token0IsSol;
+        const inUser = solIsInput ? adminWsol : adminUsdc;
+        const outUser = solIsInput ? adminUsdc : adminWsol;
+        const amount = solIsInput ? 300 * 1e9 : 20_000 * 1e6;
+        // Raydium rejects a limit EQUAL to the MIN/MAX bound (SqrtPriceLimitOverflow 6011);
+        // it must be strictly inside the range, so nudge by 1.
+        const lim = zeroForOne ? RAY_MIN_SQRT + 1n : RAY_MAX_SQRT - 1n;
+        const b8 = (v) => { const b = Buffer.alloc(8); b.writeBigUInt64LE(BigInt(Math.floor(v))); return b; };
+        const b16 = Buffer.alloc(16);
+        b16.writeBigUInt64LE(lim & 0xffffffffffffffffn, 0); b16.writeBigUInt64LE(lim >> 64n, 8);
+        const data = Buffer.concat([RAY_SWAP_DISC, b8(amount), b8(0), b16, Buffer.from([1])]);
+        const keys = [
+          { pubkey: admin.publicKey, isSigner: true, isWritable: false },
+          { pubkey: RAY_AMM_CONFIG, isSigner: false, isWritable: false },
+          { pubkey: POOL, isSigner: false, isWritable: true },
+          { pubkey: inUser, isSigner: false, isWritable: true },
+          { pubkey: outUser, isSigner: false, isWritable: true },
+          { pubkey: inVault, isSigner: false, isWritable: true },
+          { pubkey: outVault, isSigner: false, isWritable: true },
+          { pubkey: RAY_OBSERVATION, isSigner: false, isWritable: true },
+          { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+          { pubkey: arrays[0], isSigner: false, isWritable: true },
+          { pubkey: arrays[1], isSigner: false, isWritable: true },
+          { pubkey: arrays[2], isSigner: false, isWritable: true },
+        ];
+        try {
+          await provider.sendAndConfirm(new Transaction().add(
+            new TransactionInstruction({ programId: CLMM, keys, data })), [], { commitment: "confirmed" });
+          swaps++;
+        } catch (e) { console.log(`    ray swap ${i} stopped:`, (e.message || "").split("\n")[0].slice(0, 60)); break; }
+      }
+      const finalTick = rayTickOf((await connection.getAccountInfo(POOL)).data);
+      // Confirm fees actually accrued to OUR position. personal_position layout:
+      // disc8 + bump1 + nftMint32 + poolId32 + tickLower4 + tickUpper4 + liquidity16
+      // + feeGrowthInside0/1 16+16 + tokenFeesOwed0 8 + tokenFeesOwed1 8.
+      const ppData = (await connection.getAccountInfo(personalPosition)).data;
+      let po = 8 + 1 + 32 + 32 + 4 + 4 + 16 + 16 + 16;
+      const feeOwed0 = ppData.readBigUInt64LE(po);
+      const feeOwed1 = ppData.readBigUInt64LE(po + 8);
+      console.log(`    generated ${swaps} Raydium swaps -> tick ${finalTick}, position fees owed 0=${feeOwed0} 1=${feeOwed1}`);
+      if (swaps === 0) { console.log("    ⚠ no swaps landed — Raydium paths below run WITHOUT accrued fees"); }
     }
 
     // Raydium's decrease_liquidity COLLECTS REWARDS in the same instruction and takes
