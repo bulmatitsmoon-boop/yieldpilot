@@ -1,10 +1,25 @@
 name: Keeper Cron
 
+# CADENCE — read before touching the schedule.
+#
+# Measured 2026-07-28: the old "*/45 * * * *" was landing runs ~134 min apart on average
+# (up to 250), while the site claims "~hourly". Two causes:
+#   1. */45 fires at :00 and :45. Minute :00 is the single most contended slot on GitHub's
+#      shared scheduler, so those ticks get deprioritised and skipped the most.
+#   2. It is also unevenly spaced (45 then 15).
+#
+# Fix: same frequency (2x/hour) but on low-contention, evenly-spaced minutes (:09 and :39).
+# This raises the fraction of scheduled ticks that actually run without raising the count —
+# important because this is a PRIVATE repo capped at 2000 Actions-min/month. Scheduling more
+# often would risk exceeding the cap and DISABLING the keeper entirely, which is far worse
+# than slow cadence. Do not increase frequency without checking the minutes budget.
+#
+# GitHub cron is best-effort and can never be guaranteed. If reliable hourly is ever needed,
+# drive workflow_dispatch from an external pinger (e.g. cron-job.org) instead of the schedule.
 on:
   schedule:
-    - cron: "*/45 * * * *"
+    - cron: "9,39 * * * *"
   workflow_dispatch: {}
-
 jobs:
   run-keeper:
     runs-on: ubuntu-latest
