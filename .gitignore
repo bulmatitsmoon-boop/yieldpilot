@@ -4,7 +4,36 @@ target/
 app/.next/
 app/node_modules/
 keeper/node_modules/
+
+# ── Secrets & env ──────────────────────────────────────────────────────────
+# Broadened 2026-07-28 after a pre-public audit found gaps: plain ".env" only
+# ignores a file named exactly ".env", so ".env.production" slipped through. Match
+# every .env variant AND keep the example files tracked.
 .env
-.env.local
-app/.env*.local
+.env.*
+!.env.example
+!.env*.example
+!*.env.example
+app/.env*
+!app/.env*.example
+keeper/.env
+keeper/.env.*
+!keeper/.env.example
+
+# Keypairs / signing material — must NEVER be committed.
+*.pem
+*.key
+*.p12
+*.pfx
+keeper.json
+keeper/keeper.json
+id.json
+**/id.json
+*keypair*.json
+deploy-authority*.json
+mainnet-program*.json
+
+# Build artifacts that were being tracked by accident.
+.anchor/
+**/.anchor/
 keeper/logs/
