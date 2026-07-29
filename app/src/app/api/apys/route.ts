@@ -6,8 +6,8 @@ import { Redis } from "@upstash/redis";
 // LIVE APY — FIRST-PARTY SOURCES ONLY. NO THIRD-PARTY AGGREGATOR.
 // ─────────────────────────────────────────────────────────────────────────────
 // Every rate here comes from the protocol that actually pays it: Kamino's own API,
-// Marinade's own API, Solend's own API, and — for Jito — the stake pool account
-// on-chain, because an LST's yield IS the growth of its exchange rate.
+// Marinade's own API, Solend's own API, and — for Jito and PSOL — the stake pool
+// account on-chain, because an LST's yield IS the growth of its exchange rate.
 //
 // WHY WE DROPPED DEFILLAMA (2026-07-18). We moved to DeFiLlama in July to escape
 // rotted per-protocol endpoints, but it is a third-party aggregator and it glitches.
@@ -39,10 +39,18 @@ const KAMINO_RESERVE: Record<string, string> = {
 };
 const SOLEND_USDC_RESERVE = "BgxfHJDzm44T7XG68MYKx7YisTjZu73tVovyZSjJMpmw";
 const JITO_POOL = "Jito4APyf642JPZPx3hGc6WWJ8zPKtRbRs4P815Awbb";
+// PSOL runs on the same standard SPL Stake Pool program as Jito (SPoo1Ku8…, verified
+// when psol-sol was wired into deploy/recall — see api/recall-accounts/route.ts), so
+// the exact same account layout and offsets apply.
+const PSOL_POOL = "pSPcvR8GmG9aKDUbn9nbKYjkxt9hxMS7kF1qqKJaPqJ";
 
 // Static display metadata only — never a rate.
 const META = [
   { protocolId: "jito-sol",         name: "Jito",     asset: "SOL",      riskScore: 1, tvlUsd: 762_417_675 },
+  // No hardcoded TVL guess — we have no real figure for PSOL's pool size, and a
+  // made-up number here is exactly the failure class this file exists to prevent
+  // (see the DeFiLlama note above). Renders as 0/undefined until we have a live source.
+  { protocolId: "psol-sol",         name: "PSOL",     asset: "SOL",      riskScore: 1 },
   { protocolId: "kamino-sol",       name: "Kamino",   asset: "SOL",      riskScore: 1, tvlUsd:  17_698_922 },
   { protocolId: "marinade-sol",     name: "Marinade", asset: "SOL",      riskScore: 1, tvlUsd: 181_896_238 },
   { protocolId: "kamino-usdc",      name: "Kamino",   asset: "USDC",     riskScore: 1, tvlUsd:  23_525_228 },
@@ -57,6 +65,7 @@ const META = [
 
 const COLORS: Record<string, string> = {
   "kamino-usdc": "#3FE0A0", "kamino-sol": "#22B37E", "jito-sol": "#10B981",
+  "psol-sol": "#8B5CF6",
   "marinade-sol": "#06B6D4", "drift-sol": "#14B8A6", "solend-usdc": "#34D399",
   "raydium-usdc-sol": "#EF4444", "orca-sol-usdc": "#EF4444",
 };
@@ -171,7 +180,9 @@ function findLastEpochRate(d: Buffer, supplyNow: number, lamportsNow: number, ra
   return matches.length === 1 ? matches[0] : null;
 }
 
-async function fetchJito(): Promise<Live | null> {
+/** Shared SPL Stake Pool reader — same account layout for every pool on the standard
+ *  program, so Jito and PSOL (and any future LST) both go through this one function. */
+async function fetchStakePool(poolAddress: string): Promise<Live | null> {
   try {
     const rpc = process.env.MAINNET_RPC_URL || "https://api.mainnet-beta.solana.com";
     const res = await fetch(rpc, {
@@ -179,7 +190,7 @@ async function fetchJito(): Promise<Live | null> {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         jsonrpc: "2.0", id: 1, method: "getAccountInfo",
-        params: [JITO_POOL, { encoding: "base64", commitment: "confirmed" }],
+        params: [poolAddress, { encoding: "base64", commitment: "confirmed" }],
       }),
       next: { revalidate: 60 },
     });
@@ -274,8 +285,10 @@ async function writeKnown(id: string, k: Known) {
 }
 
 export async function GET(_req: NextRequest) {
-  const [kamino, marinade, solend, jito, raydium, orca] = await Promise.all([
-    fetchKamino(), fetchMarinade(), fetchSolend(), fetchJito(), fetchRaydium(), fetchOrca(),
+  const [kamino, marinade, solend, jito, psol, raydium, orca] = await Promise.all([
+    fetchKamino(), fetchMarinade(), fetchSolend(),
+    fetchStakePool(JITO_POOL), fetchStakePool(PSOL_POOL),
+    fetchRaydium(), fetchOrca(),
   ]);
 
   const live: Record<string, Live | null> = {
@@ -284,6 +297,7 @@ export async function GET(_req: NextRequest) {
     "marinade-sol":     marinade,
     "solend-usdc":      solend,
     "jito-sol":         jito,
+    "psol-sol":         psol,
     "raydium-usdc-sol": raydium,
     "orca-sol-usdc":    orca,
   };
