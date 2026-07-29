@@ -95,6 +95,7 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
     "solend-usdc": 0,
     "marinade-sol": 30, // ~0.3% liquid-unstake fee (max; measured 0.17%)
     "jito-sol": 10,     // ~0.1% to exit jitoSOL
+    "psol-sol": 10,     // same SPL stake-pool WithdrawSol path as jito — ~0.1% exit
   };
   const phantomRaw = vault.protocols.reduce(
     (sum, p) => sum + (p.currentBalance * (EXIT_COST_BPS[p.name] ?? 0)) / 10000,
