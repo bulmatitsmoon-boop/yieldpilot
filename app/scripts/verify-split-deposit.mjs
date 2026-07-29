@@ -12,6 +12,7 @@
 import assert from "node:assert/strict";
 import { blendedApy, splitAmounts, estYearly, planLegs } from "../src/lib/splitDeposit.mjs";
 import { phase2Visible } from "../src/lib/phase2Access.mjs";
+import { portfolioTotals, safeValueUsd } from "../src/lib/portfolio.mjs";
 
 let passed = 0;
 function check(name, fn) {
@@ -110,6 +111,35 @@ check("flag off + disconnected = hidden", () => {
 });
 check("no admin configured = never a preview", () => {
   assert.deepEqual(phase2Visible(ADMIN, false, undefined), { visible: false, adminPreview: false });
+});
+
+// ── portfolio totals (combined "your portfolio" view) ─────────────────────────
+check("safeValueUsd: USDC is 1:1", () => assert.equal(safeValueUsd(1500e6, false, 75), 1500));
+check("safeValueUsd: SOL prices against SOL", () => assert.equal(safeValueUsd(2e9, true, 75), 150));
+check("portfolioTotals sums both vaults in USD", () => {
+  const positions = [
+    { vault: "U", currentValue: 1500e6, earnedValue: 100e6 },
+    { vault: "S", currentValue: 2e9, earnedValue: 0.1e9 },
+  ];
+  const vaults = [{ address: "U", name: "YieldPilot USDC" }, { address: "S", name: "YieldPilot SOL" }];
+  const t = portfolioTotals(positions, vaults, 75);
+  assert.equal(Math.round(t.totalValueUsd), 1650);
+  approx(t.totalEarnedUsd, 100 + 0.1 * 75);
+  assert.equal(t.rows.length, 2);
+});
+check("portfolioTotals: 'USDC' vault not treated as SOL", () => {
+  const t = portfolioTotals([{ vault: "U", currentValue: 500e6, earnedValue: 0 }],
+    [{ address: "U", name: "YieldPilot USDC" }], 75);
+  assert.equal(Math.round(t.totalValueUsd), 500); // NOT 500*75
+});
+check("portfolioTotals: empty is zero", () => {
+  const t = portfolioTotals([], [], 75);
+  assert.equal(t.totalValueUsd, 0);
+  assert.equal(t.rows.length, 0);
+});
+check("portfolioTotals: skips positions with no matching vault", () => {
+  const t = portfolioTotals([{ vault: "X", currentValue: 999e6, earnedValue: 0 }], [{ address: "U", name: "USDC" }], 75);
+  assert.equal(t.totalValueUsd, 0);
 });
 
 console.log(`\n${passed} checks passed`);
