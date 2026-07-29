@@ -63,15 +63,12 @@ fn verify_paired_withdraw<'info>(
 /// Settle a recall's accounting for one protocol slot.
 ///
 /// `received`          — underlying actually returned to the vault by the CPI
+/// `receipt_before`    — receipt/LST units held BEFORE the CPI
 /// `receipt_remaining` — receipt/LST units STILL held after the CPI (0 == we fully exited)
 ///
-/// Three cases:
-///   * `received > deployed`   — the protocol returned MORE than the principal we recorded
-///     (accrued yield). Realize the excess into `total_deposits`.
-///   * `receipt_remaining == 0` — we exited the protocol ENTIRELY, so by definition nothing
-///     is deployed there any more. Whatever didn't come back is an exit fee that is GONE:
-///     book it as a realized LOSS and zero the slot.
-///   * otherwise — a partial recall; the remainder is genuinely still deployed.
+/// One proportional model: deployed_balance is reduced by the fraction of receipt tokens
+/// removed, and the gain/loss on the recalled portion (received vs its cost basis) is booked
+/// into total_deposits. Full exit is just the receipt_remaining == 0 case.
 ///
 /// WHY THE MIDDLE CASE EXISTS (added 2026-07-17). It previously fell into the last branch,
 /// so the fee stayed in `deployed_balance` as PHANTOM deployed capital — the vault went on
@@ -93,21 +90,44 @@ fn verify_paired_withdraw<'info>(
 /// Deliberately keyed on the RECEIPT balance rather than comparing amounts: only "do we
 /// still hold a claim on that protocol?" distinguishes a partial recall from a full exit.
 /// Sizes can't — a fee and a partial withdrawal both just look like `received < deployed`.
-fn settle_recall(v: &mut Vault, idx: usize, received: u64, receipt_remaining: u64) -> Result<()> {
+fn settle_recall(
+    v: &mut Vault,
+    idx: usize,
+    received: u64,
+    receipt_before: u64,
+    receipt_remaining: u64,
+) -> Result<()> {
     let deployed = v.protocols[idx].deployed_balance;
-    if received > deployed {
-        let gain = received - deployed;
-        v.total_deposits = v.total_deposits.checked_add(gain).ok_or(VaultError::MathOverflow)?;
-        v.protocols[idx].deployed_balance = 0;
-    } else if receipt_remaining == 0 {
-        // Fully exited. saturating_sub: a loss can never take total_deposits below zero,
-        // and under-reporting the loss is safer than underflowing the whole vault's value.
-        let loss = deployed - received;
-        v.total_deposits = v.total_deposits.saturating_sub(loss);
-        v.protocols[idx].deployed_balance = 0;
+
+    // ONE proportional model for every recall, full OR partial.
+    //
+    // Remaining deployed cost-basis scales with the fraction of RECEIPT tokens still held.
+    // The earlier version handled partial recalls with `deployed - received`, mixing
+    // underlying units into a receipt-token operation, so exit-fee residue stayed baked into
+    // deployed_balance and ACCUMULATED over repeated partial recalls — only ever fully cleared
+    // by a 100% exit. Now deployed_balance is reduced strictly in proportion to the receipt
+    // tokens removed, and the real gain/loss on the recalled portion is booked into
+    // total_deposits every time. (Updated 2026-07-28; keeps deployed_balance honest under
+    // partial recalls, not just full ones.)
+    //
+    // u128 intermediate so `deployed * receipt_remaining` can't overflow u64.
+    let new_deployed: u64 = if receipt_before == 0 {
+        0
     } else {
-        v.protocols[idx].deployed_balance = deployed.saturating_sub(received);
+        ((deployed as u128) * (receipt_remaining as u128) / (receipt_before as u128)) as u64
+    };
+    let cost_basis_recalled = deployed.saturating_sub(new_deployed);
+
+    if received >= cost_basis_recalled {
+        // Realized yield on the recalled portion.
+        let gain = received - cost_basis_recalled;
+        v.total_deposits = v.total_deposits.checked_add(gain).ok_or(VaultError::MathOverflow)?;
+    } else {
+        // Realized loss (exit fee / slippage). saturating_sub: a loss can never underflow the vault.
+        let loss = cost_basis_recalled - received;
+        v.total_deposits = v.total_deposits.saturating_sub(loss);
     }
+    v.protocols[idx].deployed_balance = new_deployed;
     Ok(())
 }
 
@@ -912,9 +932,12 @@ pub mod yieldpilot {
         // Reload the RECEIPT account before settling: whether we still hold receipt units
         // is the only thing that distinguishes "partially recalled, remainder still
         // deployed" from "fully exited, and the shortfall is a fee we already paid".
+        // `.amount` here is still the PRE-CPI balance (reload not yet called) — capture
+        // it as receipt_before so settle_recall can size the recall proportionally.
+        let receipt_before = ctx.accounts.vault_collateral_account.amount;
         ctx.accounts.vault_collateral_account.reload()?;
         let receipt_remaining = ctx.accounts.vault_collateral_account.amount;
-        settle_recall(v, idx, received, receipt_remaining)?;
+        settle_recall(v, idx, received, receipt_before, receipt_remaining)?;
 
         emit!(FundsRecalled { vault: v.key(), protocol_index, collateral_amount });
         Ok(())
@@ -1130,9 +1153,12 @@ pub mod yieldpilot {
         // Reload the RECEIPT account before settling: whether we still hold receipt units
         // is the only thing that distinguishes "partially recalled, remainder still
         // deployed" from "fully exited, and the shortfall is a fee we already paid".
+        // `.amount` here is still the PRE-CPI balance (reload not yet called) — capture
+        // it as receipt_before so settle_recall can size the recall proportionally.
+        let receipt_before = ctx.accounts.vault_msol_account.amount;
         ctx.accounts.vault_msol_account.reload()?;
         let receipt_remaining = ctx.accounts.vault_msol_account.amount;
-        settle_recall(v, idx, received, receipt_remaining)?;
+        settle_recall(v, idx, received, receipt_before, receipt_remaining)?;
 
         emit!(FundsRecalled { vault: v.key(), protocol_index, collateral_amount: msol_amount });
         Ok(())
@@ -1335,9 +1361,12 @@ pub mod yieldpilot {
         // Reload the RECEIPT account before settling: whether we still hold receipt units
         // is the only thing that distinguishes "partially recalled, remainder still
         // deployed" from "fully exited, and the shortfall is a fee we already paid".
+        // `.amount` here is still the PRE-CPI balance (reload not yet called) — capture
+        // it as receipt_before so settle_recall can size the recall proportionally.
+        let receipt_before = ctx.accounts.vault_lst_account.amount;
         ctx.accounts.vault_lst_account.reload()?;
         let receipt_remaining = ctx.accounts.vault_lst_account.amount;
-        settle_recall(v, idx, received, receipt_remaining)?;
+        settle_recall(v, idx, received, receipt_before, receipt_remaining)?;
 
         emit!(FundsRecalled { vault: v.key(), protocol_index, collateral_amount: lst_amount });
         Ok(())
@@ -1471,9 +1500,12 @@ pub mod yieldpilot {
         // Reload the RECEIPT account before settling: whether we still hold receipt units
         // is the only thing that distinguishes "partially recalled, remainder still
         // deployed" from "fully exited, and the shortfall is a fee we already paid".
+        // `.amount` here is still the PRE-CPI balance (reload not yet called) — capture
+        // it as receipt_before so settle_recall can size the recall proportionally.
+        let receipt_before = ctx.accounts.vault_collateral_account.amount;
         ctx.accounts.vault_collateral_account.reload()?;
         let receipt_remaining = ctx.accounts.vault_collateral_account.amount;
-        settle_recall(v, idx, received, receipt_remaining)?;
+        settle_recall(v, idx, received, receipt_before, receipt_remaining)?;
         emit!(FundsRecalled { vault: v.key(), protocol_index, collateral_amount });
         Ok(())
     }
