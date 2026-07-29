@@ -30,7 +30,9 @@ import {
   parseDecimalToBaseUnits,
 } from "@/hooks/useLpVault";
 import { blendedApy, estYearly, planLegs } from "@/lib/splitDeposit.mjs";
+import { portfolioTotals } from "@/lib/portfolio.mjs";
 import { usePhase2Gate } from "@/hooks/usePhase2Gate";
+import { useSolPrice } from "@/hooks/useSolPrice";
 
 const VAULT_ADDRESSES = (process.env.NEXT_PUBLIC_VAULT_ADDRESSES ?? "")
   .split(",")
@@ -58,10 +60,17 @@ export default function PortfolioPage() {
     notFound();
   }
 
-  const { vaults, deposit } = useYieldPilot(VAULT_ADDRESSES);
+  const { vaults, positions, deposit } = useYieldPilot(VAULT_ADDRESSES);
+  const solPrice = useSolPrice();
+
+  // Combined portfolio total across the safe vaults (LP value needs a live quote — shown
+  // separately below). Pure, tested math (portfolio.mjs / verify-split-deposit.mjs).
+  const totals = portfolioTotals(positions, vaults, solPrice);
+  const hasSafe = totals.rows.some((r) => r.valueUsd > 0);
   const { apys } = useApys();
   const {
     fetchLpVault,
+    fetchLpPosition,
     getDepositQuote,
     depositLp,
     getRaydiumDepositQuote,
@@ -97,6 +106,7 @@ export default function PortfolioPage() {
   const [safeAmount, setSafeAmount] = useState("");
   const [lpVaultAddr, setLpVaultAddr] = useState(LP_VAULT_ADDRESS);
   const [lpInfo, setLpInfo] = useState<LpVaultInfo | null>(null);
+  const [lpPosition, setLpPosition] = useState<{ shares: number } | null>(null);
   const [lpAmountA, setLpAmountA] = useState("");
   const [ackIl, setAckIl] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -107,6 +117,13 @@ export default function PortfolioPage() {
     try {
       const info = await fetchLpVault(lpVaultAddr.trim());
       setLpInfo(info);
+      // Also fetch the user's existing LP position for the portfolio summary (null if none).
+      try {
+        const pos = await fetchLpPosition(lpVaultAddr.trim());
+        setLpPosition(pos ? { shares: pos.shares } : null);
+      } catch {
+        setLpPosition(null);
+      }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -178,7 +195,52 @@ export default function PortfolioPage() {
           Admin preview — LP is not public yet. Only your wallet sees this.
         </div>
       )}
-      <h1 style={{ fontSize: 22, fontWeight: 500, marginBottom: 4 }}>Split deposit</h1>
+      {/* ── Combined portfolio: everything you hold across both vaults ── */}
+      <h1 style={{ fontSize: 22, fontWeight: 500, marginBottom: 16 }}>Your portfolio</h1>
+      <div style={{ background: "var(--ink-800, #1a1a1a)", borderRadius: 12, padding: "1.25rem 1.5rem", marginBottom: 24 }}>
+        <div style={{ fontSize: 13, color: "var(--text-mid, #888)" }}>Total value</div>
+        <div style={{ fontSize: 30, fontWeight: 500, marginBottom: 4 }}>
+          ${totals.totalValueUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+        </div>
+        {totals.totalEarnedUsd > 0 && (
+          <div style={{ fontSize: 13, color: "#22b37e" }}>
+            +${totals.totalEarnedUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })} earned
+          </div>
+        )}
+
+        {hasSafe && (
+          <div style={{ borderTop: "0.5px solid var(--line, #2a2a2a)", marginTop: 14, paddingTop: 12 }}>
+            {totals.rows.filter((r) => r.valueUsd > 0).map((r) => (
+              <div key={r.name} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "4px 0" }}>
+                <span style={{ color: "var(--text-mid, #888)" }}>{r.name.replace("YieldPilot ", "")} · safe</span>
+                <span>
+                  ${r.valueUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                  {r.earnedUsd > 0 && <span style={{ color: "#22b37e", marginLeft: 8 }}>+${r.earnedUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {lpInfo && lpPosition && lpPosition.shares > 0 && (
+          <div style={{ borderTop: "0.5px solid var(--line, #2a2a2a)", marginTop: 8, paddingTop: 12, display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+            <span style={{ color: "var(--text-mid, #888)" }}>
+              {lpInfo.name} · LP <span style={{ background: "rgba(216,90,48,0.12)", color: "#d85a30", fontSize: 11, padding: "1px 6px", borderRadius: 12, marginLeft: 4 }}>IL risk</span>
+            </span>
+            <span style={{ color: "var(--text-mid, #888)" }}>
+              live value on the <a href="/lp" style={{ color: "var(--text-accent, #6ea8fe)" }}>LP page</a>
+            </span>
+          </div>
+        )}
+
+        {!hasSafe && !(lpPosition && lpPosition.shares > 0) && (
+          <div style={{ fontSize: 13, color: "var(--text-mid, #888)", marginTop: 4 }}>
+            No positions yet — fund a vault below to start.
+          </div>
+        )}
+      </div>
+
+      <h2 style={{ fontSize: 18, fontWeight: 500, marginBottom: 4 }}>Add to your position</h2>
       <p style={{ color: "var(--text-mid, #888)", marginBottom: 24, fontSize: 14 }}>
         The dial previews how a deposit splits. Each vault is funded separately — the LP vault
         needs both tokens, so bring the pair.
