@@ -490,6 +490,7 @@ export function useYieldPilot(vaultAddresses: string[]) {
             "kamino-sol": "vaultCollateralAccount",
             "marinade-sol": "vaultMsolAccount",
             "jito-sol": "vaultLstAccount",
+            "psol-sol": "vaultLstAccount",
             "solend-usdc": "vaultCollateralAccount",
           };
 
