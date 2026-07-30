@@ -35,6 +35,7 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
   const [busy, setBusy] = useState(false);
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
   const [isWhitelisted, setIsWhitelisted] = useState(false);
+  const [receiptBalances, setReceiptBalances] = useState<Record<string, number>>({});
 
   const asset = vault.name.toUpperCase().includes("SOL") ? "SOL" : "USDC";
   const decimals = DECIMALS[asset] || 6;
@@ -97,10 +98,23 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
     "jito-sol": 10,     // ~0.1% to exit jitoSOL
     "psol-sol": 10,     // same SPL stake-pool WithdrawSol path as jito — ~0.1% exit
   };
-  const phantomRaw = vault.protocols.reduce(
-    (sum, p) => sum + (p.currentBalance * (EXIT_COST_BPS[p.name] ?? 0)) / 10000,
-    0
-  );
+  //
+  // The EXIT_COST_BPS estimate above only holds while a protocol still has real receipt
+  // tokens backing its deployed_balance — that's the normal case, and the small % models
+  // the genuine exit fee a live recall would pay. But a protocol can also be ALREADY fully
+  // exited (receipt balance 0) while deployed_balance is still nonzero — a residual
+  // accounting phantom from a recall that ran before the proportional settle_recall fix
+  // (or, in principle, any future edge case that leaves the same signature). In that state
+  // there is nothing left to recall at all, so the ENTIRE deployed_balance is unrecoverable,
+  // not just a fee sliver — treating it as a small % would let MAX propose an amount that
+  // reverts with InsufficientIdle every time. Detected live via receiptBalances (fetched
+  // above), so this self-corrects the moment the phantom is actually cleared on-chain.
+  const phantomRaw = vault.protocols.reduce((sum, p) => {
+    if (p.currentBalance <= 0) return sum;
+    const receiptBal = receiptBalances[p.name];
+    if (receiptBal === 0) return sum + p.currentBalance; // fully exited already — all of it is dead
+    return sum + (p.currentBalance * (EXIT_COST_BPS[p.name] ?? 0)) / 10000;
+  }, 0);
   // Cap the PAYOUT (not the share count): amount_out must be <= idle after recalls,
   // and idle-after-recalls == total_value - fees.
   const vaultCeilingTokens = Math.max(0, vault.totalDeposits - phantomRaw) / 10 ** decimals;
@@ -117,6 +131,33 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
   };
 
   useEffect(() => { if (publicKey) fetchBalance(); }, [publicKey, vault.address]);
+
+  // Fetch each deployed protocol's REAL receipt-token balance. This is what makes the
+  // ceiling below trustworthy: a fee-estimate percentage only applies while the protocol
+  // still holds live receipt tokens to recall. If receipt balance reads 0 while
+  // deployed_balance is still nonzero, the protocol has already been fully exited (by a
+  // pre-upgrade recall, or by anyone else with a paired-withdraw) and NONE of that
+  // deployed_balance is recoverable — not a fee sliver, all of it. Checking this live
+  // means "Max" is safe the moment it renders, without waiting on an admin cleanup call.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const entries = await Promise.all(
+        vault.protocols
+          .filter(p => p.currentBalance > 0)
+          .map(async p => {
+            try {
+              const bal = await connection.getTokenAccountBalance(new PublicKey(p.vaultReceiptAccount));
+              return [p.name, Number(bal.value.amount)] as const;
+            } catch {
+              return [p.name, 0] as const; // account missing/empty reads as fully exited — the safe assumption
+            }
+          })
+      );
+      if (!cancelled) setReceiptBalances(Object.fromEntries(entries));
+    })();
+    return () => { cancelled = true; };
+  }, [vault.address, vault.protocols, connection]);
 
   useEffect(() => {
     if (!publicKey) { setIsWhitelisted(false); return; }
