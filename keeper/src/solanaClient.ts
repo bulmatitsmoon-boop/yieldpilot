@@ -12,6 +12,8 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { logger } from "./logger";
+import { EpochContext } from "./rebalancer";
+import { EPOCH_GATED_PROTOCOLS, getEntryEpochs, recordEntryIfFresh, clearEntry } from "./epochTracker";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Kamino mainnet constants
@@ -876,6 +878,28 @@ export class SolanaClient {
     return lamports / 1e9;
   }
 
+  // Builds the epoch-cooldown context the rebalancer needs to refuse exiting an LST
+  // position before its accrued yield exceeds its flat exit fee. epochLengthDays is
+  // derived from a live slot-time sample rather than hardcoded, since mainnet slot
+  // times drift (verified 2026-07-30: ~0.4225s/slot -> ~2.11 days/epoch, not the
+  // ~2-3 day rule of thumb).
+  async getEpochContext(vaultAddress: string): Promise<EpochContext> {
+    const [epochInfo, perfSamples] = await Promise.all([
+      this.connection.getEpochInfo(),
+      this.connection.getRecentPerformanceSamples(1),
+    ]);
+    const sample = perfSamples[0];
+    const secsPerSlot = sample && sample.numSlots > 0
+      ? sample.samplePeriodSecs / sample.numSlots
+      : 0.4225; // fallback: last known-good live measurement
+    const epochLengthDays = (epochInfo.slotsInEpoch * secsPerSlot) / 86_400;
+    return {
+      currentEpoch: epochInfo.epoch,
+      epochLengthDays,
+      entryEpochs: getEntryEpochs(vaultAddress),
+    };
+  }
+
   async getVaultCollateralBalance(
     vaultAddress: string,
     vaultState: VaultState
@@ -946,7 +970,7 @@ export class SolanaClient {
   // Phase 1 - recall from over-deployed protocols (frees idle vault balance)
   // Phase 2 - deploy to under-deployed protocols (uses idle vault balance)
 
-  async executeRebalance(vaultAddress: string, vault: VaultState): Promise<void> {
+  async executeRebalance(vaultAddress: string, vault: VaultState, currentEpoch?: number): Promise<void> {
     const totalDeposits = vault.totalDeposits.toNumber();
     if (totalDeposits === 0) {
       logger.info("executeRebalance: vault empty, skipping");
@@ -1038,6 +1062,13 @@ export class SolanaClient {
         }
         // Recalls move real funds back out of a protocol — alert like deploys do.
         if (sig) {
+          // A full exit (recalling down to target 0) clears the epoch-entry record,
+          // so a later re-deploy starts a fresh cooldown window rather than inheriting
+          // the old one. Partial recalls (target still > 0) are not a full exit and
+          // leave the record intact.
+          if (EPOCH_GATED_PROTOCOLS.has(d.label) && d.target === 0) {
+            clearEntry(vaultAddress, d.label);
+          }
           await notifyTelegram(
             `↩️ <b>Recalled</b> — ${d.label} → vault
 ` +
@@ -1096,6 +1127,11 @@ export class SolanaClient {
         // the ONLY action with no alert — notifyTelegram was wired to rebalance+compound
         // only. Found 2026-07-16: 4.5 USDC deployed to Kamino and the channel said nothing.
         if (sig) {
+          // Only a fresh 0 -> nonzero deploy starts the epoch cooldown clock — a
+          // top-up of an already-held position must not reset it (see epochTracker.ts).
+          if (EPOCH_GATED_PROTOCOLS.has(d.label) && d.deployed === 0 && currentEpoch !== undefined) {
+            recordEntryIfFresh(vaultAddress, d.label, true, currentEpoch);
+          }
           await notifyTelegram(
             `⚡ <b>Deployed</b> — ${fmtAmount(amount.toNumber(), vault.name)} → ${d.label}
 ` +
