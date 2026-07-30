@@ -798,6 +798,39 @@ pub mod yieldpilot {
         Ok(())
     }
 
+    /// Clears a stale `deployed_balance` phantom left over from a pre-upgrade recall whose
+    /// exit fee never got booked (fixed going forward by settle_recall's proportional model,
+    /// this cleans up residue from BEFORE that fix existed).
+    ///
+    /// SAFE BY CONSTRUCTION, same argument as reconcile(): this reads the receipt token
+    /// account's REAL on-chain balance — never a caller-supplied number — and only acts
+    /// when that balance is verifiably 0. If the receipt balance is 0, there is nothing left
+    /// to recall from this protocol; therefore ANY nonzero deployed_balance for that slot is
+    /// necessarily phantom. It can only ever move a slot toward zero, and only when proven
+    /// empty — it can never zero a slot that still holds real, recallable value, and it can
+    /// never invent or inflate anything.
+    pub fn clear_phantom_deployed(ctx: Context<ClearPhantomDeployed>, protocol_index: u8) -> Result<()> {
+        let idx = protocol_index as usize;
+        let v = &mut ctx.accounts.vault;
+        require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
+        require!(
+            ctx.accounts.vault_receipt_account.key() == v.protocols[idx].vault_receipt_account,
+            VaultError::InvalidTokenAccount
+        );
+        require!(ctx.accounts.vault_receipt_account.amount == 0, VaultError::ReceiptStillHeld);
+
+        let phantom = v.protocols[idx].deployed_balance;
+        require!(phantom > 0, VaultError::ZeroAmount); // nothing to clear
+
+        // The phantom was never a real asset, so it was never really backing total_deposits
+        // either — booking it as a loss here just makes the books match what was already true.
+        v.total_deposits = v.total_deposits.saturating_sub(phantom);
+        v.protocols[idx].deployed_balance = 0;
+
+        emit!(PhantomCleared { vault: v.key(), protocol_index, cleared_amount: phantom });
+        Ok(())
+    }
+
     // ── Protocol deployment ───────────────────────────────────────────────────
 
     pub fn deploy_to_kamino<'info>(
@@ -1698,6 +1731,17 @@ pub struct Reconcile<'info> {
 }
 
 #[derive(Accounts)]
+pub struct ClearPhantomDeployed<'info> {
+    pub keeper: Signer<'info>,
+    #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
+    pub vault: Account<'info, Vault>,
+    // Read-only: same trust model as settle_recall — only its .amount is used, and it's
+    // constrained to the vault's own registered receipt account so a caller can't
+    // substitute a different (possibly nonzero) one.
+    pub vault_receipt_account: Account<'info, TokenAccount>,
+}
+
+#[derive(Accounts)]
 pub struct AcceptAdmin<'info> {
     pub new_admin: Signer<'info>,
     #[account(mut, constraint = vault.pending_admin == new_admin.key() @ VaultError::NotPendingAdmin)]
@@ -2167,6 +2211,7 @@ pub struct RecallFromSolend<'info> {
 #[event] pub struct Rebalanced        { pub vault: Pubkey, pub allocations: Vec<u64>, pub ts: i64 }
 #[event] pub struct Compounded        { pub vault: Pubkey, pub ts: i64 }
 #[event] pub struct Reconciled        { pub vault: Pubkey, pub old_total_deposits: u64, pub new_total_deposits: u64 }
+#[event] pub struct PhantomCleared    { pub vault: Pubkey, pub protocol_index: u8, pub cleared_amount: u64 }
 #[event] pub struct FundsDeployed     { pub vault: Pubkey, pub protocol_index: u8, pub amount: u64 }
 #[event] pub struct FundsRecalled     { pub vault: Pubkey, pub protocol_index: u8, pub collateral_amount: u64 }
 #[event] pub struct PauseToggled      { pub vault: Pubkey, pub paused: bool }
@@ -2213,4 +2258,5 @@ pub enum VaultError {
     // 6015, RecallRequiresPairedWithdraw = 6030 are all observed/relied on). New variants
     // go at the BOTTOM, always.
     #[msg("Treasury cannot be the zero address")] InvalidTreasury,
+    #[msg("Receipt account still holds tokens — protocol is not actually fully exited")] ReceiptStillHeld,
 }
