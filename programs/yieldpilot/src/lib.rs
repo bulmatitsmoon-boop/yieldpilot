@@ -876,6 +876,61 @@ pub mod yieldpilot {
         Ok(())
     }
 
+    /// Books the REAL accrued yield on an SPL-stake-pool position (Jito, PSOL) into
+    /// total_deposits, without recalling anything — no CPI, no exit fee, no funds move.
+    ///
+    /// An LST's pool account stores `total_lamports` (real SOL backing the pool) and
+    /// `pool_token_supply` (LST tokens in existence) directly in its own account data —
+    /// same verified offsets (258/266) the live-rates feature already reads for APY
+    /// (see api/apys/route.ts fetchStakePool), reused here rather than guessed fresh.
+    /// exchange_rate = total_lamports / pool_token_supply, and it only ever rises as
+    /// staking rewards land — this is exactly why compound() being a routine no-op left
+    /// yield on fee-bearing protocols permanently invisible: gains were only ever booked
+    /// at RECALL time (settle_recall), and nothing recalls without a real reason to.
+    ///
+    /// SAFE BY CONSTRUCTION, same shape as reconcile()/clear_phantom_deployed: reads only
+    /// account data it already trusts (the vault's own receipt-token balance, and the
+    /// registered stake pool's own account — the SAME account deploy_to_sol_lst and
+    /// recall_from_sol_lst already decode fields from at fixed offsets) and can only ever
+    /// move deployed_balance UP to match the real, computed current value — never
+    /// invents a number, never moves funds, never pays a fee.
+    pub fn accrue_sol_lst(ctx: Context<AccrueSolLst>, protocol_index: u8) -> Result<()> {
+        let idx = protocol_index as usize;
+        let v = &mut ctx.accounts.vault;
+        require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
+        require!(v.protocols[idx].kind == ProtocolKind::Jito, AdapterError::UnsupportedProtocol);
+        assert_state_matches(&v.protocols[idx], ctx.accounts.stake_pool.key)?;
+        require!(
+            ctx.accounts.vault_lst_account.key() == v.protocols[idx].vault_receipt_account,
+            VaultError::InvalidTokenAccount
+        );
+
+        let data = ctx.accounts.stake_pool.try_borrow_data()?;
+        require!(data.len() >= 274, VaultError::InvalidTokenAccount);
+        let total_lamports: u64 = u64::from_le_bytes(data[258..266].try_into().unwrap());
+        let pool_token_supply: u64 = u64::from_le_bytes(data[266..274].try_into().unwrap());
+        require!(pool_token_supply > 0, VaultError::MathOverflow);
+
+        let receipt_balance = ctx.accounts.vault_lst_account.amount;
+        let real_value: u64 = ((receipt_balance as u128) * (total_lamports as u128) / (pool_token_supply as u128))
+            .try_into()
+            .map_err(|_| VaultError::MathOverflow)?;
+
+        let old_deployed = v.protocols[idx].deployed_balance;
+        // Only ever move UP. An LST's rate only rises in normal operation; if this ever
+        // reads lower (a stale account, or racing a recall in the same slot), do nothing
+        // rather than book a phantom loss from what is just a timing artifact — a real
+        // loss is only ever booked by settle_recall, which verifies it against tokens
+        // actually received.
+        if real_value > old_deployed {
+            let gain = real_value - old_deployed;
+            v.total_deposits = v.total_deposits.checked_add(gain).ok_or(VaultError::MathOverflow)?;
+            v.protocols[idx].deployed_balance = real_value;
+            emit!(YieldAccrued { vault: v.key(), protocol_index, gain });
+        }
+        Ok(())
+    }
+
     // ── Protocol deployment ───────────────────────────────────────────────────
 
     pub fn deploy_to_kamino<'info>(
@@ -1814,6 +1869,19 @@ pub struct ClearPhantomDeployed<'info> {
 }
 
 #[derive(Accounts)]
+pub struct AccrueSolLst<'info> {
+    pub keeper: Signer<'info>,
+    #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
+    pub vault: Account<'info, Vault>,
+    // Read-only: same trust model as recall/deploy — constrained to the vault's own
+    // registered receipt account so a caller can't substitute a different one.
+    pub vault_lst_account: Account<'info, TokenAccount>,
+    /// CHECK: address-validated against the vault's own registered external_state via
+    /// assert_state_matches in the handler; only its raw account data is read (no CPI).
+    pub stake_pool: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
 pub struct AcceptAdmin<'info> {
     pub new_admin: Signer<'info>,
     #[account(mut, constraint = vault.pending_admin == new_admin.key() @ VaultError::NotPendingAdmin)]
@@ -2296,6 +2364,7 @@ pub struct RecallFromSolend<'info> {
 #[event] pub struct Compounded        { pub vault: Pubkey, pub ts: i64 }
 #[event] pub struct Reconciled        { pub vault: Pubkey, pub old_total_deposits: u64, pub new_total_deposits: u64 }
 #[event] pub struct PhantomCleared    { pub vault: Pubkey, pub protocol_index: u8, pub cleared_amount: u64 }
+#[event] pub struct YieldAccrued      { pub vault: Pubkey, pub protocol_index: u8, pub gain: u64 }
 #[event] pub struct FundsDeployed     { pub vault: Pubkey, pub protocol_index: u8, pub amount: u64 }
 #[event] pub struct FundsRecalled     { pub vault: Pubkey, pub protocol_index: u8, pub collateral_amount: u64 }
 #[event] pub struct PauseToggled      { pub vault: Pubkey, pub paused: bool }
