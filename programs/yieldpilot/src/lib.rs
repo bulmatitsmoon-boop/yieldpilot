@@ -13,6 +13,7 @@ use anchor_spl::{
 // `crate::instruction` module so this doesn't depend on that module's exact
 // shape across Anchor versions. Used by verify_paired_withdraw below.
 const WITHDRAW_DISCRIMINATOR: [u8; 8] = [183, 18, 70, 156, 148, 109, 161, 34];
+const DEPOSIT_DISCRIMINATOR: [u8; 8] = [242, 35, 198, 137, 82, 225, 242, 182];
 
 /// Called by recall_from_* when the signer is NOT the vault's keeper: confirms
 /// a `withdraw` instruction for this exact (vault, user) pair exists elsewhere
@@ -59,6 +60,50 @@ fn verify_paired_withdraw<'info>(
     err!(VaultError::RecallRequiresPairedWithdraw)
 }
 
+/// Mirror of verify_paired_withdraw, for deploy_to_*: confirms a `deposit` instruction
+/// for this exact (vault, user) pair exists elsewhere in the same transaction. This is
+/// what makes deploying idle capital immediately safe for a non-keeper caller — money
+/// is never idle waiting on the next keeper cron cycle, because a depositor bundles
+/// deposit()+deploy_to_*() into one atomic transaction and the pairing check ensures
+/// this can only ever ride along with their OWN real, share-minting deposit, never as a
+/// standalone action (which would let anyone force-deploy the vault's existing idle
+/// buffer on demand). The keeper's own routine deploys are unaffected: they're never
+/// paired with a deposit, so this function is only reached when the caller isn't the
+/// keeper. Deploy's existing MIN_IDLE_BPS check is untouched by this — a paired deploy
+/// can still only push idle down to the same 10% floor every keeper deploy respects.
+fn verify_paired_deposit<'info>(
+    instructions_sysvar: &AccountInfo<'info>,
+    expected_vault: &Pubkey,
+    expected_caller: &Pubkey,
+) -> Result<()> {
+    require_keys_eq!(
+        *instructions_sysvar.key,
+        INSTRUCTIONS_SYSVAR_ID,
+        VaultError::InvalidInstructionsSysvar
+    );
+
+    let mut i: u16 = 0;
+    loop {
+        let ix = match load_instruction_at_checked(i as usize, instructions_sysvar) {
+            Ok(ix) => ix,
+            Err(_) => break,
+        };
+        // Deposit's account order (see the Deposit accounts struct):
+        // [0] = user (Signer), [1] = vault.
+        if ix.program_id == crate::ID
+            && ix.data.len() >= 8
+            && ix.data[0..8] == DEPOSIT_DISCRIMINATOR
+            && ix.accounts.len() >= 2
+            && ix.accounts[0].pubkey == *expected_caller
+            && ix.accounts[1].pubkey == *expected_vault
+        {
+            return Ok(());
+        }
+        i += 1;
+        if i > 32 { break; }
+    }
+    err!(VaultError::DeployRequiresPairedDeposit)
+}
 
 /// Settle a recall's accounting for one protocol slot.
 ///
@@ -839,7 +884,13 @@ pub mod yieldpilot {
         amount: u64,
     ) -> Result<()> {
         let v = &mut ctx.accounts.vault;
-        require!(v.keeper == ctx.accounts.keeper.key(), VaultError::Unauthorized);
+        if v.keeper != ctx.accounts.keeper.key() {
+            verify_paired_deposit(
+                &ctx.accounts.instruction_sysvar.to_account_info(),
+                &v.key(),
+                &ctx.accounts.keeper.key(),
+            )?;
+        }
         require!(!v.paused, AdapterError::VaultPaused);
         require!(amount > 0, VaultError::ZeroAmount);
         let idx = protocol_index as usize;
@@ -982,6 +1033,13 @@ pub mod yieldpilot {
         lamports: u64,
     ) -> Result<()> {
         let v = &mut ctx.accounts.vault;
+        if v.keeper != ctx.accounts.keeper.key() {
+            verify_paired_deposit(
+                &ctx.accounts.tx_instructions_sysvar.to_account_info(),
+                &v.key(),
+                &ctx.accounts.keeper.key(),
+            )?;
+        }
         require!(!v.paused, AdapterError::VaultPaused);
         require!(lamports > 0, VaultError::ZeroAmount);
         let idx = protocol_index as usize;
@@ -1205,6 +1263,13 @@ pub mod yieldpilot {
     ) -> Result<()> {
         require!(lamports > 0, VaultError::ZeroAmount);
         let v = &mut ctx.accounts.vault;
+        if v.keeper != ctx.accounts.keeper.key() {
+            verify_paired_deposit(
+                &ctx.accounts.tx_instructions_sysvar.to_account_info(),
+                &v.key(),
+                &ctx.accounts.keeper.key(),
+            )?;
+        }
         require!(!v.paused, AdapterError::VaultPaused);
         let idx = protocol_index as usize;
         require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
@@ -1413,6 +1478,13 @@ pub mod yieldpilot {
     ) -> Result<()> {
         require!(amount > 0, VaultError::ZeroAmount);
         let v = &mut ctx.accounts.vault;
+        if v.keeper != ctx.accounts.keeper.key() {
+            verify_paired_deposit(
+                &ctx.accounts.tx_instructions_sysvar.to_account_info(),
+                &v.key(),
+                &ctx.accounts.keeper.key(),
+            )?;
+        }
         require!(!v.paused, AdapterError::VaultPaused);
         let idx = protocol_index as usize;
         require!(idx < v.protocol_count as usize, VaultError::InvalidProtocolIndex);
@@ -1887,9 +1959,11 @@ pub struct RemoveFromWhitelist<'info> {
 
 #[derive(Accounts)]
 pub struct DeployToKamino<'info> {
+    // Authorization (keeper OR paired-deposit) is checked at runtime in the handler,
+    // not here — mirrors RecallFromKamino, which opens the same way for the same reason.
     #[account(mut)]
     pub keeper: Signer<'info>,
-    #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
+    #[account(mut)]
     pub vault: Account<'info, Vault>,
     /// CHECK: PDA
     #[account(mut, seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
@@ -1968,8 +2042,12 @@ pub struct RecallFromKamino<'info> {
 pub struct DeployToMarinade<'info> {
     #[account(mut)]
     pub keeper: Signer<'info>,
-    #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
+    #[account(mut)]
     pub vault: Box<Account<'info, Vault>>,
+    /// CHECK: address-constrained to the real sysvar; used only to look up sibling
+    /// instructions in this same transaction for the paired-deposit check.
+    #[account(address = INSTRUCTIONS_SYSVAR_ID)]
+    pub tx_instructions_sysvar: UncheckedAccount<'info>,
     /// CHECK: PDA
     #[account(mut, seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
     pub vault_authority: UncheckedAccount<'info>,
@@ -2043,8 +2121,11 @@ pub struct RecallFromMarinade<'info> {
 pub struct DeployToSolLst<'info> {
     #[account(mut)]
     pub keeper: Signer<'info>,
-    #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
+    #[account(mut)]
     pub vault: Box<Account<'info, Vault>>,
+    /// CHECK: address-constrained to the real sysvar; see DeployToMarinade.
+    #[account(address = INSTRUCTIONS_SYSVAR_ID)]
+    pub tx_instructions_sysvar: UncheckedAccount<'info>,
     /// CHECK: PDA
     #[account(mut, seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
     pub vault_authority: UncheckedAccount<'info>,
@@ -2133,8 +2214,11 @@ pub struct RecallFromSolLst<'info> {
 #[derive(Accounts)]
 pub struct DeployToSolend<'info> {
     #[account(mut)] pub keeper: Signer<'info>,
-    #[account(mut, constraint = vault.keeper == keeper.key() @ VaultError::Unauthorized)]
+    #[account(mut)]
     pub vault: Box<Account<'info, Vault>>,
+    /// CHECK: address-constrained to the real sysvar; see DeployToMarinade.
+    #[account(address = INSTRUCTIONS_SYSVAR_ID)]
+    pub tx_instructions_sysvar: UncheckedAccount<'info>,
     /// CHECK: PDA
     #[account(mut, seeds = [b"vault", vault.key().as_ref()], bump = vault.authority_bump)]
     pub vault_authority: UncheckedAccount<'info>,
@@ -2259,4 +2343,5 @@ pub enum VaultError {
     // go at the BOTTOM, always.
     #[msg("Treasury cannot be the zero address")] InvalidTreasury,
     #[msg("Receipt account still holds tokens — protocol is not actually fully exited")] ReceiptStillHeld,
+    #[msg("Non-keeper deploy must be paired with a deposit instruction for the same user and vault in the same transaction")] DeployRequiresPairedDeposit,
 }
