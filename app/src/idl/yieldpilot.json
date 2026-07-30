@@ -87,6 +87,51 @@
       ]
     },
     {
+      "name": "clear_phantom_deployed",
+      "docs": [
+        "Clears a stale `deployed_balance` phantom left over from a pre-upgrade recall whose",
+        "exit fee never got booked (fixed going forward by settle_recall's proportional model,",
+        "this cleans up residue from BEFORE that fix existed).",
+        "",
+        "SAFE BY CONSTRUCTION, same argument as reconcile(): this reads the receipt token",
+        "account's REAL on-chain balance — never a caller-supplied number — and only acts",
+        "when that balance is verifiably 0. If the receipt balance is 0, there is nothing left",
+        "to recall from this protocol; therefore ANY nonzero deployed_balance for that slot is",
+        "necessarily phantom. It can only ever move a slot toward zero, and only when proven",
+        "empty — it can never zero a slot that still holds real, recallable value, and it can",
+        "never invent or inflate anything."
+      ],
+      "discriminator": [
+        37,
+        246,
+        51,
+        113,
+        169,
+        5,
+        169,
+        204
+      ],
+      "accounts": [
+        {
+          "name": "keeper",
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "vault_receipt_account"
+        }
+      ],
+      "args": [
+        {
+          "name": "protocol_index",
+          "type": "u8"
+        }
+      ]
+    },
+    {
       "name": "close_vault",
       "discriminator": [
         141,
@@ -2178,6 +2223,19 @@
       ]
     },
     {
+      "name": "PhantomCleared",
+      "discriminator": [
+        56,
+        12,
+        190,
+        10,
+        213,
+        166,
+        214,
+        62
+      ]
+    },
+    {
       "name": "ProtocolRegistered",
       "discriminator": [
         68,
@@ -2379,6 +2437,26 @@
           {
             "name": "paused",
             "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PhantomCleared",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "protocol_index",
+            "type": "u8"
+          },
+          {
+            "name": "cleared_amount",
+            "type": "u64"
           }
         ]
       }
