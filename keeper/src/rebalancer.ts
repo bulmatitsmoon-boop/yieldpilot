@@ -1,6 +1,7 @@
 import { ProtocolApy } from "./apyFetcher";
 import { VaultState } from "./solanaClient";
 import { logger } from "./logger";
+import { EPOCH_GATED_PROTOCOLS } from "./epochTracker";
 
 const REBALANCE_THRESHOLD_BPS = parseInt(process.env.REBALANCE_THRESHOLD_BPS || "500");
 const MIN_APY_IMPROVEMENT_BPS = parseInt(process.env.MIN_APY_IMPROVEMENT_BPS || "100");
@@ -24,6 +25,55 @@ const EXIT_COST_BPS: Record<string, number> = {
   "psol-sol":         10,
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Epoch cooldown
+//
+// EPOCH_GATED_PROTOCOLS (marinade-sol, jito-sol, psol-sol) only reprice once per
+// Solana epoch, because their yield comes from native staking rewards, which land
+// once per epoch. Their exit fee, however, is a FLAT bps charge on the full amount
+// withdrawn (principal included), charged regardless of how long the position was
+// held. Exiting one of these before at least one epoch's worth of accrued yield
+// exceeds that flat fee is a guaranteed realized loss — verified 2026-07-30 live:
+// 3 SOL at 6% APY held exactly 1 epoch (~2.11 days at current mainnet slot times)
+// earns ~0.00104 SOL but pays ~0.003 SOL in exit fee, a net loss ~3x the yield.
+// Breakeven scales with APY, not with position size (both fee and yield are
+// proportional to principal, so size cancels out of the comparison).
+//
+// Lending protocols (Kamino, Solend) are NEVER in EPOCH_GATED_PROTOCOLS and this
+// check is a no-op for them — they accrue every slot, so there is no "epoch" to
+// wait on. Gating them here would mean a USDC-only rebalance waits forever on an
+// epoch signal that never fires for a lending market.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface EpochContext {
+  currentEpoch: number;
+  epochLengthDays: number;
+  /** label -> epoch this protocol slot was last (re)entered at, from epochTracker */
+  entryEpochs: Record<string, number>;
+}
+
+// Returns true if `label` cannot yet be safely exited given how long it's been held.
+// Fails OPEN (does not block) when we have no entry-epoch record for the position —
+// that just means this protective check can't be applied yet, not that the underlying
+// exit-cost check should be skipped; it still runs independently in computeExitCost.
+function epochCooldownBlocksExit(
+  label: string,
+  apyBps: number,
+  ctx: EpochContext | undefined,
+): boolean {
+  if (!ctx || !EPOCH_GATED_PROTOCOLS.has(label)) return false;
+  const entryEpoch = ctx.entryEpochs[label];
+  if (entryEpoch === undefined) return false;
+
+  const epochsHeld = ctx.currentEpoch - entryEpoch;
+  if (epochsHeld <= 0) return true; // same epoch as entry — earned $0 so far, guaranteed loss
+
+  const exitFeeFrac = (EXIT_COST_BPS[label] ?? 0) / BPS_DENOM;
+  const dailyApy = (apyBps / BPS_DENOM) / 365;
+  const accruedFrac = epochsHeld * ctx.epochLengthDays * dailyApy;
+  return accruedFrac < exitFeeFrac;
+}
+
 export interface RebalanceDecision {
   shouldRebalance: boolean;
   reason: string;
@@ -38,7 +88,8 @@ export interface RebalanceDecision {
 
 export function computeRebalanceDecision(
   vault: VaultState,
-  apys: ProtocolApy[]
+  apys: ProtocolApy[],
+  epochContext?: EpochContext,
 ): RebalanceDecision {
   const protocols = vault.protocols.slice(0, vault.protocolCount);
 
@@ -94,6 +145,7 @@ export function computeRebalanceDecision(
     currentAllocations,
     protocolApys,
     protocolIds,
+    epochContext,
   );
 
   const optimalWeightedApy = computeWeightedApy(optimalAllocations, protocolApys);
@@ -107,6 +159,15 @@ export function computeRebalanceDecision(
     ...currentAllocations.map((cur, i) => Math.abs(cur - optimalAllocations[i]))
   );
 
+  // Surfaced separately from the reason string so operators can tell "nothing better
+  // exists" apart from "something better exists but the epoch cooldown is blocking it" —
+  // the two look identical from newAllocations alone (both hold current allocation).
+  const cooldownBlocked = protocolIds.some((id, i) =>
+    currentAllocations[i] > 0 &&
+    EPOCH_GATED_PROTOCOLS.has(id) &&
+    epochCooldownBlocksExit(id, protocolApys[i], epochContext)
+  );
+
   logger.debug("Rebalance evaluation", {
     currentWeightedApy:  `${(currentWeightedApy / 100).toFixed(2)}%`,
     optimalWeightedApy:  `${(optimalWeightedApy / 100).toFixed(2)}%`,
@@ -114,6 +175,7 @@ export function computeRebalanceDecision(
     netApyImprovementBps: netApyImprovement,
     maxDriftBps: maxDrift,
     thresholdBps: REBALANCE_THRESHOLD_BPS,
+    epochCooldownActive: cooldownBlocked,
   });
 
   const apyTrigger   = netApyImprovement >= MIN_APY_IMPROVEMENT_BPS;
@@ -141,6 +203,8 @@ export function computeRebalanceDecision(
     }
   } else if (!vault.autoRebalance) {
     reason = "Auto-rebalance is disabled";
+  } else if (cooldownBlocked) {
+    reason = `Holding — a better rate exists but exiting the current epoch-gated position now would pay the exit fee before enough epochs have passed to earn it back`;
   } else if (grossGain > 0) {
     reason = `Net APY gain ${netApyImprovement}bps (gross ${grossGain}bps - ${exitCostBps}bps exit cost) below the ${MIN_APY_IMPROVEMENT_BPS}bps minimum, and drift ${maxDrift}bps below the ${REBALANCE_THRESHOLD_BPS}bps threshold — holding position`;
   } else {
@@ -224,6 +288,7 @@ function computeOptimalAllocations(
   currentAllocations: number[],
   protocolApys: number[],
   protocolIds: string[],
+  epochContext?: EpochContext,
 ): number[] {
   const n = currentAllocations.length;
   if (n === 0) return [];
@@ -266,14 +331,25 @@ function computeOptimalAllocations(
   for (const cand of eligible) {
     const proposed = Array(n).fill(0);
     proposed[cand.i] = BPS_DENOM;
+
+    // Epoch cooldown: skip any candidate that requires exiting a gated position before
+    // it's been held long enough for accrued yield to exceed its flat exit fee. See the
+    // block comment above EPOCH_GATED_PROTOCOLS / epochCooldownBlocksExit.
+    const blockedByCooldown = protocolIds.some((id, i) =>
+      currentAllocations[i] > proposed[i] &&
+      epochCooldownBlocksExit(id, protocolApys[i], epochContext)
+    );
+    if (blockedByCooldown) continue;
+
     const gross = (computeWeightedApy(proposed, protocolApys) - currentApy) * 100; // bps
     const net = gross - computeExitCost(currentAllocations, proposed, protocolIds);
     if (!best || net > best.net) best = { alloc: proposed, net };
   }
 
-  // If no destination is profitable after costs, stay put. Returning the current
-  // allocation makes drift zero, so the caller's threshold check will not fire —
-  // the keeper holds rather than churning for a loss.
+  // If no destination is profitable after costs (or every profitable one is
+  // cooldown-blocked), stay put. Returning the current allocation makes drift zero, so
+  // the caller's threshold check will not fire — the keeper holds rather than churning
+  // for a loss, or forcing an exit that would realize one.
   if (!best || best.net <= 0) return [...currentAllocations];
   return best.alloc;
 }
