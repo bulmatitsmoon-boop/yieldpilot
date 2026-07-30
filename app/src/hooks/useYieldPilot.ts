@@ -384,7 +384,35 @@ export function useYieldPilot(vaultAddresses: string[]) {
             const winner = protocols[winnerIdx];
             const label = Buffer.from(winner.label as Buffer).toString("utf8").replace(/\0/g, "");
             const receiptFieldName = receiptFieldByLabel[label];
-            if (receiptFieldName) {
+
+            // deploy_to_* enforces a 10%-of-total-deposits minimum idle buffer (the same
+            // rule a keeper deploy respects) — trying to deploy the FULL deposited amount
+            // reverts the ENTIRE bundled transaction (deposit included) whenever that
+            // would push idle below the floor, which is exactly what happens depositing
+            // into a freshly-emptied vault. Reproduced live 2026-07-30 testing this
+            // feature: a same-size second deposit failed outright until this was added.
+            // Compute the max SAFE deploy amount using the contract's own idle formula
+            // (total_deposits - total_deployed, not the raw token balance — those can
+            // differ by a unit or two from rounding, so mirror the contract exactly) and
+            // never try to deploy more than that.
+            const MIN_IDLE_BPS = 1000n;
+            const BPS_DENOM = 10000n;
+            const SAFETY_MARGIN = 100n; // a little slack against any residual rounding drift
+            const totalDepositsBefore = BigInt((vaultRaw.totalDeposits as anchor.BN).toString());
+            const totalDeployedBefore = protocols.reduce(
+              (sum, p) => sum + BigInt((p.deployedBalance as anchor.BN).toString()),
+              0n
+            );
+            const idleBefore = totalDepositsBefore - totalDeployedBefore;
+            const amountBig = BigInt(amount.toString());
+            const idleAfterDeposit = idleBefore + amountBig;
+            const totalAfterDeposit = totalDepositsBefore + amountBig;
+            const minIdle = (totalAfterDeposit * MIN_IDLE_BPS) / BPS_DENOM;
+            let maxSafeDeploy = idleAfterDeposit > minIdle ? idleAfterDeposit - minIdle : 0n;
+            maxSafeDeploy = maxSafeDeploy > SAFETY_MARGIN ? maxSafeDeploy - SAFETY_MARGIN : 0n;
+            const safeDeployAmount = amountBig < maxSafeDeploy ? amountBig : maxSafeDeploy;
+
+            if (receiptFieldName && safeDeployAmount > 0n) {
               const res = await fetch(`/api/deploy-accounts?label=${encodeURIComponent(label)}`);
               if (res.ok) {
                 const { instructionName, accounts: apiAccounts, remainingAccounts } = await res.json();
@@ -406,7 +434,7 @@ export function useYieldPilot(vaultAddresses: string[]) {
 
                 const deployMethod = (program.methods as any)[instructionName];
                 if (typeof deployMethod === "function") {
-                  let builder = deployMethod(winnerIdx, amount).accounts(deployAccounts);
+                  let builder = deployMethod(winnerIdx, new anchor.BN(safeDeployAmount.toString())).accounts(deployAccounts);
                   if (remainingAccounts) {
                     builder = builder.remainingAccounts(
                       (remainingAccounts as string[]).map((pk) => ({ pubkey: new PublicKey(pk), isSigner: false, isWritable: false }))
