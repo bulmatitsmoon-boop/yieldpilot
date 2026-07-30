@@ -1,7 +1,12 @@
 "use client";
 
 import { useApys } from "@/hooks/useApys";
-import { Card, CardHeader, fmt } from "@/components/ui";
+// fmtTvl used to be redefined locally in this file — a second, independently-drifting
+// copy of the shared one in @/components/ui. That copy had no guard for missing TVL
+// (e.g. psol-sol, which has no live TVL source by design — see api/apys/route.ts) and
+// silently rendered the literal string "$NaNK" instead of "—". Import the shared,
+// already-fixed version instead of maintaining two.
+import { Card, CardHeader, fmt, fmtTvl } from "@/components/ui";
 import { useState, useEffect } from "react";
 
 // Only these protocol IDs have an on-chain deploy_to_* instruction — everything
@@ -16,12 +21,6 @@ const RISK_LABEL: Record<number, { label: string; color: string }> = {
   2: { label: "Medium", color: "var(--warn)" },
   3: { label: "High",   color: "var(--loss)" },
 };
-
-function fmtTvl(usd: number) {
-  if (usd >= 1_000_000_000) return `$${(usd / 1e9).toFixed(1)}B`;
-  if (usd >= 1_000_000)     return `$${(usd / 1e6).toFixed(0)}M`;
-  return `$${(usd / 1e3).toFixed(0)}K`;
-}
 
 function ILRiskModal({ onAccept, onDecline }: { onAccept: () => void; onDecline: () => void }) {
   return (
