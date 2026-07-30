@@ -163,7 +163,11 @@ export function TxBanner({ status, error, sig }: { status: string; error: string
 export function fmt(n: number, d = 2) {
   return n.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
 }
-export function fmtTvl(n: number) {
+export function fmtTvl(n: number | undefined | null) {
+  // A protocol can legitimately have no TVL figure (e.g. psol-sol has no live source and
+  // deliberately no hardcoded fallback — see api/apys/route.ts). Every caller here passes
+  // that straight through, so this must render "—" rather than crash on undefined.toLocaleString().
+  if (n == null || !Number.isFinite(n)) return "—";
   if (n >= 1e9) return `$${(n / 1e9).toFixed(2)}B`;
   if (n >= 1e6) return `$${(n / 1e6).toFixed(0)}M`;
   return `$${n.toLocaleString()}`;
