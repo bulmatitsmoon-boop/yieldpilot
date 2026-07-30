@@ -20,6 +20,8 @@ on:
   schedule:
     - cron: "9,39 * * * *"
   workflow_dispatch: {}
+permissions:
+  contents: write
 jobs:
   run-keeper:
     runs-on: ubuntu-latest
@@ -61,3 +63,14 @@ jobs:
         if: always()
         working-directory: keeper
         run: rm -f keeper.json
+
+      # Persists the last-processed signature per vault for the deposit watcher (see
+      # depositWatcher.ts) so consecutive runs never re-announce the same deposit,
+      # and never miss one either. Same auto-commit pattern build.yml already uses
+      # for IDL syncing — no new secret/Redis dependency needed.
+      - name: Commit deposit-watch state
+        if: always()
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: update deposit-watch state [skip ci]"
+          file_pattern: "keeper/state/deposit-watch.json"

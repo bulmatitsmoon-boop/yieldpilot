@@ -4,6 +4,7 @@ import { fetchAllApys } from "./apyFetcher";
 import { SolanaClient } from "./solanaClient";
 import { computeRebalanceDecision, shouldCompound } from "./rebalancer";
 import { notifyTelegram } from "./telegramNotify";
+import { checkNewDeposits } from "./depositWatcher";
 
 /**
  * run_once.ts — single-cycle keeper run for GitHub Actions scheduled workflow.
@@ -110,6 +111,16 @@ async function runCompound(client: SolanaClient) {
   }
 }
 
+async function runDepositWatch(client: SolanaClient) {
+  logger.info("── Deposit watch ──");
+  const vaults = await client.fetchAllVaults();
+  for (const { address, state } of vaults) {
+    await checkNewDeposits(client, address, state.name).catch(err => {
+      logger.warn(`Deposit watch failed (non-fatal): ${address.slice(0, 8)}... — ${err.message}`);
+    });
+  }
+}
+
 async function runHealthCheck(client: SolanaClient) {
   const balanceSol = await client.getKeeperBalance();
   if (balanceSol < 0.05) {
@@ -139,6 +150,7 @@ async function main() {
 
   await runApyPollAndRebalance(client);
   await runCompound(client);
+  await runDepositWatch(client);
   await runHealthCheck(client);
 
   logger.info("✓ Single run complete.");
