@@ -356,6 +356,72 @@ export function useYieldPilot(vaultAddresses: string[]) {
           postIxs.push(createCloseAccountInstruction(userTokenAccount, publicKey, publicKey));
         }
 
+        // Bundle a deploy_to_<winner> instruction right after deposit(), in the same
+        // atomic transaction — so this deposit lands directly in the earning protocol
+        // with zero idle time, instead of sitting idle until the next keeper cron cycle
+        // (~30 min, best-effort). Relies on the paired-deposit exception in lib.rs: any
+        // signer may call deploy_to_* as long as a matching deposit() for the same
+        // (vault, user) rides in the same transaction — mirrors the existing paired
+        // recall-on-withdraw exception exactly.
+        //
+        // Best-effort: if the winning protocol can't be determined, or its accounts
+        // can't be fetched, the deposit still goes through on its own — the keeper's
+        // next cycle picks up the idle balance as a fallback, same as before this
+        // existed. A deposit must never fail just because the "instant deploy" bonus
+        // couldn't be arranged.
+        const receiptFieldByLabel: Record<string, string> = {
+          "kamino-usdc": "vaultCollateralAccount",
+          "kamino-sol": "vaultCollateralAccount",
+          "marinade-sol": "vaultMsolAccount",
+          "jito-sol": "vaultLstAccount",
+          "psol-sol": "vaultLstAccount",
+          "solend-usdc": "vaultCollateralAccount",
+        };
+        try {
+          const protocols = (vaultRaw.protocols as any[]).slice(0, vaultRaw.protocolCount as number);
+          const winnerIdx = protocols.findIndex((p) => (p.targetBps as anchor.BN).eqn(10000));
+          if (winnerIdx !== -1) {
+            const winner = protocols[winnerIdx];
+            const label = Buffer.from(winner.label as Buffer).toString("utf8").replace(/\0/g, "");
+            const receiptFieldName = receiptFieldByLabel[label];
+            if (receiptFieldName) {
+              const res = await fetch(`/api/deploy-accounts?label=${encodeURIComponent(label)}`);
+              if (res.ok) {
+                const { instructionName, accounts: apiAccounts, remainingAccounts } = await res.json();
+                const deployAccounts: Record<string, PublicKey> = {
+                  keeper: publicKey,
+                  vault: vaultPubkey,
+                  vaultAuthority: vaultAuthorityPda,
+                  vaultTokenAccount,
+                  [receiptFieldName]: new PublicKey((winner.vaultReceiptAccount as PublicKey).toBase58()),
+                };
+                for (const [key, val] of Object.entries(apiAccounts as Record<string, string | undefined>)) {
+                  if (val) deployAccounts[key] = new PublicKey(val);
+                }
+                // Both possible sysvar field names resolve to the same real account —
+                // whichever one this instruction's IDL actually declares is the one
+                // Anchor will use; harmless to set both.
+                deployAccounts.txInstructionsSysvar = SYSVAR_INSTRUCTIONS_PUBKEY;
+                deployAccounts.instructionSysvar = SYSVAR_INSTRUCTIONS_PUBKEY;
+
+                const deployMethod = (program.methods as any)[instructionName];
+                if (typeof deployMethod === "function") {
+                  let builder = deployMethod(winnerIdx, amount).accounts(deployAccounts);
+                  if (remainingAccounts) {
+                    builder = builder.remainingAccounts(
+                      (remainingAccounts as string[]).map((pk) => ({ pubkey: new PublicKey(pk), isSigner: false, isWritable: false }))
+                    );
+                  }
+                  postIxs.push(await builder.instruction());
+                }
+              }
+            }
+          }
+        } catch {
+          // Instant-deploy bonus unavailable this time — deposit still proceeds below,
+          // keeper's next cycle deploys the idle balance as a fallback.
+        }
+
         return program.methods
           .deposit(amount)
           .accounts({
