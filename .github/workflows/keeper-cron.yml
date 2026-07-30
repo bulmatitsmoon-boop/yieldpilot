@@ -68,9 +68,9 @@ jobs:
       # depositWatcher.ts) so consecutive runs never re-announce the same deposit,
       # and never miss one either. Same auto-commit pattern build.yml already uses
       # for IDL syncing — no new secret/Redis dependency needed.
-      - name: Commit deposit-watch state
+      - name: Commit deposit-watch + epoch-entry state
         if: always()
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "chore: update deposit-watch state [skip ci]"
-          file_pattern: "keeper/state/deposit-watch.json"
+          commit_message: "chore: update keeper state [skip ci]"
+          file_pattern: "keeper/state/deposit-watch.json keeper/state/epoch-entries.json"
