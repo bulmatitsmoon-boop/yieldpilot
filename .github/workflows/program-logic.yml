@@ -1,19 +1,22 @@
 # Pure-logic checks that mirror the on-chain program's accounting, runnable without a build,
 # a validator, or a wallet. verify-settle-recall.mjs mirrors lib.rs's settle_recall and
 # asserts the proportional recall accounting (full/partial/gain/loss, no residue drift).
-# Keep the mirror in sync if the Rust changes.
+# verify-clear-phantom.mjs mirrors clear_phantom_deployed's cleanup accounting.
+# Keep each mirror in sync if the Rust changes.
 name: Program Logic
 
 on:
   pull_request:
     paths:
       - "tests/verify-settle-recall.mjs"
+      - "tests/verify-clear-phantom.mjs"
       - "programs/yieldpilot/src/lib.rs"
       - ".github/workflows/program-logic.yml"
   push:
     branches: [main]
     paths:
       - "tests/verify-settle-recall.mjs"
+      - "tests/verify-clear-phantom.mjs"
       - "programs/yieldpilot/src/lib.rs"
 
 jobs:
@@ -27,3 +30,14 @@ jobs:
         with:
           node-version: "20"
       - run: node tests/verify-settle-recall.mjs
+
+  clear-phantom:
+    name: clear_phantom_deployed accounting
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: node tests/verify-clear-phantom.mjs
