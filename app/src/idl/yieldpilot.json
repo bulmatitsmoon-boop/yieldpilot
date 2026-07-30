@@ -31,6 +31,64 @@
       "args": []
     },
     {
+      "name": "accrue_sol_lst",
+      "docs": [
+        "Books the REAL accrued yield on an SPL-stake-pool position (Jito, PSOL) into",
+        "total_deposits, without recalling anything — no CPI, no exit fee, no funds move.",
+        "",
+        "An LST's pool account stores `total_lamports` (real SOL backing the pool) and",
+        "`pool_token_supply` (LST tokens in existence) directly in its own account data —",
+        "same verified offsets (258/266) the live-rates feature already reads for APY",
+        "(see api/apys/route.ts fetchStakePool), reused here rather than guessed fresh.",
+        "exchange_rate = total_lamports / pool_token_supply, and it only ever rises as",
+        "staking rewards land — this is exactly why compound() being a routine no-op left",
+        "yield on fee-bearing protocols permanently invisible: gains were only ever booked",
+        "at RECALL time (settle_recall), and nothing recalls without a real reason to.",
+        "",
+        "SAFE BY CONSTRUCTION, same shape as reconcile()/clear_phantom_deployed: reads only",
+        "account data it already trusts (the vault's own receipt-token balance, and the",
+        "registered stake pool's own account — the SAME account deploy_to_sol_lst and",
+        "recall_from_sol_lst already decode fields from at fixed offsets) and can only ever",
+        "move deployed_balance UP to match the real, computed current value — never",
+        "invents a number, never moves funds, never pays a fee."
+      ],
+      "discriminator": [
+        2,
+        237,
+        65,
+        187,
+        218,
+        21,
+        217,
+        118
+      ],
+      "accounts": [
+        {
+          "name": "keeper",
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "vault_lst_account"
+        },
+        {
+          "name": "stake_pool",
+          "docs": [
+            "assert_state_matches in the handler; only its raw account data is read (no CPI)."
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "protocol_index",
+          "type": "u8"
+        }
+      ]
+    },
+    {
       "name": "add_to_whitelist",
       "discriminator": [
         157,
@@ -2314,6 +2372,19 @@
         219,
         13
       ]
+    },
+    {
+      "name": "YieldAccrued",
+      "discriminator": [
+        195,
+        121,
+        41,
+        184,
+        183,
+        9,
+        52,
+        221
+      ]
     }
   ],
   "errors": [
@@ -2836,6 +2907,26 @@
           },
           {
             "name": "perf_fee",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "YieldAccrued",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "protocol_index",
+            "type": "u8"
+          },
+          {
+            "name": "gain",
             "type": "u64"
           }
         ]
