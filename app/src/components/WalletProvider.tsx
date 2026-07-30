@@ -43,9 +43,6 @@ export function WalletContextProvider({ children }: { children: React.ReactNode 
   //    in the app actually called it — see project memory, 2026-07-09 audit.
   // Computed client-side (window.location.origin) rather than hardcoded so
   // this works correctly on preview deployments too, not just production.
-  // No WebSocket subscriptions are used anywhere in this app (confirmed via
-  // a full-repo search), so a plain HTTP JSON-RPC proxy is sufficient — the
-  // wallet-adapter's default derived wsEndpoint is simply never used.
   const endpoint = useMemo(() => {
     if (typeof window !== "undefined") {
       return `${window.location.origin}/api/rpc`;
@@ -53,8 +50,34 @@ export function WalletContextProvider({ children }: { children: React.ReactNode 
     return SSR_FALLBACK_RPC_URL; // never actually reaches a browser
   }, []);
 
+  // WEBSOCKET FIX (2026-07-30): the comment that used to sit here claimed "no
+  // WebSocket subscriptions are used anywhere in this app... the wallet-adapter's
+  // default derived wsEndpoint is simply never used." That was wrong. web3.js's
+  // Connection.confirmTransaction() subscribes over WebSocket internally for
+  // "confirmed"/"finalized" commitment REGARDLESS of whether app code explicitly
+  // calls .onSignature() — a source grep for "WebSocket" never turns that up,
+  // because it's inside the library's own default confirm behavior, not visible
+  // in application code. Left unconfigured, web3.js auto-derives the WS endpoint
+  // by swapping https->wss on the SAME url — i.e. wss://<site>/api/rpc — but
+  // /api/rpc is a plain Next.js POST route with no WebSocket upgrade support
+  // (confirmed live: the upgrade attempt gets HTTP 405). The subscription can
+  // never succeed, and every withdraw/deposit through the real site UI hung
+  // forever on "Confirming on-chain..." — reproduced live via a connected
+  // Phantom session, traced to this exact cause.
+  //
+  // Fix: point wsEndpoint at a real, working, keyless public WS RPC. Subscription
+  // traffic is just "tell me when this one signature confirms" — lightweight,
+  // and unlike the HTTP endpoint it carries no paid API key to protect.
+  // ConnectionProvider's own default config is `{ commitment: 'confirmed' }` — passing
+  // a `config` prop at all REPLACES that default outright (it isn't merged), so this
+  // must restate `commitment` explicitly or every RPC call silently loses it.
+  const connectionConfig = useMemo(() => ({
+    commitment: "confirmed" as const,
+    wsEndpoint: NETWORK === "devnet" ? "wss://api.devnet.solana.com" : "wss://api.mainnet-beta.solana.com",
+  }), []);
+
   return (
-    <Conn endpoint={endpoint}>
+    <Conn endpoint={endpoint} config={connectionConfig}>
       <WProv wallets={wallets} autoConnect>
         <WMProv>{children}</WMProv>
       </WProv>
