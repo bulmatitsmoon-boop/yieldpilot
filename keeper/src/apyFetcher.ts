@@ -45,6 +45,13 @@ const KAMINO_RESERVE: Record<string, string> = {
   "kamino-usdc": "D6q6wuQSrifJKZYpR1M8R4YawnLDtDsMmWM1NbBmgJ59",
   "kamino-sol":  "d4A2prbA2whesmvHaL88BH6Ewn5N4bTSU2Ze8P6Bc4Q",
 };
+// Kamino "Maple Market" — a separate isolated USDC reserve on the SAME Kamino program,
+// registered 2026-07-30 as protocol slot "kamino-usdc-maple" after being proven end-to-end
+// (deploy + recall) against real cloned mainnet state on the local-validator harness. Needs
+// its own API call since Kamino's reserves/metrics endpoint is scoped per-market.
+const KAMINO_MAPLE_MARKET = "6WEGfej9B9wjxRs6t4BYpb9iCXd8CpTpJ8fVSNzHCC5y";
+const KAMINO_MAPLE_USDC_RESERVE = "Atj6UREVWa7WxbF2EMKNyfmYUY1U1txughe2gjhcPDCo";
+
 const SOLEND_USDC_RESERVE = "BgxfHJDzm44T7XG68MYKx7YisTjZu73tVovyZSjJMpmw";
 // SPL stake pools we read directly. Adding another LST is one entry here plus one line
 // in META and one in rebalancer.ts's SAFE_PROTOCOLS — no new fetch logic, because every
@@ -59,6 +66,11 @@ const SPL_STAKE_POOLS: Record<string, string> = {
 /** Static display metadata only — never a rate. */
 const META: Record<string, { name: string; asset: string; riskScore: number; tvlUsd: number }> = {
   "kamino-usdc":  { name: "Kamino",   asset: "USDC", riskScore: 1, tvlUsd:  23_525_228 },
+  // Maple Market's USDC reserve is smaller and isolated (maxLtv=0 — deposit-only, not
+  // usable as borrow collateral there). No hardcoded TVL guess here since it moves faster
+  // than the main market's; real value comes from the live fetch, this is a display
+  // placeholder only used before the first successful fetch.
+  "kamino-usdc-maple": { name: "Kamino (Maple)", asset: "USDC", riskScore: 2, tvlUsd: 2_148_990 },
   "kamino-sol":   { name: "Kamino",   asset: "SOL",  riskScore: 1, tvlUsd:  17_698_922 },
   "marinade-sol": { name: "Marinade", asset: "SOL",  riskScore: 1, tvlUsd: 181_896_238 },
   "solend-usdc":  { name: "Solend",   asset: "USDC", riskScore: 1, tvlUsd:   7_143_891 },
@@ -96,6 +108,25 @@ async function fetchKamino(): Promise<Record<string, number>> {
     logger.warn("Kamino APY fetch failed", { error: err.message });
   }
   return out;
+}
+
+/** Kamino Maple Market — same reserves/metrics shape as the main market, different market ID. */
+async function fetchKaminoMaple(): Promise<number | null> {
+  try {
+    const { data } = await axios.get(
+      `https://api.kamino.finance/kamino-market/${KAMINO_MAPLE_MARKET}/reserves/metrics`,
+      { timeout: TIMEOUT }
+    );
+    if (!Array.isArray(data)) return null;
+    const r = data.find((x: any) => x?.reserve === KAMINO_MAPLE_USDC_RESERVE);
+    const apy = parseFloat(r?.supplyApy) * 100;
+    if (sane(apy)) return apy;
+    logger.warn("kamino-usdc-maple: supplyApy out of band", { raw: r?.supplyApy });
+    return null;
+  } catch (err: any) {
+    logger.warn("Kamino Maple APY fetch failed", { error: err.message });
+    return null;
+  }
 }
 
 /** Marinade — first-party realized mSOL yield (rewards land per epoch, so an LST rate is
@@ -235,19 +266,20 @@ async function fetchSplStakePool(protocolId: string, pool: string): Promise<numb
 export async function fetchAllApys(): Promise<ProtocolApy[]> {
   logger.info("Fetching APYs from first-party sources...");
 
-  const [kamino, marinade, solend, jito, psol] = await Promise.all([
-    fetchKamino(), fetchMarinade(), fetchSolend(),
+  const [kamino, kaminoMaple, marinade, solend, jito, psol] = await Promise.all([
+    fetchKamino(), fetchKaminoMaple(), fetchMarinade(), fetchSolend(),
     fetchSplStakePool("jito-sol", SPL_STAKE_POOLS["jito-sol"]),
     fetchSplStakePool("psol-sol", SPL_STAKE_POOLS["psol-sol"]),
   ]);
 
   const live: Record<string, number | null> = {
-    "kamino-usdc":  kamino["kamino-usdc"] ?? null,
-    "kamino-sol":   kamino["kamino-sol"] ?? null,
-    "marinade-sol": marinade,
-    "solend-usdc":  solend,
-    "jito-sol":     jito,
-    "psol-sol":     psol,
+    "kamino-usdc":       kamino["kamino-usdc"] ?? null,
+    "kamino-usdc-maple": kaminoMaple,
+    "kamino-sol":        kamino["kamino-sol"] ?? null,
+    "marinade-sol":      marinade,
+    "solend-usdc":       solend,
+    "jito-sol":          jito,
+    "psol-sol":          psol,
   };
 
   const now = new Date();

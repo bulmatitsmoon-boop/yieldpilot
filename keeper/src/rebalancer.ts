@@ -14,6 +14,7 @@ const BPS_DENOM = 10_000;
 // at a net loss.
 const EXIT_COST_BPS: Record<string, number> = {
   "kamino-usdc":      0,
+  "kamino-usdc-maple": 0, // same Kamino lending-market mechanics, no exit fee — proven on the local-validator harness before this was registered
   "kamino-sol":       0,
   "solend-usdc":      0,
   "marinade-sol":     30, // ~0.3% liquid unstake fee
@@ -272,6 +273,7 @@ function computeExitCost(
 
 const SAFE_PROTOCOLS = new Set([
   "kamino-usdc",
+  "kamino-usdc-maple",
   "kamino-sol",
   "solend-usdc",
   "marinade-sol",

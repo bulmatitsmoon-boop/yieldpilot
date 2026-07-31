@@ -37,6 +37,11 @@ const KAMINO_RESERVE: Record<string, string> = {
   "kamino-usdc": "D6q6wuQSrifJKZYpR1M8R4YawnLDtDsMmWM1NbBmgJ59",
   "kamino-sol":  "d4A2prbA2whesmvHaL88BH6Ewn5N4bTSU2Ze8P6Bc4Q",
 };
+// Maple Market — separate isolated Kamino USDC reserve, registered 2026-07-30 as
+// "kamino-usdc-maple" after proving deploy+recall end-to-end on the local-validator
+// harness against real cloned mainnet state. Own market ID, own API call.
+const KAMINO_MAPLE_MARKET = "6WEGfej9B9wjxRs6t4BYpb9iCXd8CpTpJ8fVSNzHCC5y";
+const KAMINO_MAPLE_USDC_RESERVE = "Atj6UREVWa7WxbF2EMKNyfmYUY1U1txughe2gjhcPDCo";
 const SOLEND_USDC_RESERVE = "BgxfHJDzm44T7XG68MYKx7YisTjZu73tVovyZSjJMpmw";
 const JITO_POOL = "Jito4APyf642JPZPx3hGc6WWJ8zPKtRbRs4P815Awbb";
 // PSOL runs on the same standard SPL Stake Pool program as Jito (SPoo1Ku8…, verified
@@ -54,6 +59,10 @@ const META = [
   { protocolId: "kamino-sol",       name: "Kamino",   asset: "SOL",      riskScore: 1, tvlUsd:  17_698_922 },
   { protocolId: "marinade-sol",     name: "Marinade", asset: "SOL",      riskScore: 1, tvlUsd: 181_896_238 },
   { protocolId: "kamino-usdc",      name: "Kamino",   asset: "USDC",     riskScore: 1, tvlUsd:  23_525_228 },
+  // Isolated market, no-collateral (maxLtv=0) — smaller and less battle-tested than the
+  // main pool, hence riskScore 2 not 1. TVL is real but small (~$2.1M) and moves faster
+  // than the main market's, so no stale hardcoded guess kept here beyond a rough anchor.
+  { protocolId: "kamino-usdc-maple", name: "Kamino (Maple)", asset: "USDC", riskScore: 2, tvlUsd: 2_148_990 },
   { protocolId: "solend-usdc",      name: "Solend",   asset: "USDC",     riskScore: 1, tvlUsd:   7_143_891 },
   // LP pools. TVL is NOT hardcoded here — both fetchers return live TVL, and the
   // placeholder that used to sit here claimed $190M/$120M against a real ~$6M/~$26M.
@@ -64,7 +73,7 @@ const META = [
 ];
 
 const COLORS: Record<string, string> = {
-  "kamino-usdc": "#3FE0A0", "kamino-sol": "#22B37E", "jito-sol": "#10B981",
+  "kamino-usdc": "#3FE0A0", "kamino-usdc-maple": "#2BB388", "kamino-sol": "#22B37E", "jito-sol": "#10B981",
   "psol-sol": "#8B5CF6",
   "marinade-sol": "#06B6D4", "drift-sol": "#14B8A6", "solend-usdc": "#34D399",
   "raydium-usdc-sol": "#EF4444", "orca-sol-usdc": "#EF4444",
@@ -121,6 +130,17 @@ async function fetchKamino(): Promise<Record<string, Live>> {
     }
   } catch { /* leave empty — caller falls back to last-known */ }
   return out;
+}
+
+/** Maple Market — separate market ID from the main Kamino pool, own API call. */
+async function fetchKaminoMaple(): Promise<Live | null> {
+  try {
+    const arr = await tryFetch(`https://api.kamino.finance/kamino-market/${KAMINO_MAPLE_MARKET}/reserves/metrics`);
+    if (!Array.isArray(arr)) return null;
+    const r = arr.find((x: any) => x?.reserve === KAMINO_MAPLE_USDC_RESERVE);
+    const apy = parseFloat(r?.supplyApy) * 100;
+    return sane(apy) ? { apyPercent: apy, tvlUsd: Number(r?.totalSupply) || undefined } : null;
+  } catch { return null; }
 }
 
 /** Marinade — first-party realized mSOL yield. An LST's rate is inherently a recent
@@ -285,14 +305,15 @@ async function writeKnown(id: string, k: Known) {
 }
 
 export async function GET(_req: NextRequest) {
-  const [kamino, marinade, solend, jito, psol, raydium, orca] = await Promise.all([
-    fetchKamino(), fetchMarinade(), fetchSolend(),
+  const [kamino, kaminoMaple, marinade, solend, jito, psol, raydium, orca] = await Promise.all([
+    fetchKamino(), fetchKaminoMaple(), fetchMarinade(), fetchSolend(),
     fetchStakePool(JITO_POOL), fetchStakePool(PSOL_POOL),
     fetchRaydium(), fetchOrca(),
   ]);
 
   const live: Record<string, Live | null> = {
     "kamino-usdc":      kamino["kamino-usdc"] ?? null,
+    "kamino-usdc-maple": kaminoMaple,
     "kamino-sol":       kamino["kamino-sol"] ?? null,
     "marinade-sol":     marinade,
     "solend-usdc":      solend,
