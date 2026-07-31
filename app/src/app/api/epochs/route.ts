@@ -66,10 +66,37 @@ async function getNetworkEpoch() {
   };
 }
 
+const MIN_SANE_APY = 0.05;
+const MAX_SANE_APY = 25;
+const sane = (v: unknown): v is number =>
+  typeof v === "number" && Number.isFinite(v) && v >= MIN_SANE_APY && v <= MAX_SANE_APY;
+
+/** Mirrors api/apys/route.ts's findLastEpochRate exactly — locates the one-epoch-ago
+ *  (supply, lamports) pair by magnitude (must be within a few percent of today's, and
+ *  imply a rate just below today's, since an LST rate only grows) rather than trusting
+ *  a hardcoded offset, which has previously been off-by-one-byte and silently produced a
+ *  256x-wrong-but-plausible-looking rate. Exactly one candidate is required. */
+function findLastEpochRate(d: Buffer, supplyNow: number, lamportsNow: number, rateNow: number): number | null {
+  const matches: number[] = [];
+  for (let o = 282; o + 16 <= d.length; o++) {
+    const supply = Number(d.readBigUInt64LE(o));
+    const lamports = Number(d.readBigUInt64LE(o + 8));
+    if (!Number.isFinite(supply) || !Number.isFinite(lamports) || supply <= 0) continue;
+    const magSupply = supply / supplyNow;
+    const magLamports = lamports / lamportsNow;
+    if (magSupply < 0.90 || magSupply > 1.02) continue;
+    if (magLamports < 0.90 || magLamports > 1.02) continue;
+    const rate = lamports / supply;
+    if (!(rate > 1.0 && rate < rateNow)) continue;
+    matches.push(rate);
+  }
+  return matches.length === 1 ? matches[0] : null;
+}
+
 /** Same SPL Stake Pool account layout as api/apys/route.ts's fetchStakePool, plus the
  *  last-update-epoch field at offset 274 that page doesn't need. */
 async function fetchStakePoolEpochStatus(poolAddress: string): Promise<{
-  lastUpdateEpoch: number; rateNow: number;
+  lastUpdateEpoch: number; rateNow: number; apyPercent: number | null;
 } | null> {
   try {
     const result = await rpc("getAccountInfo", [poolAddress, { encoding: "base64", commitment: "confirmed" }]);
@@ -85,7 +112,11 @@ async function fetchStakePoolEpochStatus(poolAddress: string): Promise<{
     if (!Number.isFinite(rateNow) || rateNow < 1.0 || rateNow > 1.6) return null;
     if (!Number.isFinite(lastUpdateEpoch) || lastUpdateEpoch <= 0) return null;
 
-    return { lastUpdateEpoch, rateNow };
+    const rateLast = findLastEpochRate(d, supplyNow, lamportsNow, rateNow);
+    const EPOCHS_PER_YEAR = 182.5; // ~2 epochs/day
+    const apy = rateLast !== null ? (Math.pow(rateNow / rateLast, EPOCHS_PER_YEAR) - 1) * 100 : null;
+
+    return { lastUpdateEpoch, rateNow, apyPercent: sane(apy) ? apy : null };
   } catch { return null; }
 }
 
@@ -114,6 +145,7 @@ export async function GET(_req: NextRequest) {
       epochsBehind: jito ? network.epoch - jito.lastUpdateEpoch : null,
       isStale: jito ? jito.lastUpdateEpoch < network.epoch : null,
       epochVerified: jito !== null,
+      apyPercent: jito?.apyPercent ?? null,
     },
     {
       protocolId: "psol-sol",
@@ -122,6 +154,7 @@ export async function GET(_req: NextRequest) {
       epochsBehind: psol ? network.epoch - psol.lastUpdateEpoch : null,
       isStale: psol ? psol.lastUpdateEpoch < network.epoch : null,
       epochVerified: psol !== null,
+      apyPercent: psol?.apyPercent ?? null,
     },
     {
       protocolId: "marinade-sol",
