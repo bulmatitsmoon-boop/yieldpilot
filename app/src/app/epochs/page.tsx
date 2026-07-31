@@ -47,15 +47,24 @@ export default function EpochsPage() {
         marginBottom: 24, border: "1px solid var(--line)", position: "relative", zIndex: 1,
       }}>
         {[
-          { label: "Current epoch", value: network ? String(network.epoch) : "—" },
-          { label: "Epoch length", value: network ? `~${fmt(network.epochLengthDays, 2)}d` : "—" },
-          { label: "Time to next epoch", value: network ? fmtDuration(network.estSecondsToNextEpoch) : "—" },
-        ].map(({ label, value }) => (
+          { label: "Current epoch", value: network ? String(network.epoch) : "—", sub: undefined as string | undefined },
+          // Full precision, no rounding indicator. Note this genuinely isn't a fixed protocol
+          // constant like slotsInEpoch (always exactly 432,000) — it's slotsInEpoch x the
+          // CURRENT live average slot time, and slot time drifts with network conditions. This
+          // is the real computed value from that live sample, not a smoothed estimate.
+          {
+            label: "Epoch length",
+            value: network ? `${fmt(network.epochLengthDays, 6)}d` : "—",
+            sub: network ? `= ${fmtDuration(Math.round(network.epochLengthDays * 86_400))} exactly, from the live slot-time sample below` : undefined,
+          },
+          { label: "Time to next epoch", value: network ? fmtDuration(network.estSecondsToNextEpoch) : "—", sub: undefined as string | undefined },
+        ].map(({ label, value, sub }) => (
           <div key={label} style={{ background: "var(--ink-800)", padding: "20px 24px" }}>
             <div className="mono-num" style={{ fontSize: 22, fontWeight: 500, color: "var(--text-hi)", marginBottom: 4 }}>
               {value}
             </div>
             <div style={{ fontSize: 12, color: "var(--text-mid)" }}>{label}</div>
+            {sub && <div style={{ fontSize: 10, color: "var(--text-low)", marginTop: 4 }}>{sub}</div>}
           </div>
         ))}
       </div>
