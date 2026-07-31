@@ -122,7 +122,11 @@ export default function EpochsPage() {
                 {p.apyPercent != null ? `${fmt(p.apyPercent)}%` : "—"}
               </span>
               <span className="mono-num" style={{ textAlign: "right", fontSize: 13, color: "var(--text-mid)" }}>
-                {p.lastUpdateEpoch != null ? `Epoch ${p.lastUpdateEpoch}` : "—"}
+                {p.lastUpdateEpoch != null ? (
+                  <span title={p.epochFieldLabel ? `(${p.epochFieldLabel})` : undefined}>
+                    Epoch {p.lastUpdateEpoch}
+                  </span>
+                ) : "—"}
               </span>
               <span style={{ textAlign: "right" }}>
                 {!p.epochVerified ? (
@@ -152,10 +156,12 @@ export default function EpochsPage() {
 
       <p style={{ marginTop: 20, color: "var(--text-low)", fontSize: 11, lineHeight: 1.65, position: "relative", zIndex: 1 }}>
         &quot;Last updated&quot; for Jito and PSOL is read directly from each protocol&apos;s own
-        on-chain stake pool account — not an estimate. Marinade&apos;s rate comes from their own
-        API; we do not yet have a verified on-chain field for its last-update epoch, so no
-        staleness badge is shown for it. Epoch length and time-to-next-epoch are derived from
-        live network slot timing and will vary slightly as validators speed up or slow down.
+        on-chain stake pool account (its whole-pool balance refresh) — not an estimate. Marinade
+        has no equivalent single field for that, but its account does store the epoch its crank
+        last ran a stake-delta rebalance, which is shown instead (hover the epoch number for the
+        exact label) — a real on-chain signal, though measuring a slightly different thing than
+        Jito/PSOL&apos;s field. Epoch length and time-to-next-epoch are derived from live network
+        slot timing and will vary slightly as validators speed up or slow down.
       </p>
     </div>
   );
