@@ -19,6 +19,7 @@ export function Header() {
     ["Home", "/"],
     ["Dashboard", "/dashboard"],
     ["Live Rates", "/apys"],
+    ["Epochs", "/epochs"],
     ["Whitepaper", "/whitepaper"],
     ...(isAdmin ? [["Admin", "/admin"] as [string, string]] : []),
   ];
