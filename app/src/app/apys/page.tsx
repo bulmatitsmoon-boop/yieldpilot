@@ -13,7 +13,7 @@ import { useState, useEffect } from "react";
 // else (Drift, and LP pools when opted in) must never get a "ROUTING HERE" /
 // "ROUTING HERE" badge, regardless of riskScore or APY rank.
 const ROUTABLE_PROTOCOL_IDS = new Set([
-  "kamino-usdc", "kamino-sol", "marinade-sol", "jito-sol", "psol-sol", "solend-usdc",
+  "kamino-usdc", "kamino-usdc-maple", "kamino-sol", "marinade-sol", "jito-sol", "psol-sol", "solend-usdc",
 ]);
 
 const RISK_LABEL: Record<number, { label: string; color: string }> = {
@@ -130,7 +130,7 @@ const LP_PROTOCOL_IDS = new Set(["raydium-usdc-sol", "orca-sol-usdc"]);
 
 // Purely a display grouping for the type-filter tabs — not a routability signal.
 const PROTOCOL_TYPE: Record<string, "Lending" | "Liquid stake" | "LP"> = {
-  "kamino-usdc": "Lending", "kamino-sol": "Lending", "solend-usdc": "Lending", "drift-sol": "Lending",
+  "kamino-usdc": "Lending", "kamino-usdc-maple": "Lending", "kamino-sol": "Lending", "solend-usdc": "Lending", "drift-sol": "Lending",
   "marinade-sol": "Liquid stake", "jito-sol": "Liquid stake", "psol-sol": "Liquid stake",
   "raydium-usdc-sol": "LP", "orca-sol-usdc": "LP",
 };

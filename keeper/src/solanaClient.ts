@@ -38,6 +38,20 @@ const KAMINO_SOL_COLLATERAL_MINT = new PublicKey("2UywZrUdyqs5vDchy7fKQJKau2RVyu
 const KAMINO_SOL_COLLATERAL_SUPPLY = new PublicKey("8NXMyRD91p3nof61BTkJvrfpGTASHygz1cUvc3HvwyGS"); // verified from reserve.collateral.supplyVault
 const KAMINO_SCOPE_PRICES = new PublicKey("3t4JZcueEzTbVP6kLxXrL3VpWx45jDer4eqysweBchNH"); // Scope price feed used by both USDC and SOL reserves
 
+// Kamino "Maple Market" — a separate, isolated USDC reserve on the SAME Kamino program.
+// Registered 2026-07-30 as protocol slot "kamino-usdc-maple" (0% initial target — the
+// rebalancer's normal cost/benefit comparison decides if/when it wins real weight).
+// Proven end-to-end (deploy + recall, both directions) against real cloned mainnet state
+// via the local-validator harness before this was wired up — see project memory.
+// No new on-chain code: reuses deploy_to_kamino/recall_from_kamino exactly, just with a
+// different reserve/market/authority/liquidity-supply/collateral-mint account set.
+const KAMINO_MAPLE_MARKET = new PublicKey("6WEGfej9B9wjxRs6t4BYpb9iCXd8CpTpJ8fVSNzHCC5y");
+const KAMINO_MAPLE_MARKET_AUTHORITY = new PublicKey("6QbtpY2jDNcncRFmVf343NThnCdaY8gCAsYATPnYQR9g"); // PDA ["lma", market]
+const KAMINO_MAPLE_USDC_RESERVE = new PublicKey("Atj6UREVWa7WxbF2EMKNyfmYUY1U1txughe2gjhcPDCo");
+const KAMINO_MAPLE_USDC_LIQUIDITY_SUPPLY = new PublicKey("BBcwMNSMyhhBnYE9pevEvkxKHGzTafMP9v3j7Kk7nAWM");
+const KAMINO_MAPLE_USDC_COLLATERAL_MINT = new PublicKey("6M89FWrQaqcy3domy85J1a1wVMnviL86WeUqbqTXf1qb");
+const KAMINO_MAPLE_USDC_COLLATERAL_SUPPLY = new PublicKey("25x4aEFoJE3bk4sdNLgHrrmchyop1JvcmGA4ccA6tWWT");
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Marinade mainnet constants
 // ─────────────────────────────────────────────────────────────────────────────
@@ -345,6 +359,27 @@ export class SolanaClient {
     };
   }
 
+  /** Same shape as getKaminoAccounts, pointed at the Maple Market's isolated USDC reserve. */
+  getKaminoMapleAccounts(vaultPubkey: PublicKey, vaultState: VaultState): KaminoAccounts {
+    const vaultAuthority = this.getVaultAuthority(vaultPubkey, vaultState.authorityBump);
+    const vaultCollateralAccount = getAssociatedTokenAddressSync(
+      KAMINO_MAPLE_USDC_COLLATERAL_MINT,
+      vaultAuthority,
+      true
+    );
+    return {
+      vaultAuthority,
+      vaultCollateralAccount,
+      reserve: KAMINO_MAPLE_USDC_RESERVE,
+      lendingMarket: KAMINO_MAPLE_MARKET,
+      marketAuthority: KAMINO_MAPLE_MARKET_AUTHORITY,
+      liquidityMint: USDC_MINT,
+      liquiditySupply: KAMINO_MAPLE_USDC_LIQUIDITY_SUPPLY,
+      collateralMint: KAMINO_MAPLE_USDC_COLLATERAL_MINT,
+      collateralSupply: KAMINO_MAPLE_USDC_COLLATERAL_SUPPLY,
+    };
+  }
+
   // ── Transaction helpers ───────────────────────────────────────────────────
 
   /**
@@ -472,11 +507,14 @@ export class SolanaClient {
     vaultAddress: string,
     protocolIndex: number,
     amount: anchor.BN,
-    oracleAccounts: PublicKey[] = [KAMINO_PROGRAM_ID, KAMINO_PROGRAM_ID, KAMINO_PROGRAM_ID, KAMINO_SCOPE_PRICES]
+    oracleAccounts: PublicKey[] = [KAMINO_PROGRAM_ID, KAMINO_PROGRAM_ID, KAMINO_PROGRAM_ID, KAMINO_SCOPE_PRICES],
+    // Lets a second (or third...) Kamino reserve reuse this exact same on-chain
+    // instruction with a different account set — see getKaminoMapleAccounts.
+    kaminoAccountsOverride?: KaminoAccounts
   ): Promise<string | null> {
     const vaultPubkey = new PublicKey(vaultAddress);
     const vault = await this.fetchVault(vaultAddress);
-    const kamino = this.getKaminoAccounts(vaultPubkey, vault);
+    const kamino = kaminoAccountsOverride ?? this.getKaminoAccounts(vaultPubkey, vault);
 
     return this.sendWithRetry(
       () =>
@@ -514,11 +552,12 @@ export class SolanaClient {
     vaultAddress: string,
     protocolIndex: number,
     collateralAmount: anchor.BN,
-    oracleAccounts: PublicKey[] = [KAMINO_PROGRAM_ID, KAMINO_PROGRAM_ID, KAMINO_PROGRAM_ID, KAMINO_SCOPE_PRICES]
+    oracleAccounts: PublicKey[] = [KAMINO_PROGRAM_ID, KAMINO_PROGRAM_ID, KAMINO_PROGRAM_ID, KAMINO_SCOPE_PRICES],
+    kaminoAccountsOverride?: KaminoAccounts
   ): Promise<string | null> {
     const vaultPubkey = new PublicKey(vaultAddress);
     const vault = await this.fetchVault(vaultAddress);
-    const kamino = this.getKaminoAccounts(vaultPubkey, vault);
+    const kamino = kaminoAccountsOverride ?? this.getKaminoAccounts(vaultPubkey, vault);
 
     return this.sendWithRetry(
       () =>
@@ -1048,6 +1087,13 @@ export class SolanaClient {
         let sig: string | null = null;
         if (d.label === "kamino-usdc") {
           sig = await this.recallFromKamino(vaultAddress, d.index, receiptToWithdraw);
+        } else if (d.label === "kamino-usdc-maple") {
+          const mapleAccounts = this.getKaminoMapleAccounts(new PublicKey(vaultAddress), vault);
+          sig = await this.recallFromKamino(
+            vaultAddress, d.index, receiptToWithdraw,
+            [KAMINO_PROGRAM_ID, KAMINO_PROGRAM_ID, KAMINO_PROGRAM_ID, KAMINO_SCOPE_PRICES],
+            mapleAccounts
+          );
         } else if (d.label === "kamino-sol") {
           sig = await this.recallFromKaminoSol(vaultAddress, d.index, receiptToWithdraw);
         } else if (d.label === "marinade-sol") {
@@ -1110,6 +1156,13 @@ export class SolanaClient {
         let sig: string | null = null;
         if (d.label === "kamino-usdc") {
           sig = await this.deployToKamino(vaultAddress, d.index, amount);
+        } else if (d.label === "kamino-usdc-maple") {
+          const mapleAccounts = this.getKaminoMapleAccounts(new PublicKey(vaultAddress), vault);
+          sig = await this.deployToKamino(
+            vaultAddress, d.index, amount,
+            [KAMINO_PROGRAM_ID, KAMINO_PROGRAM_ID, KAMINO_PROGRAM_ID, KAMINO_SCOPE_PRICES],
+            mapleAccounts
+          );
         } else if (d.label === "kamino-sol") {
           sig = await this.deployToKaminoSol(vaultAddress, d.index, amount);
         } else if (d.label === "marinade-sol") {
