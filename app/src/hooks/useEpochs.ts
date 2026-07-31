@@ -11,6 +11,10 @@ export interface EpochProtocolStatus {
   epochsBehind: number | null;
   isStale: boolean | null;
   epochVerified: boolean;
+  /** What lastUpdateEpoch actually measures — not identical across protocols. Jito/PSOL:
+   *  "last updated" (whole-pool balance refresh). Marinade: "last stake-delta run" (when
+   *  the crank last rebalanced) — a real but different on-chain signal. */
+  epochFieldLabel?: string;
   apyPercent?: number | null;
 }
 
