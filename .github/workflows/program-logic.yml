@@ -3,6 +3,8 @@
 # asserts the proportional recall accounting (full/partial/gain/loss, no residue drift).
 # verify-clear-phantom.mjs mirrors clear_phantom_deployed's cleanup accounting.
 # verify-accrue-sol-lst.mjs mirrors accrue_sol_lst's real-yield-booking accounting.
+# verify-lifetime-gains.mjs mirrors the lifetime_gains cumulative counter (settle_recall's
+# gain branch + accrue_sol_lst's gain branch increment it; nothing else touches it).
 # Keep each mirror in sync if the Rust changes.
 name: Program Logic
 
@@ -12,6 +14,7 @@ on:
       - "tests/verify-settle-recall.mjs"
       - "tests/verify-clear-phantom.mjs"
       - "tests/verify-accrue-sol-lst.mjs"
+      - "tests/verify-lifetime-gains.mjs"
       - "programs/yieldpilot/src/lib.rs"
       - ".github/workflows/program-logic.yml"
   push:
@@ -20,6 +23,7 @@ on:
       - "tests/verify-settle-recall.mjs"
       - "tests/verify-clear-phantom.mjs"
       - "tests/verify-accrue-sol-lst.mjs"
+      - "tests/verify-lifetime-gains.mjs"
       - "programs/yieldpilot/src/lib.rs"
 
 jobs:
@@ -55,3 +59,14 @@ jobs:
         with:
           node-version: "20"
       - run: node tests/verify-accrue-sol-lst.mjs
+
+  lifetime-gains:
+    name: lifetime_gains accounting
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: node tests/verify-lifetime-gains.mjs

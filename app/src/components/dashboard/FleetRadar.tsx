@@ -18,7 +18,7 @@ function dotPosition(i: number, radius: number) {
 }
 
 export function FleetRadar({ totalDeposited, blendedApy }: Props) {
-  const { activePositions, recentActivity, totalGainedUsd, loading } = useFleetStats();
+  const { activePositions, recentActivity, totalGainedUsd, lifetimeGainedUsd, loading } = useFleetStats();
 
   return (
     <div style={{ marginBottom: 96, position: "relative", zIndex: 1 }}>
@@ -78,11 +78,17 @@ export function FleetRadar({ totalDeposited, blendedApy }: Props) {
               { value: fmtTvl(totalDeposited), label: "Total deposited" },
               { value: String(activePositions), label: "Active positions" },
               { value: blendedApy === null ? "—" : `${blendedApy.toFixed(1)}%`, label: "Blended net APY" },
-              // Real, on-chain realized gain — total_deposits minus every position's own
-              // cost basis, summed across every vault. Not a projection: settle_recall
-              // and reconcile() keep total_deposits accurate, so this is booked truth,
-              // not an estimated exchange-rate decode.
-              { value: totalGainedUsd === null ? "—" : fmtTvl(totalGainedUsd), label: "Total gained" },
+              // Real, on-chain realized gain currently sitting in the vaults —
+              // total_deposits minus every position's own cost basis, summed across
+              // every vault. A LIVE snapshot: goes toward $0 whenever everyone withdraws,
+              // since there's nothing left "currently gaining" at that point. Not a
+              // projection — settle_recall and reconcile() keep total_deposits accurate.
+              { value: totalGainedUsd === null ? "—" : fmtTvl(totalGainedUsd), label: "Currently gaining" },
+              // Cumulative, ALL-TIME realized gain — reads the on-chain lifetime_gains
+              // counter directly (added 2026-08-03). Unlike the stat above, this only
+              // ever goes up and survives full withdrawals — it answers "how much has
+              // this ever earned", not "how much is earning right now".
+              { value: lifetimeGainedUsd === null ? "—" : fmtTvl(lifetimeGainedUsd), label: "All-time gained" },
             ].map(({ value, label }) => (
               <div key={label} style={{ background: "var(--ink-800)", border: "1px solid var(--line)", borderRadius: 10, padding: "16px 18px" }}>
                 <div className="mono-num" style={{ fontSize: 22, fontWeight: 500, color: "var(--text-hi)" }}>{value}</div>
