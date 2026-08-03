@@ -2844,6 +2844,10 @@
           {
             "name": "created_at",
             "type": "i64"
+          },
+          {
+            "name": "lifetime_gains",
+            "type": "u64"
           }
         ]
       }
