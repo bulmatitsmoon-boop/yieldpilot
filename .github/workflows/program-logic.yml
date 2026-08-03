@@ -5,6 +5,10 @@
 # verify-accrue-sol-lst.mjs mirrors accrue_sol_lst's real-yield-booking accounting.
 # verify-lifetime-gains.mjs mirrors the lifetime_gains cumulative counter (settle_recall's
 # gain branch + accrue_sol_lst's gain branch increment it; nothing else touches it).
+# verify-withdraw-charges-own-recall-loss.mjs mirrors the pending_recall_loss charge-back:
+# a withdrawal that forces an early recall pays its OWN exit-fee loss via a reduced
+# payout (reverting if the loss exceeds the withdrawal), instead of that loss being
+# socialized into total_deposits for every depositor.
 # Keep each mirror in sync if the Rust changes.
 name: Program Logic
 
@@ -15,6 +19,7 @@ on:
       - "tests/verify-clear-phantom.mjs"
       - "tests/verify-accrue-sol-lst.mjs"
       - "tests/verify-lifetime-gains.mjs"
+      - "tests/verify-withdraw-charges-own-recall-loss.mjs"
       - "programs/yieldpilot/src/lib.rs"
       - ".github/workflows/program-logic.yml"
   push:
@@ -24,6 +29,7 @@ on:
       - "tests/verify-clear-phantom.mjs"
       - "tests/verify-accrue-sol-lst.mjs"
       - "tests/verify-lifetime-gains.mjs"
+      - "tests/verify-withdraw-charges-own-recall-loss.mjs"
       - "programs/yieldpilot/src/lib.rs"
 
 jobs:
@@ -70,3 +76,14 @@ jobs:
         with:
           node-version: "20"
       - run: node tests/verify-lifetime-gains.mjs
+
+  withdraw-charges-own-recall-loss:
+    name: withdraw() charges its own forced-recall loss
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: node tests/verify-withdraw-charges-own-recall-loss.mjs
