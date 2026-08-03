@@ -135,12 +135,26 @@ fn verify_paired_deposit<'info>(
 /// Deliberately keyed on the RECEIPT balance rather than comparing amounts: only "do we
 /// still hold a claim on that protocol?" distinguishes a partial recall from a full exit.
 /// Sizes can't — a fee and a partial withdrawal both just look like `received < deployed`.
+/// `charge_to_withdrawer`: true when this recall was forced by a non-keeper caller
+/// pairing it with their own withdraw() in the same transaction (verify_paired_withdraw
+/// already confirmed that pairing at the call site). A withdrawal that exceeds the idle
+/// buffer forces an EARLY exit from a deployed position regardless of whether enough
+/// epochs/yield have accrued to cover the protocol's exit fee — and since that fee was
+/// previously booked into total_deposits (shared by every depositor via total_shares),
+/// any user could cheaply force a real loss onto the other depositors while paying only
+/// their own tiny pro-rata slice of it (griefing the whole pool for the cost of one
+/// person's share). When true, the loss is instead staged in pending_recall_loss and
+/// withdraw() charges it against the triggering user's own payout — see withdraw()'s
+/// pending_recall_loss handling. Keeper-initiated (voluntary rebalance) recalls are
+/// unaffected: that's an operator decision made on behalf of everyone, same as before.
+/// Gains are never redirected — no exploit incentive exists on the gain side.
 fn settle_recall(
     v: &mut Vault,
     idx: usize,
     received: u64,
     receipt_before: u64,
     receipt_remaining: u64,
+    charge_to_withdrawer: bool,
 ) -> Result<()> {
     let deployed = v.protocols[idx].deployed_balance;
 
@@ -173,7 +187,14 @@ fn settle_recall(
     } else {
         // Realized loss (exit fee / slippage). saturating_sub: a loss can never underflow the vault.
         let loss = cost_basis_recalled - received;
-        v.total_deposits = v.total_deposits.saturating_sub(loss);
+        if charge_to_withdrawer {
+            // Stage it — withdraw() charges this to the triggering user's own payout
+            // instead of socializing it into total_deposits. Accumulates in case a
+            // single withdrawal needs recalls from more than one protocol.
+            v.pending_recall_loss = v.pending_recall_loss.saturating_add(loss);
+        } else {
+            v.total_deposits = v.total_deposits.saturating_sub(loss);
+        }
     }
     v.protocols[idx].deployed_balance = new_deployed;
     Ok(())
@@ -279,6 +300,7 @@ pub mod yieldpilot {
         // (same mint+admin seeds can be reinitialized after close_vault).
         v.created_at          = Clock::get()?.unix_timestamp;
         v.lifetime_gains      = 0;
+        v.pending_recall_loss = 0;
 
         emit!(VaultInitialized { vault: v.key(), admin: v.admin, mint: v.mint });
         Ok(())
@@ -477,6 +499,37 @@ pub mod yieldpilot {
             .and_then(|x| x.checked_div(v.total_shares as u128))
             .ok_or(VaultError::MathOverflow)? as u64;
         require!(amount_out > 0, VaultError::ZeroAmount);
+
+        // If this withdrawal was paired with a recall that forced an early exit from a
+        // deployed position (see settle_recall's charge_to_withdrawer doc comment),
+        // charge the OTHER shareholders' portion of that loss against THIS user's own
+        // payout instead of letting it dilute total_deposits for everyone. amount_out
+        // above already naturally absorbed this withdrawer's own pro-rata slice of the
+        // loss (idle_balance/total_deployed() were already reduced by it) — this only
+        // adds the remaining (total_shares - shares)/total_shares portion, i.e. the
+        // slice that would otherwise land on people who did nothing.
+        //
+        // SECURITY: never let this go negative or get silently capped — if the loss
+        // exceeds what this withdrawal is even taking out, that means someone paired a
+        // disproportionately large forced recall with a tiny withdrawal (the exact
+        // "cheap grief the whole pool" attack this exists to close), so revert instead
+        // of letting any of it leak onto other depositors. This bounds the maximum
+        // damage anyone can force to the size of their OWN withdrawal, never more.
+        let recall_loss = v.pending_recall_loss;
+        v.pending_recall_loss = 0;
+        let amount_out = if recall_loss > 0 {
+            let total_shares_before = v.total_shares;
+            let extra_charge = (recall_loss as u128)
+                .checked_mul(total_shares_before.saturating_sub(shares) as u128)
+                .and_then(|x| x.checked_div(total_shares_before as u128))
+                .ok_or(VaultError::MathOverflow)? as u64;
+            require!(amount_out >= extra_charge, VaultError::RecallExceedsWithdrawal);
+            amount_out - extra_charge
+        } else {
+            amount_out
+        };
+        require!(amount_out > 0, VaultError::ZeroAmount);
+
         // Slippage guard: caller specifies the minimum they will accept.
         // Protects against vault balance dropping between simulation and execution.
         require!(amount_out >= min_amount_out, VaultError::SlippageExceeded);
@@ -1015,7 +1068,8 @@ pub mod yieldpilot {
         collateral_amount: u64,
     ) -> Result<()> {
         let v = &mut ctx.accounts.vault;
-        if v.keeper != ctx.accounts.keeper.key() {
+        let is_paired_withdraw = v.keeper != ctx.accounts.keeper.key();
+        if is_paired_withdraw {
             verify_paired_withdraw(
                 &ctx.accounts.tx_instructions_sysvar.to_account_info(),
                 &v.key(),
@@ -1081,7 +1135,7 @@ pub mod yieldpilot {
         let receipt_before = ctx.accounts.vault_collateral_account.amount;
         ctx.accounts.vault_collateral_account.reload()?;
         let receipt_remaining = ctx.accounts.vault_collateral_account.amount;
-        settle_recall(v, idx, received, receipt_before, receipt_remaining)?;
+        settle_recall(v, idx, received, receipt_before, receipt_remaining, is_paired_withdraw)?;
 
         emit!(FundsRecalled { vault: v.key(), protocol_index, collateral_amount });
         Ok(())
@@ -1223,7 +1277,8 @@ pub mod yieldpilot {
         msol_amount: u64,
     ) -> Result<()> {
         let v = &mut ctx.accounts.vault;
-        if v.keeper != ctx.accounts.keeper.key() {
+        let is_paired_withdraw = v.keeper != ctx.accounts.keeper.key();
+        if is_paired_withdraw {
             verify_paired_withdraw(
                 &ctx.accounts.tx_instructions_sysvar.to_account_info(),
                 &v.key(),
@@ -1309,7 +1364,7 @@ pub mod yieldpilot {
         let receipt_before = ctx.accounts.vault_msol_account.amount;
         ctx.accounts.vault_msol_account.reload()?;
         let receipt_remaining = ctx.accounts.vault_msol_account.amount;
-        settle_recall(v, idx, received, receipt_before, receipt_remaining)?;
+        settle_recall(v, idx, received, receipt_before, receipt_remaining, is_paired_withdraw)?;
 
         emit!(FundsRecalled { vault: v.key(), protocol_index, collateral_amount: msol_amount });
         Ok(())
@@ -1446,7 +1501,8 @@ pub mod yieldpilot {
     ) -> Result<()> {
         require!(lst_amount > 0, VaultError::ZeroAmount);
         let v = &mut ctx.accounts.vault;
-        if v.keeper != ctx.accounts.keeper.key() {
+        let is_paired_withdraw = v.keeper != ctx.accounts.keeper.key();
+        if is_paired_withdraw {
             verify_paired_withdraw(
                 &ctx.accounts.tx_instructions_sysvar.to_account_info(),
                 &v.key(),
@@ -1524,7 +1580,7 @@ pub mod yieldpilot {
         let receipt_before = ctx.accounts.vault_lst_account.amount;
         ctx.accounts.vault_lst_account.reload()?;
         let receipt_remaining = ctx.accounts.vault_lst_account.amount;
-        settle_recall(v, idx, received, receipt_before, receipt_remaining)?;
+        settle_recall(v, idx, received, receipt_before, receipt_remaining, is_paired_withdraw)?;
 
         emit!(FundsRecalled { vault: v.key(), protocol_index, collateral_amount: lst_amount });
         Ok(())
@@ -1613,7 +1669,8 @@ pub mod yieldpilot {
     ) -> Result<()> {
         require!(collateral_amount > 0, VaultError::ZeroAmount);
         let v = &mut ctx.accounts.vault;
-        if v.keeper != ctx.accounts.keeper.key() {
+        let is_paired_withdraw = v.keeper != ctx.accounts.keeper.key();
+        if is_paired_withdraw {
             verify_paired_withdraw(
                 &ctx.accounts.tx_instructions_sysvar.to_account_info(),
                 &v.key(),
@@ -1670,7 +1727,7 @@ pub mod yieldpilot {
         let receipt_before = ctx.accounts.vault_collateral_account.amount;
         ctx.accounts.vault_collateral_account.reload()?;
         let receipt_remaining = ctx.accounts.vault_collateral_account.amount;
-        settle_recall(v, idx, received, receipt_before, receipt_remaining)?;
+        settle_recall(v, idx, received, receipt_before, receipt_remaining, is_paired_withdraw)?;
         emit!(FundsRecalled { vault: v.key(), protocol_index, collateral_amount });
         Ok(())
     }
@@ -1719,6 +1776,15 @@ pub struct Vault {
     // has this vault ever earned, lifetime" instead of "how much is it earning right
     // now" — the two are deliberately different numbers for different questions.
     pub lifetime_gains:      u64,
+    // Staged by settle_recall (charge_to_withdrawer=true path) when a non-keeper caller
+    // forces an early recall paired with their own withdraw() in the same transaction.
+    // Drained by that same withdraw() call, which charges the OTHER shareholders' portion
+    // of this loss against the triggering user's own payout instead of letting it dilute
+    // total_deposits for everyone. Added 2026-08-03 to close the "cheap grief the whole
+    // pool by forcing an uneconomical early LST exit" gap — see settle_recall's doc
+    // comment on charge_to_withdrawer. Always 0 outside of the single instruction between
+    // a paired recall and its withdraw(); never persists across transactions.
+    pub pending_recall_loss: u64,
 }
 
 impl Vault {
@@ -1731,8 +1797,8 @@ impl Vault {
         + 8              // tvl_cap
         + 4 + 32         // name string
         + MAX_PROTOCOLS * ProtocolAdapter::SIZE
-        + 120;           // padding (was 128 — created_at was already carved out of this reserve when it
-                         // was added; lifetime_gains now takes another 8 bytes of the same reserve.
+        + 112;           // padding (was 128 — created_at, lifetime_gains, and now pending_recall_loss
+                         // were each carved out of this reserve when added; 112 bytes remain.
                          // Existing accounts already have this space allocated and zero-initialized,
                          // so no realloc/migration is needed for the new field.
 
@@ -2431,4 +2497,5 @@ pub enum VaultError {
     #[msg("Treasury cannot be the zero address")] InvalidTreasury,
     #[msg("Receipt account still holds tokens — protocol is not actually fully exited")] ReceiptStillHeld,
     #[msg("Non-keeper deploy must be paired with a deposit instruction for the same user and vault in the same transaction")] DeployRequiresPairedDeposit,
+    #[msg("This withdrawal's forced early-exit fee exceeds the amount being withdrawn — reduce the withdrawal or wait for more idle/epoch accrual")] RecallExceedsWithdrawal,
 }
