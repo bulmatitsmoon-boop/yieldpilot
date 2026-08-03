@@ -32,8 +32,15 @@ export default function AdminPage() {
   const [lastSig, setLastSig] = useState<string | null>(null);
 
   // Form state
+  // Single shared vault selector for every action below — was previously several
+  // independent VAULT_ADDRESSES[0] hardcodes (Token Gate, TVL Cap, Rebalance,
+  // Whitelist Add/Remove/Check all silently only ever touched the first vault) plus
+  // one separate, redundant selector just for Pause/Unpause. A wallet whitelisted on
+  // one vault is NOT whitelisted on the other — the whitelist PDA seeds on the vault
+  // address, so "USDC vault only" was a real, silent gap, not just Pause's problem.
+  const [selectedVaultIdx, setSelectedVaultIdx] = useState(0);
+  const selectedVault = VAULT_ADDRESSES[selectedVaultIdx];
   const [newGateMint, setNewGateMint] = useState("");
-  const [pauseVaultIdx, setPauseVaultIdx] = useState(0);
   const [newTvlCap, setNewTvlCap] = useState("");
   const [rebalanceAllocs, setRebalanceAllocs] = useState("8000,2000");
   const [whitelistAddr, setWhitelistAddr] = useState("");
@@ -70,14 +77,14 @@ export default function AdminPage() {
 
   const handleSetGateMint = () => wrapTx(async () => {
     const program = getProgram();
-    const vault = new PublicKey(VAULT_ADDRESSES[0]);
+    const vault = new PublicKey(selectedVault);
     return program.methods.setGateMint(new PublicKey(newGateMint))
       .accounts({ admin: publicKey!, vault }).rpc();
   });
 
   const handlePause = (paused: boolean) => wrapTx(async () => {
     const program = getProgram();
-    const vault = new PublicKey(VAULT_ADDRESSES[pauseVaultIdx]);
+    const vault = new PublicKey(selectedVault);
     return program.methods.setPaused(paused)
       .accounts({ admin: publicKey!, vault }).rpc();
   });
@@ -88,7 +95,7 @@ export default function AdminPage() {
   // can't be redirected to steal fees — see lib.rs's comments.)
   const handleRaiseTvlCap = () => wrapTx(async () => {
     const program = getProgram();
-    const vault = new PublicKey(VAULT_ADDRESSES[0]);
+    const vault = new PublicKey(selectedVault);
     const cap = new anchor.BN(Math.floor(parseFloat(newTvlCap) * 1e6));
     return program.methods.raiseTvlCap(cap)
       .accounts({ admin: publicKey!, vault }).rpc();
@@ -96,14 +103,17 @@ export default function AdminPage() {
 
   const handleRebalance = () => wrapTx(async () => {
     const program = getProgram();
-    const vault = new PublicKey(VAULT_ADDRESSES[0]);
+    const vault = new PublicKey(selectedVault);
     const allocs = rebalanceAllocs.split(",").map(s => new anchor.BN(parseInt(s.trim())));
     return program.methods.rebalance(allocs)
       .accounts({ admin: publicKey!, vault }).rpc();
   });
 
+  // Whitelist PDA seeds on the VAULT address, not just the wallet — a wallet
+  // whitelisted on one vault has a completely separate on-chain record on the other.
+  // This must use whichever vault is currently selected, same as every other action.
   const whitelistPda = (wallet: string) => {
-    const vault = new PublicKey(VAULT_ADDRESSES[0]);
+    const vault = new PublicKey(selectedVault);
     const walletPubkey = new PublicKey(wallet);
     const [pda] = PublicKey.findProgramAddressSync(
       [Buffer.from("wl"), vault.toBuffer(), walletPubkey.toBuffer()],
@@ -114,7 +124,7 @@ export default function AdminPage() {
 
   const handleAddWhitelist = () => wrapTx(async () => {
     const program = getProgram();
-    const vault = new PublicKey(VAULT_ADDRESSES[0]);
+    const vault = new PublicKey(selectedVault);
     const walletPubkey = new PublicKey(whitelistAddr);
     const pda = whitelistPda(whitelistAddr);
     return program.methods.addToWhitelist(walletPubkey)
@@ -124,7 +134,7 @@ export default function AdminPage() {
 
   const handleRemoveWhitelist = () => wrapTx(async () => {
     const program = getProgram();
-    const vault = new PublicKey(VAULT_ADDRESSES[0]);
+    const vault = new PublicKey(selectedVault);
     const walletPubkey = new PublicKey(whitelistAddr);
     const pda = whitelistPda(whitelistAddr);
     return program.methods.removeFromWhitelist(walletPubkey)
@@ -183,11 +193,27 @@ export default function AdminPage() {
     <div style={{ maxWidth: 820, margin: "0 auto", padding: "32px 16px 80px" }}>
       <div style={{ marginBottom: 28 }}>
         <h1 style={{ fontSize: 22, fontWeight: 800, letterSpacing: "-0.02em" }}>⚙️ Admin Panel</h1>
-        <p style={{ color: "var(--text-muted)", fontSize: 14, marginTop: 4 }}>
-          Vault: <span style={{ fontFamily: "var(--mono)", color: "var(--purple-light)" }}>
-            {VAULT_ADDRESSES[0]?.slice(0, 8)}...{VAULT_ADDRESSES[0]?.slice(-8)}
-          </span>
+        <p style={{ color: "var(--text-muted)", fontSize: 14, marginTop: 4, marginBottom: 12 }}>
+          Every action below (Token Gate, Vault Controls, Manual Rebalance, Whitelist) applies to
+          whichever vault is selected here — they are independent on-chain accounts.
         </p>
+        <div style={{ display: "flex", gap: 8 }}>
+          {VAULT_ADDRESSES.map((addr, i) => (
+            <button
+              key={addr}
+              onClick={() => setSelectedVaultIdx(i)}
+              style={{
+                padding: "8px 16px", borderRadius: 8, cursor: "pointer",
+                border: i === selectedVaultIdx ? "1px solid var(--purple-light)" : "1px solid var(--border)",
+                background: i === selectedVaultIdx ? "rgba(139,92,246,0.12)" : "var(--bg)",
+                color: i === selectedVaultIdx ? "var(--purple-light)" : "var(--text-muted)",
+                fontSize: 13, fontWeight: 600, fontFamily: "var(--mono)",
+              }}
+            >
+              {i === 0 ? "USDC" : i === 1 ? "SOL" : `Vault ${i + 1}`} · {addr.slice(0, 4)}...{addr.slice(-4)}
+            </button>
+          ))}
+        </div>
       </div>
 
       <TxBanner status={txStatus} error={txError} sig={lastSig} />
