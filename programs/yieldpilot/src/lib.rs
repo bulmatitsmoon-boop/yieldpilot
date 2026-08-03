@@ -167,6 +167,9 @@ fn settle_recall(
         // Realized yield on the recalled portion.
         let gain = received - cost_basis_recalled;
         v.total_deposits = v.total_deposits.checked_add(gain).ok_or(VaultError::MathOverflow)?;
+        // Lifetime counter: only ever added to, here and in accrue_sol_lst's gain branch —
+        // never touched by the loss branch below or by withdraw(). See the field's doc comment.
+        v.lifetime_gains = v.lifetime_gains.saturating_add(gain);
     } else {
         // Realized loss (exit fee / slippage). saturating_sub: a loss can never underflow the vault.
         let loss = cost_basis_recalled - received;
@@ -275,6 +278,7 @@ pub mod yieldpilot {
         // position from a stale one left over by a prior vault at the same PDA
         // (same mint+admin seeds can be reinitialized after close_vault).
         v.created_at          = Clock::get()?.unix_timestamp;
+        v.lifetime_gains      = 0;
 
         emit!(VaultInitialized { vault: v.key(), admin: v.admin, mint: v.mint });
         Ok(())
@@ -925,6 +929,7 @@ pub mod yieldpilot {
         if real_value > old_deployed {
             let gain = real_value - old_deployed;
             v.total_deposits = v.total_deposits.checked_add(gain).ok_or(VaultError::MathOverflow)?;
+            v.lifetime_gains = v.lifetime_gains.saturating_add(gain);
             v.protocols[idx].deployed_balance = real_value;
             emit!(YieldAccrued { vault: v.key(), protocol_index, gain });
         }
@@ -1704,6 +1709,16 @@ pub struct Vault {
     // deposit() can detect a UserPosition left over from a prior vault at the
     // same PDA. See deposit()'s reset check.
     pub created_at:          i64,
+    // Cumulative, all-time REALIZED gains booked into this vault, in the vault's own
+    // asset units (lamports for the SOL vault, micro-USDC for the USDC vault). Added
+    // 2026-08-03. Unlike `total_deposits` (a live snapshot that resets to the sum of
+    // current depositors' principal whenever everyone withdraws), this only ever
+    // increases — incremented in the same two places `total_deposits` gains are
+    // booked (settle_recall's gain branch, accrue_sol_lst's gain branch), and never
+    // decremented by settle_recall's loss branch or by withdrawals. Answers "how much
+    // has this vault ever earned, lifetime" instead of "how much is it earning right
+    // now" — the two are deliberately different numbers for different questions.
+    pub lifetime_gains:      u64,
 }
 
 impl Vault {
@@ -1716,7 +1731,10 @@ impl Vault {
         + 8              // tvl_cap
         + 4 + 32         // name string
         + MAX_PROTOCOLS * ProtocolAdapter::SIZE
-        + 128;           // padding
+        + 120;           // padding (was 128 — created_at was already carved out of this reserve when it
+                         // was added; lifetime_gains now takes another 8 bytes of the same reserve.
+                         // Existing accounts already have this space allocated and zero-initialized,
+                         // so no realloc/migration is needed for the new field.
 
     pub fn total_deployed(&self) -> u64 {
         self.protocols[..self.protocol_count as usize]

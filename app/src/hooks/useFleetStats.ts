@@ -25,9 +25,17 @@ export interface FleetStats {
   activePositions: number;
   totalDepositors: number; // includes zero-balance / closed positions
   recentActivity: FleetActivity[];
-  /** Real, realized gain across every vault and every wallet, in USD-equivalent.
+  /** Real, realized gain currently sitting in the vaults, in USD-equivalent — a LIVE
+   *  snapshot (total_deposits minus current depositors' cost basis) that resets toward
+   *  0 whenever everyone withdraws, since there's no longer anything "currently gaining."
    *  null while loading — never 0 as a placeholder, same rule as everywhere else here. */
   totalGainedUsd: number | null;
+  /** Cumulative, ALL-TIME realized gain across every vault, in USD-equivalent — reads
+   *  the on-chain `lifetime_gains` counter directly (added 2026-08-03), which only ever
+   *  increases and survives full withdrawals. This is the number that answers "how much
+   *  has this ever earned", as distinct from totalGainedUsd's "how much is it earning
+   *  right now". null while loading, same rule as totalGainedUsd. */
+  lifetimeGainedUsd: number | null;
   loading: boolean;
 }
 
@@ -53,6 +61,7 @@ export function useFleetStats(): FleetStats {
   const [totalDepositors, setTotalDepositors] = useState(0);
   const [recentActivity, setRecentActivity] = useState<FleetActivity[]>([]);
   const [totalGainedUsd, setTotalGainedUsd] = useState<number | null>(null);
+  const [lifetimeGainedUsd, setLifetimeGainedUsd] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
 
   const fetch = useCallback(async () => {
@@ -82,6 +91,7 @@ export function useFleetStats(): FleetStats {
       );
 
       let gainedUsd = 0;
+      let lifetimeUsd = 0;
       let anyVaultResolved = false;
       VAULT_ADDRESSES.forEach((addr, i) => {
         const v = vaultAccounts[i];
@@ -100,8 +110,17 @@ export function useFleetStats(): FleetStats {
         const gainedRaw = totalDepositsRaw > depositedSumRaw ? totalDepositsRaw - depositedSumRaw : 0n;
         const gainedUi = Number(gainedRaw) / decimals;
         gainedUsd += isSol ? gainedUi * solPrice : gainedUi;
+
+        // Falls back to 0 (not skipped) on vaults whose ProgramData predates the
+        // 2026-08-03 upgrade — Anchor's Borsh decoder returns undefined for a field
+        // added to the IDL but not yet present at that byte offset on an old account;
+        // `?? 0n` treats that as "no lifetime gains recorded yet" rather than crashing.
+        const lifetimeRaw = BigInt((v.lifetimeGains as anchor.BN | undefined)?.toString() ?? "0");
+        const lifetimeUi = Number(lifetimeRaw) / decimals;
+        lifetimeUsd += isSol ? lifetimeUi * solPrice : lifetimeUi;
       });
       setTotalGainedUsd(anyVaultResolved ? gainedUsd : null);
+      setLifetimeGainedUsd(anyVaultResolved ? lifetimeUsd : null);
     } catch (err) {
       console.error("useFleetStats error", err);
     } finally {
@@ -115,5 +134,5 @@ export function useFleetStats(): FleetStats {
     return () => clearInterval(id);
   }, [fetch]);
 
-  return { activePositions, totalDepositors, recentActivity, totalGainedUsd, loading };
+  return { activePositions, totalDepositors, recentActivity, totalGainedUsd, lifetimeGainedUsd, loading };
 }
