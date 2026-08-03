@@ -2848,6 +2848,10 @@
           {
             "name": "lifetime_gains",
             "type": "u64"
+          },
+          {
+            "name": "pending_recall_loss",
+            "type": "u64"
           }
         ]
       }
