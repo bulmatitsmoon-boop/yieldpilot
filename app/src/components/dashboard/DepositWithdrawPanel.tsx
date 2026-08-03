@@ -92,6 +92,7 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
   // fee as a realized loss); until that upgrade ships, promise only what can settle.
   const EXIT_COST_BPS: Record<string, number> = {
     "kamino-usdc": 0,
+    "kamino-usdc-maple": 0, // same fee-free Kamino redemption as the main market
     "kamino-sol": 0,
     "solend-usdc": 0,
     "marinade-sol": 30, // ~0.3% liquid-unstake fee (max; measured 0.17%)
