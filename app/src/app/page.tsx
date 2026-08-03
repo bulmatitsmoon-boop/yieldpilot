@@ -17,7 +17,7 @@ import { TierLadder } from "@/components/dashboard/TierLadder";
 // Everything else (e.g. Drift) is informational-only and must never show "ROUTING HERE"
 // or imply the vault can send funds there.
 const ROUTABLE_PROTOCOL_IDS = new Set([
-  "kamino-usdc", "kamino-sol", "marinade-sol", "jito-sol", "psol-sol", "solend-usdc",
+  "kamino-usdc", "kamino-usdc-maple", "kamino-sol", "marinade-sol", "jito-sol", "psol-sol", "solend-usdc",
 ]);
 
 const VAULT_ADDRESSES = (process.env.NEXT_PUBLIC_VAULT_ADDRESSES || "F1r513ZZdofz4tjhRfhNAYDK5hsmc8uCZbMmg2tkPJ6e,8KcoRt5DcCbXBaqDVDorEbW2J6GofTrRyy9Afzb8wwaE")
