@@ -8,12 +8,6 @@ import {
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
 import { PhantomWalletAdapter } from "@solana/wallet-adapter-phantom";
 import { SolflareWalletAdapter } from "@solana/wallet-adapter-solflare";
-import {
-  registerMwa,
-  createDefaultAuthorizationCache,
-  createDefaultChainSelector,
-  createDefaultWalletNotFoundHandler,
-} from "@solana-mobile/wallet-standard-mobile";
 import { clusterApiUrl } from "@solana/web3.js";
 
 import "@solana/wallet-adapter-react-ui/styles.css";
@@ -51,18 +45,42 @@ export function WalletContextProvider({ children }: { children: React.ReactNode 
   // as a side effect: it self-registers as a Wallet Standard provider, and
   // `@solana/wallet-adapter-react`'s WalletProvider auto-detects Wallet-Standard wallets
   // on its own — no manual array entry needed at all.
+  // DYNAMIC IMPORT, DELIBERATELY — do not convert this back to a top-level import.
+  // A static `import ... from "@solana-mobile/wallet-standard-mobile"` was tried first
+  // and BROKE CLIENT-SIDE HYDRATION FOR THE ENTIRE SITE: the preview deploy built and
+  // rendered fine (SSR HTML looked perfect), but React never hydrated, so every button
+  // on every page — desktop included — was inert. Verified live: the Connect button had
+  // no `__reactFiber$`/`__reactProps$` keys at all, vs. a healthy production build where
+  // it does. A green Vercel build does NOT catch this; only a real in-browser check does.
+  //
+  // Keeping the package out of the synchronous module graph means that even if it throws
+  // at module-evaluation time (browser-only globals, etc.) it can't take hydration with
+  // it. The try/catch then degrades a failure to "mobile wallet option missing" rather
+  // than "entire site dead" — the mobile-wallet feature is strictly additive, so it must
+  // never be able to break the core app.
   useEffect(() => {
-    registerMwa({
-      appIdentity: {
-        name: "YieldPilot",
-        uri: "https://yieldpilot.fund",
-        icon: "/favicon.ico",
-      },
-      authorizationCache: createDefaultAuthorizationCache(),
-      chains: NETWORK === "devnet" ? ["solana:devnet"] : ["solana:mainnet"],
-      chainSelector: createDefaultChainSelector(),
-      onWalletNotFound: createDefaultWalletNotFoundHandler(),
-    });
+    let cancelled = false;
+    (async () => {
+      try {
+        const mwa = await import("@solana-mobile/wallet-standard-mobile");
+        if (cancelled) return;
+        mwa.registerMwa({
+          appIdentity: {
+            name: "YieldPilot",
+            uri: "https://yieldpilot.fund",
+            icon: "/favicon.ico",
+          },
+          authorizationCache: mwa.createDefaultAuthorizationCache(),
+          chains: NETWORK === "devnet" ? ["solana:devnet"] : ["solana:mainnet"],
+          chainSelector: mwa.createDefaultChainSelector(),
+          onWalletNotFound: mwa.createDefaultWalletNotFoundHandler(),
+        });
+      } catch (err) {
+        // Non-fatal by design — see comment above.
+        console.error("Mobile Wallet Adapter registration failed (non-fatal):", err);
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   const wallets = useMemo(
