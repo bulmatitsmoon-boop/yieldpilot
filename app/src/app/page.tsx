@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { useWalletModal } from "@solana/wallet-adapter-react-ui";
+import { useConnectWallet } from "@/components/useConnectWallet";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useApys } from "@/hooks/useApys";
 import { useYieldPilot } from "@/hooks/useYieldPilot";
@@ -42,7 +42,7 @@ function Reveal({ children, delay = 0 }: { children: React.ReactNode; delay?: nu
 }
 
 export default function Home() {
-  const { setVisible } = useWalletModal();
+  const connectWallet = useConnectWallet();
   const { connected } = useWallet();
   const { apys } = useApys();
   const { vaults, userGateBalance } = useYieldPilot(VAULT_ADDRESSES);
@@ -147,7 +147,7 @@ export default function Home() {
                   Open Dashboard
                 </Link>
               ) : (
-                <button onClick={() => setVisible(true)} style={{
+                <button onClick={connectWallet} style={{
                   background: "var(--signal)", color: "var(--ink-900)", border: "none",
                   padding: "12px 26px", borderRadius: 8,
                   fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: "var(--font-body)",
@@ -466,7 +466,7 @@ export default function Home() {
                     Open Dashboard
                   </Link>
                 ) : (
-                  <button onClick={() => setVisible(true)} style={{
+                  <button onClick={connectWallet} style={{
                     background: "var(--signal)", color: "var(--ink-900)", border: "none",
                     padding: "12px 26px", borderRadius: 8,
                     fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: "var(--font-body)",
