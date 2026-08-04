@@ -3,12 +3,12 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { useWalletModal } from "@solana/wallet-adapter-react-ui";
+import { useConnectWallet } from "@/components/useConnectWallet";
 import { fmtAddr } from "@/components/ui";
 
 export function Header() {
   const { publicKey, disconnect, connected } = useWallet();
-  const { setVisible } = useWalletModal();
+  const connectWallet = useConnectWallet();
   const pathname = usePathname();
   const isAdmin = publicKey?.toBase58() === process.env.NEXT_PUBLIC_ADMIN_WALLET;
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -112,7 +112,7 @@ export function Header() {
           </div>
         ) : (
           <button
-            onClick={() => setVisible(true)}
+            onClick={connectWallet}
             style={{
               background: "var(--signal)",
               color: "var(--ink-900)", border: "none", padding: "9px 20px",
