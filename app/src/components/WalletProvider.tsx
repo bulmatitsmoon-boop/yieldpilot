@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo } from "react";
 import {
   ConnectionProvider,
   WalletProvider,
@@ -8,13 +8,12 @@ import {
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
 import { PhantomWalletAdapter } from "@solana/wallet-adapter-phantom";
 import { SolflareWalletAdapter } from "@solana/wallet-adapter-solflare";
-import { WalletAdapterNetwork } from "@solana/wallet-adapter-base";
 import {
-  SolanaMobileWalletAdapter,
-  createDefaultAddressSelector,
-  createDefaultAuthorizationResultCache,
+  registerMwa,
+  createDefaultAuthorizationCache,
+  createDefaultChainSelector,
   createDefaultWalletNotFoundHandler,
-} from "@solana-mobile/wallet-adapter-mobile";
+} from "@solana-mobile/wallet-standard-mobile";
 import { clusterApiUrl } from "@solana/web3.js";
 
 import "@solana/wallet-adapter-react-ui/styles.css";
@@ -33,30 +32,41 @@ const WProv = WalletProvider as any;
 const WMProv = WalletModalProvider as any;
 
 export function WalletContextProvider({ children }: { children: React.ReactNode }) {
-  // MOBILE FIX (2026-08-03): PhantomWalletAdapter/SolflareWalletAdapter both rely on
-  // detecting an injected `window.solana`/`window.solflare` browser-extension
-  // provider. On a real mobile browser tab (not the wallet app's own in-app
-  // browser), no extension exists, so neither adapter has anything to connect
-  // to — the connect modal opens fine but tapping a wallet silently does
-  // nothing. SolanaMobileWalletAdapter implements the actual Mobile Wallet
-  // Adapter protocol (intent-based handoff to whatever wallet app is
-  // installed) and is what makes Connect work on a real mobile browser.
+  // MOBILE FIX (2026-08-03, corrected same day): PhantomWalletAdapter/SolflareWalletAdapter
+  // both rely on detecting an injected `window.solana`/`window.solflare` browser-extension
+  // provider. On a real mobile browser tab (not the wallet app's own in-app browser), no
+  // extension exists, so neither adapter has anything to connect to — the connect modal
+  // opens fine but tapping a wallet silently does nothing.
+  //
+  // First attempt used `@solana-mobile/wallet-adapter-mobile`'s SolanaMobileWalletAdapter,
+  // added directly to this `wallets` array — shipped, then found LIVE (via a real click
+  // through the deployed site, not just a build check) that it silently never appeared in
+  // the connect modal at all. Root cause: that package's actual v2.x constructor takes
+  // {appIdentity, authorizationCache, chains, chainSelector, onWalletNotFound} — NOT the
+  // older {addressSelector, authorizationResultCache, cluster} shape a stale doc described.
+  // Passing the wrong shape didn't throw (fields just went `undefined`), so it silently
+  // failed instead of erroring, and — more fundamentally — that class isn't even meant to
+  // go in the classic `wallets` array; per Solana Mobile's own current docs, the real
+  // mechanism is `registerMwa()` from `@solana-mobile/wallet-standard-mobile`, called once
+  // as a side effect: it self-registers as a Wallet Standard provider, and
+  // `@solana/wallet-adapter-react`'s WalletProvider auto-detects Wallet-Standard wallets
+  // on its own — no manual array entry needed at all.
+  useEffect(() => {
+    registerMwa({
+      appIdentity: {
+        name: "YieldPilot",
+        uri: "https://yieldpilot.fund",
+        icon: "/favicon.ico",
+      },
+      authorizationCache: createDefaultAuthorizationCache(),
+      chains: NETWORK === "devnet" ? ["solana:devnet"] : ["solana:mainnet"],
+      chainSelector: createDefaultChainSelector(),
+      onWalletNotFound: createDefaultWalletNotFoundHandler(),
+    });
+  }, []);
+
   const wallets = useMemo(
-    () => [
-      new PhantomWalletAdapter(),
-      new SolflareWalletAdapter(),
-      new SolanaMobileWalletAdapter({
-        addressSelector: createDefaultAddressSelector(),
-        appIdentity: {
-          name: "YieldPilot",
-          uri: "https://yieldpilot.fund",
-          icon: "/favicon.ico",
-        },
-        authorizationResultCache: createDefaultAuthorizationResultCache(),
-        cluster: NETWORK === "devnet" ? WalletAdapterNetwork.Devnet : WalletAdapterNetwork.Mainnet,
-        onWalletNotFound: createDefaultWalletNotFoundHandler(),
-      }),
-    ],
+    () => [new PhantomWalletAdapter(), new SolflareWalletAdapter()],
     []
   );
 
