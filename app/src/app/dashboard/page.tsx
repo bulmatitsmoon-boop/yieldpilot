@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { useWalletModal } from "@solana/wallet-adapter-react-ui";
+import { useConnectWallet } from "@/components/useConnectWallet";
 import { StatCard, Card, CardHeader, Toggle, TxBanner, fmt, fmtAddr } from "@/components/ui";
 import { ProtocolTable } from "@/components/dashboard/ProtocolTable";
 import { DepositWithdrawPanel } from "@/components/dashboard/DepositWithdrawPanel";
@@ -24,7 +24,7 @@ const ADMIN_PUBKEY = "8i7kydJHwi3Cdp46Xugyux2vWJmTScYDvnJrBiBihBnP";
 
 export default function Dashboard() {
   const { publicKey, connected } = useWallet();
-  const { setVisible } = useWalletModal();
+  const connectWallet = useConnectWallet();
   const isAdmin = publicKey?.toBase58() === ADMIN_PUBKEY;
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [selectedVaultAddr, setSelectedVaultAddr] = useState<string | null>(null);
@@ -184,7 +184,7 @@ export default function Dashboard() {
             Connect to see your position, earnings, and tier — routed across Solana&apos;s top protocols automatically.
           </p>
           <button
-            onClick={() => setVisible(true)}
+            onClick={connectWallet}
             style={{
               background: "var(--signal)",
               color: "var(--ink-900)", border: "none", padding: "14px 36px", borderRadius: 12,
