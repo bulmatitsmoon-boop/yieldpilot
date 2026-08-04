@@ -8,13 +8,6 @@ import {
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
 import { PhantomWalletAdapter } from "@solana/wallet-adapter-phantom";
 import { SolflareWalletAdapter } from "@solana/wallet-adapter-solflare";
-import { WalletAdapterNetwork } from "@solana/wallet-adapter-base";
-import {
-  SolanaMobileWalletAdapter,
-  createDefaultAddressSelector,
-  createDefaultAuthorizationResultCache,
-  createDefaultWalletNotFoundHandler,
-} from "@solana-mobile/wallet-adapter-mobile";
 import { clusterApiUrl } from "@solana/web3.js";
 
 import "@solana/wallet-adapter-react-ui/styles.css";
@@ -33,30 +26,21 @@ const WProv = WalletProvider as any;
 const WMProv = WalletModalProvider as any;
 
 export function WalletContextProvider({ children }: { children: React.ReactNode }) {
-  // MOBILE FIX (2026-08-03): PhantomWalletAdapter/SolflareWalletAdapter both rely on
-  // detecting an injected `window.solana`/`window.solflare` browser-extension
-  // provider. On a real mobile browser tab (not the wallet app's own in-app
-  // browser), no extension exists, so neither adapter has anything to connect
-  // to — the connect modal opens fine but tapping a wallet silently does
-  // nothing. SolanaMobileWalletAdapter implements the actual Mobile Wallet
-  // Adapter protocol (intent-based handoff to whatever wallet app is
-  // installed) and is what makes Connect work on a real mobile browser.
+  // Mobile support does NOT live here — see useConnectWallet.ts, which deep-links into
+  // a wallet's in-app browser when there's no injected provider (the real fix, shipped
+  // 2026-08-03 in PR #168).
+  //
+  // A SolanaMobileWalletAdapter from @solana-mobile/wallet-adapter-mobile was briefly
+  // added to this array and is now removed: it was verified LIVE on production to never
+  // appear in the connect modal at all. Its real v2.x constructor takes
+  // {appIdentity, authorizationCache, chains, chainSelector, onWalletNotFound} — not the
+  // {addressSelector, authorizationResultCache, cluster} shape used here — so the wrong
+  // keys silently became `undefined` instead of throwing, and that class isn't meant for
+  // this array in the first place (MWA registers itself via the Wallet Standard).
+  // Note @solana/wallet-adapter-react already carries the MWA package transitively, so
+  // nothing is lost by dropping the direct dependency.
   const wallets = useMemo(
-    () => [
-      new PhantomWalletAdapter(),
-      new SolflareWalletAdapter(),
-      new SolanaMobileWalletAdapter({
-        addressSelector: createDefaultAddressSelector(),
-        appIdentity: {
-          name: "YieldPilot",
-          uri: "https://yieldpilot.fund",
-          icon: "/favicon.ico",
-        },
-        authorizationResultCache: createDefaultAuthorizationResultCache(),
-        cluster: NETWORK === "devnet" ? WalletAdapterNetwork.Devnet : WalletAdapterNetwork.Mainnet,
-        onWalletNotFound: createDefaultWalletNotFoundHandler(),
-      }),
-    ],
+    () => [new PhantomWalletAdapter(), new SolflareWalletAdapter()],
     []
   );
 
