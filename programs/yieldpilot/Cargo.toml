@@ -18,7 +18,7 @@ default = []
 
 [dependencies]
 anchor-lang  = { version = "=0.31.0", features = ["init-if-needed"] }
-anchor-spl   = { version = "=0.31.0", features = ["token", "associated_token"] }
+anchor-spl   = { version = "=0.31.0", features = ["token", "associated_token", "token_2022"] }
 hashbrown    = "=0.14.5"
 indexmap     = "=2.3.0"
 zeroize      = "=1.7.0"
