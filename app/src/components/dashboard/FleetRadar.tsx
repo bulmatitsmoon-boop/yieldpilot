@@ -39,7 +39,7 @@ export function FleetRadar({ totalDeposited, blendedApy }: Props) {
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 16 }}>
+      <div className="fleet-radar-grid" style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 16 }}>
         {/* Fleet radar */}
         <div style={{ background: "var(--ink-800)", border: "1px solid var(--line)", borderRadius: 12, padding: 20 }}>
           <div style={{ fontSize: 10, fontWeight: 600, color: "var(--text-low)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 12, fontFamily: "var(--font-mono)" }}>

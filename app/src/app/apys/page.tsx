@@ -329,7 +329,7 @@ export default function ApysPage() {
             }
           />
 
-          <div style={{
+          <div className="apys-rate-row" style={{
             display: "grid", gridTemplateColumns: "1fr 80px 100px 80px 80px",
             padding: "8px 20px", borderBottom: "1px solid var(--line)",
             color: "var(--text-low)", fontSize: 11, fontWeight: 600,
@@ -348,7 +348,7 @@ export default function ApysPage() {
             const isRoutable = ROUTABLE_PROTOCOL_IDS.has(p.protocolId);
             const routableRank = routableSorted.findIndex(s => s.protocolId === p.protocolId);
             return (
-              <div key={p.protocolId} style={{
+              <div key={p.protocolId} className="apys-rate-row" style={{
                 display: "grid", gridTemplateColumns: "1fr 80px 100px 80px 80px",
                 padding: "14px 20px", borderTop: i === 0 ? "none" : "1px solid var(--line)",
                 alignItems: "center",

@@ -171,6 +171,19 @@ html, body {
 
   .table-scroll { overflow-x: auto !important; -webkit-overflow-scrolling: touch; }
 
+  /* Fleet Radar's radar panel was a hardcoded 320px first grid column with no
+     mobile override — on a ~375px viewport it alone ate nearly the full width,
+     squeezing the stats/activity-feed column to negative space. Combined with
+     html/body's global overflow-x:hidden, that content was clipped rather than
+     scrollable. Collapse to a single column on mobile instead. */
+  .fleet-radar-grid { grid-template-columns: 1fr !important; }
+
+  /* /apys page's own rate table never picked up the .rate-row mobile fix above
+     (it's a separate, non-shared table implementation from the homepage's) —
+     give it the same column-narrowing treatment so it doesn't clip either. */
+  .apys-rate-row { grid-template-columns: minmax(0,1fr) 52px 56px 48px 48px !important; padding-left: 12px !important; padding-right: 12px !important; }
+  .apys-rate-row .mono-num { font-size: 12px !important; }
+
   .hero-h1 { font-size: 32px !important; }
   .hero-grid { grid-template-columns: 1fr !important; gap: 32px !important; padding: 40px 0 48px !important; }
 
