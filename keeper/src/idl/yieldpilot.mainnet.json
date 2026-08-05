@@ -2852,6 +2852,10 @@
           {
             "name": "pending_recall_loss",
             "type": "u64"
+          },
+          {
+            "name": "last_gate_mint_update_ts",
+            "type": "i64"
           }
         ]
       }
