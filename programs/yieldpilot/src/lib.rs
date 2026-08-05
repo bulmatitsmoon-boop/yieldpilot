@@ -6,6 +6,17 @@ use anchor_lang::solana_program::sysvar::instructions::{
 use anchor_spl::{
     associated_token::{self, AssociatedToken, Create},
     token::{self, Mint, MintTo, Token, TokenAccount, Transfer, Burn, CloseAccount, SyncNative},
+    // Gate-token accounts must accept EITHER token program: pump.fun tokens are minted
+    // under Token-2022 (`TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb`), not the classic
+    // SPL Token program every OTHER token in this program uses (USDC, WSOL, our own
+    // shares mint — none of those are Token-2022, so nothing else here needs this).
+    // `token::TokenAccount` (above) is Anchor's classic-only type — Account<'info, T>
+    // hard-requires the account be owned by T::owner(), which for that type is always
+    // the classic Token program, so a Token-2022 gate-token account would fail an owner
+    // check before the program logic even ran. `token_interface::TokenAccount` +
+    // `InterfaceAccount` (the latter from anchor_lang::prelude, already imported above)
+    // accept whichever of the two programs actually owns the account.
+    token_interface::TokenAccount as GateTokenAccount,
 };
 
 // sha256("global:withdraw")[0..8] — the Anchor instruction discriminator for
@@ -298,9 +309,10 @@ pub mod yieldpilot {
         // Unique per-lifecycle stamp: lets deposit() tell apart a genuinely fresh
         // position from a stale one left over by a prior vault at the same PDA
         // (same mint+admin seeds can be reinitialized after close_vault).
-        v.created_at          = Clock::get()?.unix_timestamp;
-        v.lifetime_gains      = 0;
-        v.pending_recall_loss = 0;
+        v.created_at              = Clock::get()?.unix_timestamp;
+        v.lifetime_gains          = 0;
+        v.pending_recall_loss     = 0;
+        v.last_gate_mint_update_ts = 0;
 
         emit!(VaultInitialized { vault: v.key(), admin: v.admin, mint: v.mint });
         Ok(())
@@ -784,13 +796,25 @@ pub mod yieldpilot {
         Ok(())
     }
 
+    // Changed 2026-08-03 (Lloyd's explicit direction): was locked to a single one-time
+    // set, forever, as an anti-rug guarantee — an admin couldn't swap the gate token out
+    // from under depositors mid-flight and silently strip their tier discounts. Now
+    // mirrors update_tier_thresholds's cooldown model instead of an outright lock: the
+    // FIRST set is always allowed immediately (nothing to rug yet), and every set after
+    // that requires the same TIER_THRESHOLD_COOLDOWN_SECS window to have passed since the
+    // last change. Still can't be flash-changed against anyone mid-session; no longer
+    // permanently unfixable if the token ever needs correcting.
     pub fn set_gate_mint(ctx: Context<AdminOnly>, gate_mint: Pubkey) -> Result<()> {
         let v = &mut ctx.accounts.vault;
-        require!(
-            v.gate_mint == anchor_lang::solana_program::system_program::ID,
-            VaultError::GateMintAlreadySet
-        );
+        let now = Clock::get()?.unix_timestamp;
+        if v.gate_mint != anchor_lang::solana_program::system_program::ID {
+            require!(
+                now - v.last_gate_mint_update_ts >= TIER_THRESHOLD_COOLDOWN_SECS,
+                VaultError::GateMintCooldownActive
+            );
+        }
         v.gate_mint = gate_mint;
+        v.last_gate_mint_update_ts = now;
         Ok(())
     }
 
@@ -1785,6 +1809,14 @@ pub struct Vault {
     // comment on charge_to_withdrawer. Always 0 outside of the single instruction between
     // a paired recall and its withdraw(); never persists across transactions.
     pub pending_recall_loss: u64,
+    // Cooldown timestamp for set_gate_mint, mirroring last_threshold_update_ts's role for
+    // update_tier_thresholds. Added 2026-08-03: gate_mint was originally locked forever
+    // after the first set (a deliberate anti-rug guarantee — an admin couldn't swap the
+    // reward token out from under depositors and silently strip their tier discounts).
+    // Changed at Lloyd's explicit direction to match the tier-threshold pattern instead:
+    // still can't be flash-changed to rug someone mid-session, but no longer permanently
+    // locked if the token ever needs to be corrected or upgraded. 0 until the first set.
+    pub last_gate_mint_update_ts: i64,
 }
 
 impl Vault {
@@ -1797,8 +1829,9 @@ impl Vault {
         + 8              // tvl_cap
         + 4 + 32         // name string
         + MAX_PROTOCOLS * ProtocolAdapter::SIZE
-        + 112;           // padding (was 128 — created_at, lifetime_gains, and now pending_recall_loss
-                         // were each carved out of this reserve when added; 112 bytes remain.
+        + 104;           // padding (was 128 — created_at, lifetime_gains, pending_recall_loss, and now
+                         // last_gate_mint_update_ts were each carved out of this reserve when added;
+                         // 104 bytes remain.
                          // Existing accounts already have this space allocated and zero-initialized,
                          // so no realloc/migration is needed for the new field.
 
@@ -2009,7 +2042,7 @@ pub struct Deposit<'info> {
     pub user_shares_account: Box<Account<'info, TokenAccount>>,
 
     /// Optional: user's gate token account. Required when vault.gate_mint != default.
-    pub user_gate_account: Option<Box<Account<'info, TokenAccount>>>,
+    pub user_gate_account: Option<Box<InterfaceAccount<'info, GateTokenAccount>>>,
 
     pub token_program:            Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
@@ -2055,7 +2088,7 @@ pub struct Withdraw<'info> {
     pub treasury_token_account: Option<Box<Account<'info, TokenAccount>>>,
 
     /// Optional: user's gate token account. Used to determine fee tier at withdrawal.
-    pub user_gate_account: Option<Box<Account<'info, TokenAccount>>>,
+    pub user_gate_account: Option<Box<InterfaceAccount<'info, GateTokenAccount>>>,
 
     /// Optional: whitelist entry PDA. If present, performance fee is waived entirely.
     #[account(
@@ -2498,4 +2531,5 @@ pub enum VaultError {
     #[msg("Receipt account still holds tokens — protocol is not actually fully exited")] ReceiptStillHeld,
     #[msg("Non-keeper deploy must be paired with a deposit instruction for the same user and vault in the same transaction")] DeployRequiresPairedDeposit,
     #[msg("This withdrawal's forced early-exit fee exceeds the amount being withdrawn — reduce the withdrawal or wait for more idle/epoch accrual")] RecallExceedsWithdrawal,
+    #[msg("Gate mint was changed recently — wait for the cooldown before changing it again")] GateMintCooldownActive,
 }
