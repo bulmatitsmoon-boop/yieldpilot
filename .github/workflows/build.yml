@@ -157,7 +157,11 @@ jobs:
         env:
           MAINNET_RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
         run: |
-          CURRENT_LEN=$(solana program show 3tAEmHXZ51YVLe9ts8b9cMcgQPgaSamLxLtxR31VpREi --url "${MAINNET_RPC_URL}" | awk -F'[ (]' '/Data Length:/{print $3}')
+          CURRENT_LEN=$(solana program show 3tAEmHXZ51YVLe9ts8b9cMcgQPgaSamLxLtxR31VpREi --keypair /tmp/deploy-authority.json --url "${MAINNET_RPC_URL}" | awk -F'[ (]' '/Data Length:/{print $3}')
+          if [ -z "$CURRENT_LEN" ]; then
+            echo "Could not determine current program length — failing loudly instead of silently skipping the extend."
+            exit 1
+          fi
           NEW_LEN=$(stat -c%s target/deploy/yieldpilot.so)
           echo "current on-chain capacity: $CURRENT_LEN bytes, new binary: $NEW_LEN bytes"
           if [ "$NEW_LEN" -gt "$CURRENT_LEN" ]; then
