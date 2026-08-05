@@ -157,7 +157,13 @@ jobs:
         env:
           MAINNET_RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
         run: |
-          CURRENT_LEN=$(solana program show 3tAEmHXZ51YVLe9ts8b9cMcgQPgaSamLxLtxR31VpREi --keypair /tmp/deploy-authority.json --url "${MAINNET_RPC_URL}" | awk -F'[ (]' '/Data Length:/{print $3}')
+          # `--keypair` alone is not enough here — `solana program show` still errors
+          # "No default signer found" without a CONFIGURED default keypair (this is a
+          # config-file lookup, not a per-command flag), confirmed live 2026-08-05 after
+          # passing --keypair inline changed nothing. `solana config set` fixes it for
+          # every solana CLI call in the rest of this step, not just this one.
+          solana config set --keypair /tmp/deploy-authority.json --url "${MAINNET_RPC_URL}"
+          CURRENT_LEN=$(solana program show 3tAEmHXZ51YVLe9ts8b9cMcgQPgaSamLxLtxR31VpREi | awk -F'[ (]' '/Data Length:/{print $3}')
           if [ -z "$CURRENT_LEN" ]; then
             echo "Could not determine current program length — failing loudly instead of silently skipping the extend."
             exit 1
