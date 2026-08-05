@@ -142,6 +142,32 @@ jobs:
           pip3 install --quiet base58
           python3 scripts/decode_mainnet_program_key.py /tmp/mainnet-program-keypair.json
 
+      # Solana's BPFLoaderUpgradeable can only extend a program account in minimum
+      # 10240-byte chunks (ExtendProgram's own floor) — `solana program deploy`'s
+      # auto-extend does NOT know this and just requests exactly (new_size - current_size)
+      # bytes, which fails outright ("invalid program argument") whenever that gap is
+      # small (observed live 2026-08-05: a 48-byte gap failed deploy entirely, no funds
+      # lost since the failure happens before the buffer/extend actually commits, but it
+      # wastes a full CI cycle every time the binary crosses its allocated capacity by a
+      # small amount). Pre-extending in one guaranteed-large-enough step makes the
+      # subsequent deploy always a same-size upgrade (never needs its own extend), so
+      # this failure mode can't recur regardless of how small the future overage is.
+      - name: Extend mainnet program account if needed (works around Solana's 10240-byte minimum extend)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.network == 'mainnet'
+        env:
+          MAINNET_RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
+        run: |
+          CURRENT_LEN=$(solana program show 3tAEmHXZ51YVLe9ts8b9cMcgQPgaSamLxLtxR31VpREi --url "${MAINNET_RPC_URL}" | awk -F'[ (]' '/Data Length:/{print $3}')
+          NEW_LEN=$(stat -c%s target/deploy/yieldpilot.so)
+          echo "current on-chain capacity: $CURRENT_LEN bytes, new binary: $NEW_LEN bytes"
+          if [ "$NEW_LEN" -gt "$CURRENT_LEN" ]; then
+            EXTEND_BY=$(( NEW_LEN - CURRENT_LEN > 10240 ? NEW_LEN - CURRENT_LEN : 10240 ))
+            echo "extending program account by $EXTEND_BY bytes first"
+            solana program extend 3tAEmHXZ51YVLe9ts8b9cMcgQPgaSamLxLtxR31VpREi "$EXTEND_BY" --keypair /tmp/deploy-authority.json --url "${MAINNET_RPC_URL}"
+          else
+            echo "binary fits in current capacity, no extend needed"
+          fi
+
       - name: Deploy to mainnet
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.network == 'mainnet'
         env:
