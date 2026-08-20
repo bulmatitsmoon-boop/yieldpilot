@@ -22,11 +22,13 @@ on:
   pull_request:
     paths:
       - "keeper/**"
+      - "tests/verify-epoch-cooldown.mjs"
       - ".github/workflows/keeper-ci.yml"
   push:
     branches: [main]
     paths:
       - "keeper/**"
+      - "tests/verify-epoch-cooldown.mjs"
       - ".github/workflows/keeper-ci.yml"
 
 jobs:
@@ -50,3 +52,17 @@ jobs:
       - name: Typecheck
         working-directory: keeper
         run: npx tsc --noEmit
+
+  # Typechecking alone would NOT have caught the 2026-08-20 churn incident: the
+  # fail-open epoch cooldown was perfectly well-typed and silently inert, and it cost
+  # ~77% of two weeks' yield in avoidable exit fees. This asserts the behaviour.
+  epoch-cooldown:
+    name: epoch-cooldown gate (fail-closed)
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: node tests/verify-epoch-cooldown.mjs
