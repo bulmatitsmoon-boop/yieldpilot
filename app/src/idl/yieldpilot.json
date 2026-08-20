@@ -31,6 +31,64 @@
       "args": []
     },
     {
+      "name": "accrue_sol_lst",
+      "docs": [
+        "Books the REAL accrued yield on an SPL-stake-pool position (Jito, PSOL) into",
+        "total_deposits, without recalling anything — no CPI, no exit fee, no funds move.",
+        "",
+        "An LST's pool account stores `total_lamports` (real SOL backing the pool) and",
+        "`pool_token_supply` (LST tokens in existence) directly in its own account data —",
+        "same verified offsets (258/266) the live-rates feature already reads for APY",
+        "(see api/apys/route.ts fetchStakePool), reused here rather than guessed fresh.",
+        "exchange_rate = total_lamports / pool_token_supply, and it only ever rises as",
+        "staking rewards land — this is exactly why compound() being a routine no-op left",
+        "yield on fee-bearing protocols permanently invisible: gains were only ever booked",
+        "at RECALL time (settle_recall), and nothing recalls without a real reason to.",
+        "",
+        "SAFE BY CONSTRUCTION, same shape as reconcile()/clear_phantom_deployed: reads only",
+        "account data it already trusts (the vault's own receipt-token balance, and the",
+        "registered stake pool's own account — the SAME account deploy_to_sol_lst and",
+        "recall_from_sol_lst already decode fields from at fixed offsets) and can only ever",
+        "move deployed_balance UP to match the real, computed current value — never",
+        "invents a number, never moves funds, never pays a fee."
+      ],
+      "discriminator": [
+        2,
+        237,
+        65,
+        187,
+        218,
+        21,
+        217,
+        118
+      ],
+      "accounts": [
+        {
+          "name": "keeper",
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "vault_lst_account"
+        },
+        {
+          "name": "stake_pool",
+          "docs": [
+            "assert_state_matches in the handler; only its raw account data is read (no CPI)."
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "protocol_index",
+          "type": "u8"
+        }
+      ]
+    },
+    {
       "name": "add_to_whitelist",
       "discriminator": [
         157,
@@ -83,6 +141,51 @@
         {
           "name": "_wallet",
           "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "clear_phantom_deployed",
+      "docs": [
+        "Clears a stale `deployed_balance` phantom left over from a pre-upgrade recall whose",
+        "exit fee never got booked (fixed going forward by settle_recall's proportional model,",
+        "this cleans up residue from BEFORE that fix existed).",
+        "",
+        "SAFE BY CONSTRUCTION, same argument as reconcile(): this reads the receipt token",
+        "account's REAL on-chain balance — never a caller-supplied number — and only acts",
+        "when that balance is verifiably 0. If the receipt balance is 0, there is nothing left",
+        "to recall from this protocol; therefore ANY nonzero deployed_balance for that slot is",
+        "necessarily phantom. It can only ever move a slot toward zero, and only when proven",
+        "empty — it can never zero a slot that still holds real, recallable value, and it can",
+        "never invent or inflate anything."
+      ],
+      "discriminator": [
+        37,
+        246,
+        51,
+        113,
+        169,
+        5,
+        169,
+        204
+      ],
+      "accounts": [
+        {
+          "name": "keeper",
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "vault_receipt_account"
+        }
+      ],
+      "args": [
+        {
+          "name": "protocol_index",
+          "type": "u8"
         }
       ]
     },
@@ -257,6 +360,13 @@
           "writable": true
         },
         {
+          "name": "tx_instructions_sysvar",
+          "docs": [
+            "instructions in this same transaction for the paired-deposit check."
+          ],
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        },
+        {
           "name": "vault_authority",
           "writable": true,
           "pda": {
@@ -377,6 +487,10 @@
         {
           "name": "vault",
           "writable": true
+        },
+        {
+          "name": "tx_instructions_sysvar",
+          "address": "Sysvar1nstructions1111111111111111111111111"
         },
         {
           "name": "vault_authority",
@@ -505,6 +619,10 @@
         {
           "name": "vault",
           "writable": true
+        },
+        {
+          "name": "tx_instructions_sysvar",
+          "address": "Sysvar1nstructions1111111111111111111111111"
         },
         {
           "name": "vault_authority",
@@ -781,6 +899,1290 @@
       "args": [
         {
           "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "emergency_close",
+      "discriminator": [
+        72,
+        5,
+        66,
+        138,
+        108,
+        194,
+        37,
+        175
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "vault"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "initialize_vault",
+      "discriminator": [
+        48,
+        191,
+        163,
+        44,
+        71,
+        129,
+        63,
+        164
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "account",
+                "path": "admin"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_token_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "vault_authority"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "shares_mint",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "params",
+          "type": {
+            "defined": {
+              "name": "InitVaultParams"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "propose_admin",
+      "discriminator": [
+        121,
+        214,
+        199,
+        212,
+        87,
+        39,
+        117,
+        234
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "vault"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "new_admin",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "raise_tvl_cap",
+      "discriminator": [
+        189,
+        18,
+        217,
+        77,
+        58,
+        73,
+        228,
+        195
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "vault"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "new_cap",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "rebalance",
+      "discriminator": [
+        108,
+        158,
+        77,
+        9,
+        210,
+        52,
+        88,
+        62
+      ],
+      "accounts": [
+        {
+          "name": "keeper",
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "new_allocations",
+          "type": {
+            "vec": "u64"
+          }
+        }
+      ]
+    },
+    {
+      "name": "recall_from_kamino",
+      "discriminator": [
+        133,
+        175,
+        209,
+        248,
+        145,
+        104,
+        47,
+        190
+      ],
+      "accounts": [
+        {
+          "name": "keeper",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "tx_instructions_sysvar",
+          "docs": [
+            "sibling instructions in this same transaction for the pairing check."
+          ],
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        },
+        {
+          "name": "vault_authority",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_token_account",
+          "writable": true
+        },
+        {
+          "name": "vault_collateral_account",
+          "writable": true
+        },
+        {
+          "name": "kamino_reserve",
+          "writable": true
+        },
+        {
+          "name": "kamino_lending_market"
+        },
+        {
+          "name": "kamino_market_authority"
+        },
+        {
+          "name": "kamino_liquidity_mint"
+        },
+        {
+          "name": "kamino_liquidity_supply",
+          "writable": true
+        },
+        {
+          "name": "kamino_collateral_mint",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "docs": [
+            "Token program (used for both liquidity and collateral)"
+          ],
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "instruction_sysvar"
+        },
+        {
+          "name": "kamino_program",
+          "address": "KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD"
+        }
+      ],
+      "args": [
+        {
+          "name": "protocol_index",
+          "type": "u8"
+        },
+        {
+          "name": "collateral_amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "recall_from_marinade",
+      "discriminator": [
+        140,
+        230,
+        137,
+        235,
+        132,
+        214,
+        200,
+        236
+      ],
+      "accounts": [
+        {
+          "name": "keeper",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "tx_instructions_sysvar",
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        },
+        {
+          "name": "vault_authority",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_token_account",
+          "docs": [
+            "Vault's wrapped-SOL account — native SOL received from Marinade gets",
+            "wrapped back in here (transfer + sync_native), no close/recreate",
+            "needed since we're topping up an already-open account."
+          ],
+          "writable": true
+        },
+        {
+          "name": "marinade_state",
+          "writable": true
+        },
+        {
+          "name": "msol_mint",
+          "writable": true
+        },
+        {
+          "name": "liq_pool_sol_leg",
+          "writable": true
+        },
+        {
+          "name": "liq_pool_msol_leg",
+          "writable": true
+        },
+        {
+          "name": "treasury_msol_account",
+          "writable": true
+        },
+        {
+          "name": "vault_msol_account",
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "marinade_program",
+          "address": "MarBmsSgKXdrN1egZf5sqe1TMai9K1rChYNDJgjq7aD"
+        }
+      ],
+      "args": [
+        {
+          "name": "protocol_index",
+          "type": "u8"
+        },
+        {
+          "name": "msol_amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "recall_from_sol_lst",
+      "docs": [
+        "Burn LST tokens to withdraw SOL from an SPL Stake Pool (Jito)."
+      ],
+      "discriminator": [
+        197,
+        194,
+        161,
+        164,
+        199,
+        54,
+        204,
+        133
+      ],
+      "accounts": [
+        {
+          "name": "keeper",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "tx_instructions_sysvar",
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        },
+        {
+          "name": "vault_token_account",
+          "docs": [
+            "Vault's wrapped-SOL account — native SOL received from the stake pool",
+            "gets wrapped back in here (transfer + sync_native), no close/recreate",
+            "needed since we're topping up an already-open account."
+          ],
+          "writable": true
+        },
+        {
+          "name": "vault_authority",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_lst_account",
+          "docs": [
+            "Vault's LST ATA — LST burned from here"
+          ],
+          "writable": true
+        },
+        {
+          "name": "stake_pool",
+          "writable": true
+        },
+        {
+          "name": "withdraw_authority"
+        },
+        {
+          "name": "reserve_stake",
+          "writable": true
+        },
+        {
+          "name": "manager_fee_account",
+          "docs": [
+            "Manager fee account"
+          ],
+          "writable": true
+        },
+        {
+          "name": "pool_mint",
+          "docs": [
+            "LST pool mint"
+          ],
+          "writable": true
+        },
+        {
+          "name": "clock_sysvar",
+          "address": "SysvarC1ock11111111111111111111111111111111"
+        },
+        {
+          "name": "stake_history_sysvar",
+          "address": "SysvarStakeHistory1111111111111111111111111"
+        },
+        {
+          "name": "stake_program",
+          "address": "Stake11111111111111111111111111111111111111"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "stake_pool_program",
+          "address": "SPoo1Ku8WFXoNDMHPsrGSTSG1Y47rzgn41SLUNakuHy"
+        }
+      ],
+      "args": [
+        {
+          "name": "protocol_index",
+          "type": "u8"
+        },
+        {
+          "name": "lst_amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "recall_from_solend",
+      "docs": [
+        "Redeem cTokens from Solend, receive liquidity."
+      ],
+      "discriminator": [
+        101,
+        117,
+        61,
+        19,
+        86,
+        49,
+        5,
+        29
+      ],
+      "accounts": [
+        {
+          "name": "keeper",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "tx_instructions_sysvar",
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        },
+        {
+          "name": "vault_authority",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_collateral_account",
+          "writable": true
+        },
+        {
+          "name": "vault_token_account",
+          "writable": true
+        },
+        {
+          "name": "reserve",
+          "writable": true
+        },
+        {
+          "name": "reserve_collateral_mint",
+          "writable": true
+        },
+        {
+          "name": "reserve_liquidity_supply",
+          "writable": true
+        },
+        {
+          "name": "lending_market",
+          "writable": true
+        },
+        {
+          "name": "lending_market_authority"
+        },
+        {
+          "name": "pyth_oracle"
+        },
+        {
+          "name": "switchboard_oracle"
+        },
+        {
+          "name": "clock_sysvar",
+          "address": "SysvarC1ock11111111111111111111111111111111"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "solend_program",
+          "address": "So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo"
+        }
+      ],
+      "args": [
+        {
+          "name": "protocol_index",
+          "type": "u8"
+        },
+        {
+          "name": "collateral_amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "reconcile",
+      "docs": [
+        "Snap total_deposits back to what the vault ACTUALLY holds: idle + deployed principal.",
+        "",
+        "WHY THIS IS SAFE TO EXPOSE (and could even be permissionless): it writes NOTHING it",
+        "doesn't already read from THIS vault's own on-chain state — the vault_token_account",
+        "balance and total_deployed(), both of which any instruction here already trusts. It",
+        "does NOT decode Kamino/Marinade/Jito state, does NOT read an exchange rate, invents",
+        "no number. So it cannot over-value a share: the value it computes is the same",
+        "conservative floor withdraw() already uses (see the long note in withdraw() — \"idle +",
+        "total_deployed is a conservative floor... it never over-values a share, so it can",
+        "never drain the vault\"). It can only ever make total_deposits MORE accurate.",
+        "",
+        "WHAT IT FIXES: withdraw() subtracts amount_out and recall books realized gains/losses,",
+        "but rounding and the historical cost-basis bug can leave total_deposits drifted a few",
+        "units off the real (idle + deployed) value — \"orphaned\" accounting with no funds",
+        "behind it. Observed live 2026-07-17: after a full withdrawal the USDC vault read",
+        "total_shares = 0 with total_deposits = 148. Because the UI prices positions as",
+        "shares * total_deposits / total_shares, that drift misprices the next depositor.",
+        "reconcile() clears it and makes the accounting self-healing against any future drift.",
+        "",
+        "Kept KeeperOnly (not permissionless) only for symmetry with compound/rebalance and to",
+        "keep the admin surface legible; there is no security reason it must be gated, since it",
+        "can only move total_deposits toward the truth. Allowed while paused: reconciling a",
+        "halted vault is strictly safe and may be exactly what an operator wants mid-incident."
+      ],
+      "discriminator": [
+        61,
+        24,
+        197,
+        180,
+        195,
+        169,
+        138,
+        105
+      ],
+      "accounts": [
+        {
+          "name": "keeper",
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "vault_token_account"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "register_protocol",
+      "discriminator": [
+        63,
+        107,
+        156,
+        136,
+        249,
+        231,
+        183,
+        65
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "vault"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "kind",
+          "type": "u8"
+        },
+        {
+          "name": "external_state",
+          "type": "pubkey"
+        },
+        {
+          "name": "vault_receipt_account",
+          "type": "pubkey"
+        },
+        {
+          "name": "target_bps",
+          "type": "u64"
+        },
+        {
+          "name": "label",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "remove_from_whitelist",
+      "discriminator": [
+        7,
+        144,
+        216,
+        239,
+        243,
+        236,
+        193,
+        235
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault"
+        },
+        {
+          "name": "whitelist_entry",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  119,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault"
+              },
+              {
+                "kind": "arg",
+                "path": "wallet"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "_wallet",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "set_gate_mint",
+      "discriminator": [
+        127,
+        39,
+        248,
+        229,
+        20,
+        204,
+        166,
+        10
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "vault"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "gate_mint",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "set_keeper",
+      "discriminator": [
+        102,
+        94,
+        23,
+        78,
+        157,
+        222,
+        243,
+        214
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "vault"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "new_keeper",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "set_paused",
+      "discriminator": [
+        91,
+        60,
+        125,
+        192,
+        176,
+        225,
+        166,
+        218
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "vault"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "paused",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "set_treasury",
+      "docs": [
+        "Change where performance fees are routed.",
+        "",
+        "WHY THIS EXISTS: `treasury` was previously written once in `initialize_vault` and",
+        "had no setter, making it immutable for the life of a vault. Round 8 shipped with",
+        "`treasury == admin` on both vaults, which meant (a) fee revenue accrued to the same",
+        "wallet that holds the upgrade authority and the deploy SOL, and (b) the perf-fee",
+        "routing fixed in PR #64 could never be VERIFIED — the fee and the user's payout",
+        "landed in the same account, so the two were indistinguishable. Fixing that required",
+        "this instruction, hence the upgrade.",
+        "",
+        "One-step, unlike the admin handover (`propose_admin`/`accept_admin`): a wrong",
+        "treasury is recoverable — the admin simply calls this again — whereas a wrong admin",
+        "is permanent loss of control. It is NOT harmless, though: `withdraw()` enforces",
+        "`treasury_acct.owner == v.treasury` and refuses to pay out when a non-zero fee has",
+        "nowhere to go (`TreasuryRequired`), so pointing this at an address whose token",
+        "account doesn't exist BRICKS every PROFITABLE withdrawal until it's corrected.",
+        "Principal-only withdrawals (perf_fee == 0) are unaffected. Set this to a wallet you",
+        "control and create its ATA for the vault's mint before any profitable withdrawal."
+      ],
+      "discriminator": [
+        57,
+        97,
+        196,
+        95,
+        195,
+        206,
+        106,
+        136
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "vault"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "new_treasury",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "update_settings",
+      "discriminator": [
+        81,
+        166,
+        51,
+        213,
+        158,
+        84,
+        157,
+        108
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "vault"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "auto_compound",
+          "type": "bool"
+        },
+        {
+          "name": "auto_rebalance",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "update_tier_thresholds",
+      "discriminator": [
+        253,
+        196,
+        79,
+        35,
+        61,
+        76,
+        169,
+        85
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "gold",
+          "type": "u64"
+        },
+        {
+          "name": "silver",
+          "type": "u64"
+        },
+        {
+          "name": "bronze",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "withdraw",
+      "discriminator": [
+        183,
+        18,
+        70,
+        156,
+        148,
+        109,
+        161,
+        34
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "vault_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_token_account",
+          "writable": true
+        },
+        {
+          "name": "user_token_account",
+          "writable": true
+        },
+        {
+          "name": "shares_mint",
+          "writable": true
+        },
+        {
+          "name": "user_position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault"
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user_shares_account",
+          "writable": true
+        },
+        {
+          "name": "treasury_token_account",
+          "docs": [
+            "Optional: treasury token account for perf fee routing."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "user_gate_account",
+          "docs": [
+            "Optional: user's gate token account. Used to determine fee tier at withdrawal."
+          ],
+          "optional": true
+        },
+        {
+          "name": "whitelist_entry",
+          "docs": [
+            "Optional: whitelist entry PDA. If present, performance fee is waived entirely."
+          ],
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  119,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault"
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
+        {
+          "name": "shares",
+          "type": "u64"
+        },
+        {
+          "name": "min_amount_out",
           "type": "u64"
         }
       ]
@@ -1134,38 +2536,6 @@
           "type": "bool"
         }
       ]
-    },
-    {
-      "name": "emergency_close",
-      "discriminator": [
-        72,
-        5,
-        66,
-        138,
-        108,
-        194,
-        37,
-        175
-      ],
-      "accounts": [
-        {
-          "name": "admin",
-          "writable": true,
-          "signer": true,
-          "relations": [
-            "vault"
-          ]
-        },
-        {
-          "name": "vault",
-          "writable": true
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
-        }
-      ],
-      "args": []
     },
     {
       "name": "exit_orca_lp_position",
@@ -2123,197 +3493,6 @@
       ]
     },
     {
-      "name": "initialize_vault",
-      "discriminator": [
-        48,
-        191,
-        163,
-        44,
-        71,
-        129,
-        63,
-        164
-      ],
-      "accounts": [
-        {
-          "name": "admin",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "mint"
-        },
-        {
-          "name": "vault",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "mint"
-              },
-              {
-                "kind": "account",
-                "path": "admin"
-              }
-            ]
-          }
-        },
-        {
-          "name": "vault_authority",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "vault"
-              }
-            ]
-          }
-        },
-        {
-          "name": "vault_token_account",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "account",
-                "path": "vault_authority"
-              },
-              {
-                "kind": "const",
-                "value": [
-                  6,
-                  221,
-                  246,
-                  225,
-                  215,
-                  101,
-                  161,
-                  147,
-                  217,
-                  203,
-                  225,
-                  70,
-                  206,
-                  235,
-                  121,
-                  172,
-                  28,
-                  180,
-                  133,
-                  237,
-                  95,
-                  91,
-                  55,
-                  145,
-                  58,
-                  140,
-                  245,
-                  133,
-                  126,
-                  255,
-                  0,
-                  169
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "mint"
-              }
-            ],
-            "program": {
-              "kind": "const",
-              "value": [
-                140,
-                151,
-                37,
-                143,
-                78,
-                36,
-                137,
-                241,
-                187,
-                61,
-                16,
-                41,
-                20,
-                142,
-                13,
-                131,
-                11,
-                90,
-                19,
-                153,
-                218,
-                255,
-                16,
-                132,
-                4,
-                142,
-                123,
-                216,
-                219,
-                233,
-                248,
-                89
-              ]
-            }
-          }
-        },
-        {
-          "name": "shares_mint",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "token_program",
-          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-        },
-        {
-          "name": "associated_token_program",
-          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
-        },
-        {
-          "name": "rent",
-          "address": "SysvarRent111111111111111111111111111111111"
-        }
-      ],
-      "args": [
-        {
-          "name": "params",
-          "type": {
-            "defined": {
-              "name": "InitVaultParams"
-            }
-          }
-        }
-      ]
-    },
-    {
       "name": "open_new_orca_lp_position",
       "docs": [
         "Open a fresh Whirlpool position at a new price range, after",
@@ -2608,548 +3787,6 @@
       ]
     },
     {
-      "name": "propose_admin",
-      "discriminator": [
-        121,
-        214,
-        199,
-        212,
-        87,
-        39,
-        117,
-        234
-      ],
-      "accounts": [
-        {
-          "name": "admin",
-          "signer": true,
-          "relations": [
-            "vault"
-          ]
-        },
-        {
-          "name": "vault",
-          "writable": true
-        }
-      ],
-      "args": [
-        {
-          "name": "new_admin",
-          "type": "pubkey"
-        }
-      ]
-    },
-    {
-      "name": "raise_tvl_cap",
-      "discriminator": [
-        189,
-        18,
-        217,
-        77,
-        58,
-        73,
-        228,
-        195
-      ],
-      "accounts": [
-        {
-          "name": "admin",
-          "signer": true,
-          "relations": [
-            "vault"
-          ]
-        },
-        {
-          "name": "vault",
-          "writable": true
-        }
-      ],
-      "args": [
-        {
-          "name": "new_cap",
-          "type": "u64"
-        }
-      ]
-    },
-    {
-      "name": "rebalance",
-      "discriminator": [
-        108,
-        158,
-        77,
-        9,
-        210,
-        52,
-        88,
-        62
-      ],
-      "accounts": [
-        {
-          "name": "keeper",
-          "signer": true
-        },
-        {
-          "name": "vault",
-          "writable": true
-        }
-      ],
-      "args": [
-        {
-          "name": "new_allocations",
-          "type": {
-            "vec": "u64"
-          }
-        }
-      ]
-    },
-    {
-      "name": "recall_from_kamino",
-      "discriminator": [
-        133,
-        175,
-        209,
-        248,
-        145,
-        104,
-        47,
-        190
-      ],
-      "accounts": [
-        {
-          "name": "keeper",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "vault",
-          "writable": true
-        },
-        {
-          "name": "tx_instructions_sysvar",
-          "docs": [
-            "sibling instructions in this same transaction for the pairing check."
-          ],
-          "address": "Sysvar1nstructions1111111111111111111111111"
-        },
-        {
-          "name": "vault_authority",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "vault"
-              }
-            ]
-          }
-        },
-        {
-          "name": "vault_token_account",
-          "writable": true
-        },
-        {
-          "name": "vault_collateral_account",
-          "writable": true
-        },
-        {
-          "name": "kamino_reserve",
-          "writable": true
-        },
-        {
-          "name": "kamino_lending_market"
-        },
-        {
-          "name": "kamino_market_authority"
-        },
-        {
-          "name": "kamino_liquidity_mint"
-        },
-        {
-          "name": "kamino_liquidity_supply",
-          "writable": true
-        },
-        {
-          "name": "kamino_collateral_mint",
-          "writable": true
-        },
-        {
-          "name": "token_program",
-          "docs": [
-            "Token program (used for both liquidity and collateral)"
-          ],
-          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-        },
-        {
-          "name": "instruction_sysvar"
-        },
-        {
-          "name": "kamino_program",
-          "address": "KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD"
-        }
-      ],
-      "args": [
-        {
-          "name": "protocol_index",
-          "type": "u8"
-        },
-        {
-          "name": "collateral_amount",
-          "type": "u64"
-        }
-      ]
-    },
-    {
-      "name": "recall_from_marinade",
-      "discriminator": [
-        140,
-        230,
-        137,
-        235,
-        132,
-        214,
-        200,
-        236
-      ],
-      "accounts": [
-        {
-          "name": "keeper",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "vault",
-          "writable": true
-        },
-        {
-          "name": "tx_instructions_sysvar",
-          "address": "Sysvar1nstructions1111111111111111111111111"
-        },
-        {
-          "name": "vault_authority",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "vault"
-              }
-            ]
-          }
-        },
-        {
-          "name": "vault_token_account",
-          "docs": [
-            "Vault's wrapped-SOL account — native SOL received from Marinade gets",
-            "wrapped back in here (transfer + sync_native), no close/recreate",
-            "needed since we're topping up an already-open account."
-          ],
-          "writable": true
-        },
-        {
-          "name": "marinade_state",
-          "writable": true
-        },
-        {
-          "name": "msol_mint",
-          "writable": true
-        },
-        {
-          "name": "liq_pool_sol_leg",
-          "writable": true
-        },
-        {
-          "name": "liq_pool_msol_leg",
-          "writable": true
-        },
-        {
-          "name": "treasury_msol_account",
-          "writable": true
-        },
-        {
-          "name": "vault_msol_account",
-          "writable": true
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
-        },
-        {
-          "name": "token_program",
-          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-        },
-        {
-          "name": "marinade_program",
-          "address": "MarBmsSgKXdrN1egZf5sqe1TMai9K1rChYNDJgjq7aD"
-        }
-      ],
-      "args": [
-        {
-          "name": "protocol_index",
-          "type": "u8"
-        },
-        {
-          "name": "msol_amount",
-          "type": "u64"
-        }
-      ]
-    },
-    {
-      "name": "recall_from_sol_lst",
-      "docs": [
-        "Burn LST tokens to withdraw SOL from an SPL Stake Pool (Jito)."
-      ],
-      "discriminator": [
-        197,
-        194,
-        161,
-        164,
-        199,
-        54,
-        204,
-        133
-      ],
-      "accounts": [
-        {
-          "name": "keeper",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "vault",
-          "writable": true
-        },
-        {
-          "name": "tx_instructions_sysvar",
-          "address": "Sysvar1nstructions1111111111111111111111111"
-        },
-        {
-          "name": "vault_token_account",
-          "docs": [
-            "Vault's wrapped-SOL account — native SOL received from the stake pool",
-            "gets wrapped back in here (transfer + sync_native), no close/recreate",
-            "needed since we're topping up an already-open account."
-          ],
-          "writable": true
-        },
-        {
-          "name": "vault_authority",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "vault"
-              }
-            ]
-          }
-        },
-        {
-          "name": "vault_lst_account",
-          "docs": [
-            "Vault's LST ATA — LST burned from here"
-          ],
-          "writable": true
-        },
-        {
-          "name": "stake_pool",
-          "writable": true
-        },
-        {
-          "name": "withdraw_authority"
-        },
-        {
-          "name": "reserve_stake",
-          "writable": true
-        },
-        {
-          "name": "manager_fee_account",
-          "docs": [
-            "Manager fee account"
-          ],
-          "writable": true
-        },
-        {
-          "name": "pool_mint",
-          "docs": [
-            "LST pool mint"
-          ],
-          "writable": true
-        },
-        {
-          "name": "clock_sysvar",
-          "address": "SysvarC1ock11111111111111111111111111111111"
-        },
-        {
-          "name": "stake_history_sysvar",
-          "address": "SysvarStakeHistory1111111111111111111111111"
-        },
-        {
-          "name": "stake_program",
-          "address": "Stake11111111111111111111111111111111111111"
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
-        },
-        {
-          "name": "token_program",
-          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-        },
-        {
-          "name": "stake_pool_program",
-          "address": "SPoo1Ku8WFXoNDMHPsrGSTSG1Y47rzgn41SLUNakuHy"
-        }
-      ],
-      "args": [
-        {
-          "name": "protocol_index",
-          "type": "u8"
-        },
-        {
-          "name": "lst_amount",
-          "type": "u64"
-        }
-      ]
-    },
-    {
-      "name": "recall_from_solend",
-      "docs": [
-        "Redeem cTokens from Solend, receive liquidity."
-      ],
-      "discriminator": [
-        101,
-        117,
-        61,
-        19,
-        86,
-        49,
-        5,
-        29
-      ],
-      "accounts": [
-        {
-          "name": "keeper",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "vault",
-          "writable": true
-        },
-        {
-          "name": "tx_instructions_sysvar",
-          "address": "Sysvar1nstructions1111111111111111111111111"
-        },
-        {
-          "name": "vault_authority",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "vault"
-              }
-            ]
-          }
-        },
-        {
-          "name": "vault_collateral_account",
-          "writable": true
-        },
-        {
-          "name": "vault_token_account",
-          "writable": true
-        },
-        {
-          "name": "reserve",
-          "writable": true
-        },
-        {
-          "name": "reserve_collateral_mint",
-          "writable": true
-        },
-        {
-          "name": "reserve_liquidity_supply",
-          "writable": true
-        },
-        {
-          "name": "lending_market",
-          "writable": true
-        },
-        {
-          "name": "lending_market_authority"
-        },
-        {
-          "name": "pyth_oracle"
-        },
-        {
-          "name": "switchboard_oracle"
-        },
-        {
-          "name": "clock_sysvar",
-          "address": "SysvarC1ock11111111111111111111111111111111"
-        },
-        {
-          "name": "token_program",
-          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-        },
-        {
-          "name": "solend_program",
-          "address": "So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo"
-        }
-      ],
-      "args": [
-        {
-          "name": "protocol_index",
-          "type": "u8"
-        },
-        {
-          "name": "collateral_amount",
-          "type": "u64"
-        }
-      ]
-    },
-    {
       "name": "redeploy_orca_lp_liquidity",
       "docs": [
         "Move the vault's own idle tokens into the currently active position",
@@ -3391,421 +4028,6 @@
         },
         {
           "name": "token_max_b",
-          "type": "u64"
-        }
-      ]
-    },
-    {
-      "name": "register_protocol",
-      "discriminator": [
-        63,
-        107,
-        156,
-        136,
-        249,
-        231,
-        183,
-        65
-      ],
-      "accounts": [
-        {
-          "name": "admin",
-          "signer": true,
-          "relations": [
-            "vault"
-          ]
-        },
-        {
-          "name": "vault",
-          "writable": true
-        }
-      ],
-      "args": [
-        {
-          "name": "kind",
-          "type": "u8"
-        },
-        {
-          "name": "external_state",
-          "type": "pubkey"
-        },
-        {
-          "name": "vault_receipt_account",
-          "type": "pubkey"
-        },
-        {
-          "name": "target_bps",
-          "type": "u64"
-        },
-        {
-          "name": "label",
-          "type": "string"
-        }
-      ]
-    },
-    {
-      "name": "remove_from_whitelist",
-      "discriminator": [
-        7,
-        144,
-        216,
-        239,
-        243,
-        236,
-        193,
-        235
-      ],
-      "accounts": [
-        {
-          "name": "admin",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "vault"
-        },
-        {
-          "name": "whitelist_entry",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  119,
-                  108
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "vault"
-              },
-              {
-                "kind": "arg",
-                "path": "wallet"
-              }
-            ]
-          }
-        }
-      ],
-      "args": [
-        {
-          "name": "_wallet",
-          "type": "pubkey"
-        }
-      ]
-    },
-    {
-      "name": "set_gate_mint",
-      "discriminator": [
-        127,
-        39,
-        248,
-        229,
-        20,
-        204,
-        166,
-        10
-      ],
-      "accounts": [
-        {
-          "name": "admin",
-          "signer": true,
-          "relations": [
-            "vault"
-          ]
-        },
-        {
-          "name": "vault",
-          "writable": true
-        }
-      ],
-      "args": [
-        {
-          "name": "gate_mint",
-          "type": "pubkey"
-        }
-      ]
-    },
-    {
-      "name": "set_keeper",
-      "discriminator": [
-        102,
-        94,
-        23,
-        78,
-        157,
-        222,
-        243,
-        214
-      ],
-      "accounts": [
-        {
-          "name": "admin",
-          "signer": true,
-          "relations": [
-            "vault"
-          ]
-        },
-        {
-          "name": "vault",
-          "writable": true
-        }
-      ],
-      "args": [
-        {
-          "name": "new_keeper",
-          "type": "pubkey"
-        }
-      ]
-    },
-    {
-      "name": "set_paused",
-      "discriminator": [
-        91,
-        60,
-        125,
-        192,
-        176,
-        225,
-        166,
-        218
-      ],
-      "accounts": [
-        {
-          "name": "admin",
-          "signer": true,
-          "relations": [
-            "vault"
-          ]
-        },
-        {
-          "name": "vault",
-          "writable": true
-        }
-      ],
-      "args": [
-        {
-          "name": "paused",
-          "type": "bool"
-        }
-      ]
-    },
-    {
-      "name": "update_settings",
-      "discriminator": [
-        81,
-        166,
-        51,
-        213,
-        158,
-        84,
-        157,
-        108
-      ],
-      "accounts": [
-        {
-          "name": "admin",
-          "signer": true,
-          "relations": [
-            "vault"
-          ]
-        },
-        {
-          "name": "vault",
-          "writable": true
-        }
-      ],
-      "args": [
-        {
-          "name": "auto_compound",
-          "type": "bool"
-        },
-        {
-          "name": "auto_rebalance",
-          "type": "bool"
-        }
-      ]
-    },
-    {
-      "name": "update_tier_thresholds",
-      "discriminator": [
-        253,
-        196,
-        79,
-        35,
-        61,
-        76,
-        169,
-        85
-      ],
-      "accounts": [
-        {
-          "name": "admin",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "vault",
-          "writable": true
-        }
-      ],
-      "args": [
-        {
-          "name": "gold",
-          "type": "u64"
-        },
-        {
-          "name": "silver",
-          "type": "u64"
-        },
-        {
-          "name": "bronze",
-          "type": "u64"
-        }
-      ]
-    },
-    {
-      "name": "withdraw",
-      "discriminator": [
-        183,
-        18,
-        70,
-        156,
-        148,
-        109,
-        161,
-        34
-      ],
-      "accounts": [
-        {
-          "name": "user",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "vault",
-          "writable": true
-        },
-        {
-          "name": "vault_authority",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "vault"
-              }
-            ]
-          }
-        },
-        {
-          "name": "vault_token_account",
-          "writable": true
-        },
-        {
-          "name": "user_token_account",
-          "writable": true
-        },
-        {
-          "name": "shares_mint",
-          "writable": true
-        },
-        {
-          "name": "user_position",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  112,
-                  111,
-                  115,
-                  105,
-                  116,
-                  105,
-                  111,
-                  110
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "vault"
-              },
-              {
-                "kind": "account",
-                "path": "user"
-              }
-            ]
-          }
-        },
-        {
-          "name": "user_shares_account",
-          "writable": true
-        },
-        {
-          "name": "treasury_token_account",
-          "docs": [
-            "Optional: treasury token account for perf fee routing."
-          ],
-          "writable": true,
-          "optional": true
-        },
-        {
-          "name": "user_gate_account",
-          "docs": [
-            "Optional: user's gate token account. Used to determine fee tier at withdrawal."
-          ],
-          "optional": true
-        },
-        {
-          "name": "whitelist_entry",
-          "docs": [
-            "Optional: whitelist entry PDA. If present, performance fee is waived entirely."
-          ],
-          "optional": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  119,
-                  108
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "vault"
-              },
-              {
-                "kind": "account",
-                "path": "user"
-              }
-            ]
-          }
-        },
-        {
-          "name": "token_program",
-          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-        }
-      ],
-      "args": [
-        {
-          "name": "shares",
-          "type": "u64"
-        },
-        {
-          "name": "min_amount_out",
           "type": "u64"
         }
       ]
@@ -4147,32 +4369,6 @@
   ],
   "accounts": [
     {
-      "name": "LpUserPosition",
-      "discriminator": [
-        179,
-        185,
-        88,
-        139,
-        228,
-        145,
-        229,
-        195
-      ]
-    },
-    {
-      "name": "LpVault",
-      "discriminator": [
-        189,
-        45,
-        167,
-        23,
-        91,
-        118,
-        105,
-        190
-      ]
-    },
-    {
       "name": "UserPosition",
       "discriminator": [
         251,
@@ -4209,6 +4405,32 @@
         192,
         234,
         62
+      ]
+    },
+    {
+      "name": "LpUserPosition",
+      "discriminator": [
+        179,
+        185,
+        88,
+        139,
+        228,
+        145,
+        229,
+        195
+      ]
+    },
+    {
+      "name": "LpVault",
+      "discriminator": [
+        189,
+        45,
+        167,
+        23,
+        91,
+        118,
+        105,
+        190
       ]
     }
   ],
@@ -4263,6 +4485,110 @@
         189,
         21,
         224
+      ]
+    },
+    {
+      "name": "PauseToggled",
+      "discriminator": [
+        105,
+        215,
+        89,
+        53,
+        198,
+        232,
+        136,
+        161
+      ]
+    },
+    {
+      "name": "PhantomCleared",
+      "discriminator": [
+        56,
+        12,
+        190,
+        10,
+        213,
+        166,
+        214,
+        62
+      ]
+    },
+    {
+      "name": "ProtocolRegistered",
+      "discriminator": [
+        68,
+        113,
+        160,
+        1,
+        146,
+        198,
+        22,
+        87
+      ]
+    },
+    {
+      "name": "Rebalanced",
+      "discriminator": [
+        74,
+        101,
+        57,
+        244,
+        181,
+        179,
+        52,
+        182
+      ]
+    },
+    {
+      "name": "Reconciled",
+      "discriminator": [
+        192,
+        247,
+        107,
+        182,
+        202,
+        153,
+        79,
+        71
+      ]
+    },
+    {
+      "name": "VaultInitialized",
+      "discriminator": [
+        180,
+        43,
+        207,
+        2,
+        18,
+        71,
+        3,
+        75
+      ]
+    },
+    {
+      "name": "Withdrawn",
+      "discriminator": [
+        20,
+        89,
+        223,
+        198,
+        194,
+        124,
+        219,
+        13
+      ]
+    },
+    {
+      "name": "YieldAccrued",
+      "discriminator": [
+        195,
+        121,
+        41,
+        184,
+        183,
+        9,
+        52,
+        221
       ]
     },
     {
@@ -4342,74 +4668,14 @@
         51,
         153
       ]
-    },
-    {
-      "name": "PauseToggled",
-      "discriminator": [
-        105,
-        215,
-        89,
-        53,
-        198,
-        232,
-        136,
-        161
-      ]
-    },
-    {
-      "name": "ProtocolRegistered",
-      "discriminator": [
-        68,
-        113,
-        160,
-        1,
-        146,
-        198,
-        22,
-        87
-      ]
-    },
-    {
-      "name": "Rebalanced",
-      "discriminator": [
-        74,
-        101,
-        57,
-        244,
-        181,
-        179,
-        52,
-        182
-      ]
-    },
-    {
-      "name": "VaultInitialized",
-      "discriminator": [
-        180,
-        43,
-        207,
-        2,
-        18,
-        71,
-        3,
-        75
-      ]
-    },
-    {
-      "name": "Withdrawn",
-      "discriminator": [
-        20,
-        89,
-        223,
-        198,
-        194,
-        124,
-        219,
-        13
-      ]
     }
   ],
   "errors": [
+    {
+      "code": 6000,
+      "name": "ReserveDataTooShort",
+      "msg": "Reserve account data too short to parse"
+    },
     {
       "code": 6000,
       "name": "MustAcknowledgeImpermanentLoss",
@@ -4553,6 +4819,475 @@
       }
     },
     {
+      "name": "InitVaultParams",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "auto_compound",
+            "type": "bool"
+          },
+          {
+            "name": "auto_rebalance",
+            "type": "bool"
+          },
+          {
+            "name": "tvl_cap",
+            "type": "u64"
+          },
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "treasury",
+            "type": "pubkey"
+          },
+          {
+            "name": "gate_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "keeper",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PauseToggled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "paused",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PhantomCleared",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "protocol_index",
+            "type": "u8"
+          },
+          {
+            "name": "cleared_amount",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProtocolAdapter",
+      "docs": [
+        "Per-protocol slot stored inside the Vault account."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "kind",
+            "type": {
+              "defined": {
+                "name": "ProtocolKind"
+              }
+            }
+          },
+          {
+            "name": "external_state",
+            "docs": [
+              "Kamino/Solend → reserve pubkey.  Marinade → state pubkey.  Jito → stake pool pubkey."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "vault_receipt_account",
+            "docs": [
+              "Vault's receipt-token ATA (kUSDC for Kamino, mSOL for Marinade)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "deployed_balance",
+            "docs": [
+              "Base-asset lamports currently deployed here."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "target_bps",
+            "docs": [
+              "Target share of vault in basis points."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "label",
+            "docs": [
+              "Human-readable label, null-terminated UTF-8."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                24
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProtocolKind",
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Kamino"
+          },
+          {
+            "name": "Marinade"
+          },
+          {
+            "name": "Solend"
+          },
+          {
+            "name": "Jito"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProtocolRegistered",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "external_state",
+            "type": "pubkey"
+          },
+          {
+            "name": "target_bps",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Rebalanced",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "allocations",
+            "type": {
+              "vec": "u64"
+            }
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Reconciled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "old_total_deposits",
+            "type": "u64"
+          },
+          {
+            "name": "new_total_deposits",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UserPosition",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "shares",
+            "type": "u64"
+          },
+          {
+            "name": "deposited_amount",
+            "type": "u64"
+          },
+          {
+            "name": "last_deposit_ts",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "tier_at_deposit",
+            "type": "u8"
+          },
+          {
+            "name": "vault_created_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Vault",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "keeper",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "vault_token_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "shares_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "treasury",
+            "type": "pubkey"
+          },
+          {
+            "name": "gate_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "gold_threshold",
+            "type": "u64"
+          },
+          {
+            "name": "silver_threshold",
+            "type": "u64"
+          },
+          {
+            "name": "bronze_threshold",
+            "type": "u64"
+          },
+          {
+            "name": "pending_admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "total_deposits",
+            "type": "u64"
+          },
+          {
+            "name": "total_shares",
+            "type": "u64"
+          },
+          {
+            "name": "auto_compound",
+            "type": "bool"
+          },
+          {
+            "name": "auto_rebalance",
+            "type": "bool"
+          },
+          {
+            "name": "paused",
+            "type": "bool"
+          },
+          {
+            "name": "last_compound_ts",
+            "type": "i64"
+          },
+          {
+            "name": "last_threshold_update_ts",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "authority_bump",
+            "type": "u8"
+          },
+          {
+            "name": "protocol_count",
+            "type": "u8"
+          },
+          {
+            "name": "tvl_cap",
+            "type": "u64"
+          },
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "protocols",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "ProtocolAdapter"
+                  }
+                },
+                6
+              ]
+            }
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "lifetime_gains",
+            "type": "u64"
+          },
+          {
+            "name": "pending_recall_loss",
+            "type": "u64"
+          },
+          {
+            "name": "last_gate_mint_update_ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "VaultInitialized",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "WhitelistEntry",
+      "docs": [
+        "Whitelist entry PDA — existence means the wallet pays zero performance fee on this vault.",
+        "Seeds: [\"wl\", vault, wallet]"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Withdrawn",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "shares_burned",
+            "type": "u64"
+          },
+          {
+            "name": "amount_out",
+            "type": "u64"
+          },
+          {
+            "name": "perf_fee",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "YieldAccrued",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "protocol_index",
+            "type": "u8"
+          },
+          {
+            "name": "gain",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
       "name": "InitLpVaultParams",
       "type": {
         "kind": "struct",
@@ -4589,42 +5324,6 @@
           {
             "name": "name",
             "type": "string"
-          }
-        ]
-      }
-    },
-    {
-      "name": "InitVaultParams",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "auto_compound",
-            "type": "bool"
-          },
-          {
-            "name": "auto_rebalance",
-            "type": "bool"
-          },
-          {
-            "name": "tvl_cap",
-            "type": "u64"
-          },
-          {
-            "name": "name",
-            "type": "string"
-          },
-          {
-            "name": "treasury",
-            "type": "pubkey"
-          },
-          {
-            "name": "gate_mint",
-            "type": "pubkey"
-          },
-          {
-            "name": "keeper",
-            "type": "pubkey"
           }
         ]
       }
@@ -4927,367 +5626,6 @@
           {
             "name": "liquidity_amount",
             "type": "u128"
-          }
-        ]
-      }
-    },
-    {
-      "name": "PauseToggled",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "vault",
-            "type": "pubkey"
-          },
-          {
-            "name": "paused",
-            "type": "bool"
-          }
-        ]
-      }
-    },
-    {
-      "name": "ProtocolAdapter",
-      "docs": [
-        "Per-protocol slot stored inside the Vault account."
-      ],
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "kind",
-            "type": {
-              "defined": {
-                "name": "ProtocolKind"
-              }
-            }
-          },
-          {
-            "name": "external_state",
-            "docs": [
-              "Kamino/Solend → reserve pubkey.  Marinade → state pubkey.  Jito → stake pool pubkey."
-            ],
-            "type": "pubkey"
-          },
-          {
-            "name": "vault_receipt_account",
-            "docs": [
-              "Vault's receipt-token ATA (kUSDC for Kamino, mSOL for Marinade)."
-            ],
-            "type": "pubkey"
-          },
-          {
-            "name": "deployed_balance",
-            "docs": [
-              "Base-asset lamports currently deployed here."
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "target_bps",
-            "docs": [
-              "Target share of vault in basis points."
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "label",
-            "docs": [
-              "Human-readable label, null-terminated UTF-8."
-            ],
-            "type": {
-              "array": [
-                "u8",
-                24
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
-      "name": "ProtocolKind",
-      "repr": {
-        "kind": "rust"
-      },
-      "type": {
-        "kind": "enum",
-        "variants": [
-          {
-            "name": "Kamino"
-          },
-          {
-            "name": "Marinade"
-          },
-          {
-            "name": "Solend"
-          },
-          {
-            "name": "Jito"
-          }
-        ]
-      }
-    },
-    {
-      "name": "ProtocolRegistered",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "vault",
-            "type": "pubkey"
-          },
-          {
-            "name": "external_state",
-            "type": "pubkey"
-          },
-          {
-            "name": "target_bps",
-            "type": "u64"
-          }
-        ]
-      }
-    },
-    {
-      "name": "Rebalanced",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "vault",
-            "type": "pubkey"
-          },
-          {
-            "name": "allocations",
-            "type": {
-              "vec": "u64"
-            }
-          },
-          {
-            "name": "ts",
-            "type": "i64"
-          }
-        ]
-      }
-    },
-    {
-      "name": "UserPosition",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "owner",
-            "type": "pubkey"
-          },
-          {
-            "name": "vault",
-            "type": "pubkey"
-          },
-          {
-            "name": "shares",
-            "type": "u64"
-          },
-          {
-            "name": "deposited_amount",
-            "type": "u64"
-          },
-          {
-            "name": "last_deposit_ts",
-            "type": "i64"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          },
-          {
-            "name": "tier_at_deposit",
-            "type": "u8"
-          },
-          {
-            "name": "vault_created_at",
-            "type": "i64"
-          }
-        ]
-      }
-    },
-    {
-      "name": "Vault",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "admin",
-            "type": "pubkey"
-          },
-          {
-            "name": "keeper",
-            "type": "pubkey"
-          },
-          {
-            "name": "mint",
-            "type": "pubkey"
-          },
-          {
-            "name": "vault_token_account",
-            "type": "pubkey"
-          },
-          {
-            "name": "shares_mint",
-            "type": "pubkey"
-          },
-          {
-            "name": "treasury",
-            "type": "pubkey"
-          },
-          {
-            "name": "gate_mint",
-            "type": "pubkey"
-          },
-          {
-            "name": "gold_threshold",
-            "type": "u64"
-          },
-          {
-            "name": "silver_threshold",
-            "type": "u64"
-          },
-          {
-            "name": "bronze_threshold",
-            "type": "u64"
-          },
-          {
-            "name": "pending_admin",
-            "type": "pubkey"
-          },
-          {
-            "name": "total_deposits",
-            "type": "u64"
-          },
-          {
-            "name": "total_shares",
-            "type": "u64"
-          },
-          {
-            "name": "auto_compound",
-            "type": "bool"
-          },
-          {
-            "name": "auto_rebalance",
-            "type": "bool"
-          },
-          {
-            "name": "paused",
-            "type": "bool"
-          },
-          {
-            "name": "last_compound_ts",
-            "type": "i64"
-          },
-          {
-            "name": "last_threshold_update_ts",
-            "type": "i64"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          },
-          {
-            "name": "authority_bump",
-            "type": "u8"
-          },
-          {
-            "name": "protocol_count",
-            "type": "u8"
-          },
-          {
-            "name": "tvl_cap",
-            "type": "u64"
-          },
-          {
-            "name": "name",
-            "type": "string"
-          },
-          {
-            "name": "protocols",
-            "type": {
-              "array": [
-                {
-                  "defined": {
-                    "name": "ProtocolAdapter"
-                  }
-                },
-                6
-              ]
-            }
-          },
-          {
-            "name": "created_at",
-            "type": "i64"
-          }
-        ]
-      }
-    },
-    {
-      "name": "VaultInitialized",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "vault",
-            "type": "pubkey"
-          },
-          {
-            "name": "admin",
-            "type": "pubkey"
-          },
-          {
-            "name": "mint",
-            "type": "pubkey"
-          }
-        ]
-      }
-    },
-    {
-      "name": "WhitelistEntry",
-      "docs": [
-        "Whitelist entry PDA — existence means the wallet pays zero performance fee on this vault.",
-        "Seeds: [\"wl\", vault, wallet]"
-      ],
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "bump",
-            "type": "u8"
-          }
-        ]
-      }
-    },
-    {
-      "name": "Withdrawn",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "vault",
-            "type": "pubkey"
-          },
-          {
-            "name": "user",
-            "type": "pubkey"
-          },
-          {
-            "name": "shares_burned",
-            "type": "u64"
-          },
-          {
-            "name": "amount_out",
-            "type": "u64"
-          },
-          {
-            "name": "perf_fee",
-            "type": "u64"
           }
         ]
       }

@@ -31,6 +31,64 @@
       "args": []
     },
     {
+      "name": "accrue_sol_lst",
+      "docs": [
+        "Books the REAL accrued yield on an SPL-stake-pool position (Jito, PSOL) into",
+        "total_deposits, without recalling anything — no CPI, no exit fee, no funds move.",
+        "",
+        "An LST's pool account stores `total_lamports` (real SOL backing the pool) and",
+        "`pool_token_supply` (LST tokens in existence) directly in its own account data —",
+        "same verified offsets (258/266) the live-rates feature already reads for APY",
+        "(see api/apys/route.ts fetchStakePool), reused here rather than guessed fresh.",
+        "exchange_rate = total_lamports / pool_token_supply, and it only ever rises as",
+        "staking rewards land — this is exactly why compound() being a routine no-op left",
+        "yield on fee-bearing protocols permanently invisible: gains were only ever booked",
+        "at RECALL time (settle_recall), and nothing recalls without a real reason to.",
+        "",
+        "SAFE BY CONSTRUCTION, same shape as reconcile()/clear_phantom_deployed: reads only",
+        "account data it already trusts (the vault's own receipt-token balance, and the",
+        "registered stake pool's own account — the SAME account deploy_to_sol_lst and",
+        "recall_from_sol_lst already decode fields from at fixed offsets) and can only ever",
+        "move deployed_balance UP to match the real, computed current value — never",
+        "invents a number, never moves funds, never pays a fee."
+      ],
+      "discriminator": [
+        2,
+        237,
+        65,
+        187,
+        218,
+        21,
+        217,
+        118
+      ],
+      "accounts": [
+        {
+          "name": "keeper",
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "vault_lst_account"
+        },
+        {
+          "name": "stake_pool",
+          "docs": [
+            "assert_state_matches in the handler; only its raw account data is read (no CPI)."
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "protocol_index",
+          "type": "u8"
+        }
+      ]
+    },
+    {
       "name": "add_to_whitelist",
       "discriminator": [
         157,
@@ -83,6 +141,51 @@
         {
           "name": "_wallet",
           "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "clear_phantom_deployed",
+      "docs": [
+        "Clears a stale `deployed_balance` phantom left over from a pre-upgrade recall whose",
+        "exit fee never got booked (fixed going forward by settle_recall's proportional model,",
+        "this cleans up residue from BEFORE that fix existed).",
+        "",
+        "SAFE BY CONSTRUCTION, same argument as reconcile(): this reads the receipt token",
+        "account's REAL on-chain balance — never a caller-supplied number — and only acts",
+        "when that balance is verifiably 0. If the receipt balance is 0, there is nothing left",
+        "to recall from this protocol; therefore ANY nonzero deployed_balance for that slot is",
+        "necessarily phantom. It can only ever move a slot toward zero, and only when proven",
+        "empty — it can never zero a slot that still holds real, recallable value, and it can",
+        "never invent or inflate anything."
+      ],
+      "discriminator": [
+        37,
+        246,
+        51,
+        113,
+        169,
+        5,
+        169,
+        204
+      ],
+      "accounts": [
+        {
+          "name": "keeper",
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "vault_receipt_account"
+        }
+      ],
+      "args": [
+        {
+          "name": "protocol_index",
+          "type": "u8"
         }
       ]
     },
@@ -257,6 +360,13 @@
           "writable": true
         },
         {
+          "name": "tx_instructions_sysvar",
+          "docs": [
+            "instructions in this same transaction for the paired-deposit check."
+          ],
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        },
+        {
           "name": "vault_authority",
           "writable": true,
           "pda": {
@@ -377,6 +487,10 @@
         {
           "name": "vault",
           "writable": true
+        },
+        {
+          "name": "tx_instructions_sysvar",
+          "address": "Sysvar1nstructions1111111111111111111111111"
         },
         {
           "name": "vault_authority",
@@ -505,6 +619,10 @@
         {
           "name": "vault",
           "writable": true
+        },
+        {
+          "name": "tx_instructions_sysvar",
+          "address": "Sysvar1nstructions1111111111111111111111111"
         },
         {
           "name": "vault_authority",
@@ -1551,6 +1669,58 @@
       ]
     },
     {
+      "name": "reconcile",
+      "docs": [
+        "Snap total_deposits back to what the vault ACTUALLY holds: idle + deployed principal.",
+        "",
+        "WHY THIS IS SAFE TO EXPOSE (and could even be permissionless): it writes NOTHING it",
+        "doesn't already read from THIS vault's own on-chain state — the vault_token_account",
+        "balance and total_deployed(), both of which any instruction here already trusts. It",
+        "does NOT decode Kamino/Marinade/Jito state, does NOT read an exchange rate, invents",
+        "no number. So it cannot over-value a share: the value it computes is the same",
+        "conservative floor withdraw() already uses (see the long note in withdraw() — \"idle +",
+        "total_deployed is a conservative floor... it never over-values a share, so it can",
+        "never drain the vault\"). It can only ever make total_deposits MORE accurate.",
+        "",
+        "WHAT IT FIXES: withdraw() subtracts amount_out and recall books realized gains/losses,",
+        "but rounding and the historical cost-basis bug can leave total_deposits drifted a few",
+        "units off the real (idle + deployed) value — \"orphaned\" accounting with no funds",
+        "behind it. Observed live 2026-07-17: after a full withdrawal the USDC vault read",
+        "total_shares = 0 with total_deposits = 148. Because the UI prices positions as",
+        "shares * total_deposits / total_shares, that drift misprices the next depositor.",
+        "reconcile() clears it and makes the accounting self-healing against any future drift.",
+        "",
+        "Kept KeeperOnly (not permissionless) only for symmetry with compound/rebalance and to",
+        "keep the admin surface legible; there is no security reason it must be gated, since it",
+        "can only move total_deposits toward the truth. Allowed while paused: reconciling a",
+        "halted vault is strictly safe and may be exactly what an operator wants mid-incident."
+      ],
+      "discriminator": [
+        61,
+        24,
+        197,
+        180,
+        195,
+        169,
+        138,
+        105
+      ],
+      "accounts": [
+        {
+          "name": "keeper",
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "vault_token_account"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "register_protocol",
       "discriminator": [
         63,
@@ -1743,6 +1913,58 @@
         {
           "name": "paused",
           "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "set_treasury",
+      "docs": [
+        "Change where performance fees are routed.",
+        "",
+        "WHY THIS EXISTS: `treasury` was previously written once in `initialize_vault` and",
+        "had no setter, making it immutable for the life of a vault. Round 8 shipped with",
+        "`treasury == admin` on both vaults, which meant (a) fee revenue accrued to the same",
+        "wallet that holds the upgrade authority and the deploy SOL, and (b) the perf-fee",
+        "routing fixed in PR #64 could never be VERIFIED — the fee and the user's payout",
+        "landed in the same account, so the two were indistinguishable. Fixing that required",
+        "this instruction, hence the upgrade.",
+        "",
+        "One-step, unlike the admin handover (`propose_admin`/`accept_admin`): a wrong",
+        "treasury is recoverable — the admin simply calls this again — whereas a wrong admin",
+        "is permanent loss of control. It is NOT harmless, though: `withdraw()` enforces",
+        "`treasury_acct.owner == v.treasury` and refuses to pay out when a non-zero fee has",
+        "nowhere to go (`TreasuryRequired`), so pointing this at an address whose token",
+        "account doesn't exist BRICKS every PROFITABLE withdrawal until it's corrected.",
+        "Principal-only withdrawals (perf_fee == 0) are unaffected. Set this to a wallet you",
+        "control and create its ATA for the vault's mint before any profitable withdrawal."
+      ],
+      "discriminator": [
+        57,
+        97,
+        196,
+        95,
+        195,
+        206,
+        106,
+        136
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "vault"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "new_treasury",
+          "type": "pubkey"
         }
       ]
     },
@@ -2074,6 +2296,19 @@
       ]
     },
     {
+      "name": "PhantomCleared",
+      "discriminator": [
+        56,
+        12,
+        190,
+        10,
+        213,
+        166,
+        214,
+        62
+      ]
+    },
+    {
       "name": "ProtocolRegistered",
       "discriminator": [
         68,
@@ -2100,6 +2335,19 @@
       ]
     },
     {
+      "name": "Reconciled",
+      "discriminator": [
+        192,
+        247,
+        107,
+        182,
+        202,
+        153,
+        79,
+        71
+      ]
+    },
+    {
       "name": "VaultInitialized",
       "discriminator": [
         180,
@@ -2123,6 +2371,19 @@
         124,
         219,
         13
+      ]
+    },
+    {
+      "name": "YieldAccrued",
+      "discriminator": [
+        195,
+        121,
+        41,
+        184,
+        183,
+        9,
+        52,
+        221
       ]
     }
   ],
@@ -2267,6 +2528,26 @@
       }
     },
     {
+      "name": "PhantomCleared",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "protocol_index",
+            "type": "u8"
+          },
+          {
+            "name": "cleared_amount",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
       "name": "ProtocolAdapter",
       "docs": [
         "Per-protocol slot stored inside the Vault account."
@@ -2386,6 +2667,26 @@
           {
             "name": "ts",
             "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Reconciled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "old_total_deposits",
+            "type": "u64"
+          },
+          {
+            "name": "new_total_deposits",
+            "type": "u64"
           }
         ]
       }
@@ -2543,6 +2844,18 @@
           {
             "name": "created_at",
             "type": "i64"
+          },
+          {
+            "name": "lifetime_gains",
+            "type": "u64"
+          },
+          {
+            "name": "pending_recall_loss",
+            "type": "u64"
+          },
+          {
+            "name": "last_gate_mint_update_ts",
+            "type": "i64"
           }
         ]
       }
@@ -2606,6 +2919,26 @@
           },
           {
             "name": "perf_fee",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "YieldAccrued",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "protocol_index",
+            "type": "u8"
+          },
+          {
+            "name": "gain",
             "type": "u64"
           }
         ]
