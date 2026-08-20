@@ -356,6 +356,100 @@ export function useYieldPilot(vaultAddresses: string[]) {
           postIxs.push(createCloseAccountInstruction(userTokenAccount, publicKey, publicKey));
         }
 
+        // Bundle a deploy_to_<winner> instruction right after deposit(), in the same
+        // atomic transaction — so this deposit lands directly in the earning protocol
+        // with zero idle time, instead of sitting idle until the next keeper cron cycle
+        // (~30 min, best-effort). Relies on the paired-deposit exception in lib.rs: any
+        // signer may call deploy_to_* as long as a matching deposit() for the same
+        // (vault, user) rides in the same transaction — mirrors the existing paired
+        // recall-on-withdraw exception exactly.
+        //
+        // Best-effort: if the winning protocol can't be determined, or its accounts
+        // can't be fetched, the deposit still goes through on its own — the keeper's
+        // next cycle picks up the idle balance as a fallback, same as before this
+        // existed. A deposit must never fail just because the "instant deploy" bonus
+        // couldn't be arranged.
+        const receiptFieldByLabel: Record<string, string> = {
+          "kamino-usdc": "vaultCollateralAccount",
+          "kamino-sol": "vaultCollateralAccount",
+          "marinade-sol": "vaultMsolAccount",
+          "jito-sol": "vaultLstAccount",
+          "psol-sol": "vaultLstAccount",
+          "solend-usdc": "vaultCollateralAccount",
+        };
+        try {
+          const protocols = (vaultRaw.protocols as any[]).slice(0, vaultRaw.protocolCount as number);
+          const winnerIdx = protocols.findIndex((p) => (p.targetBps as anchor.BN).eqn(10000));
+          if (winnerIdx !== -1) {
+            const winner = protocols[winnerIdx];
+            const label = Buffer.from(winner.label as Buffer).toString("utf8").replace(/\0/g, "");
+            const receiptFieldName = receiptFieldByLabel[label];
+
+            // deploy_to_* enforces a 10%-of-total-deposits minimum idle buffer (the same
+            // rule a keeper deploy respects) — trying to deploy the FULL deposited amount
+            // reverts the ENTIRE bundled transaction (deposit included) whenever that
+            // would push idle below the floor, which is exactly what happens depositing
+            // into a freshly-emptied vault. Reproduced live 2026-07-30 testing this
+            // feature: a same-size second deposit failed outright until this was added.
+            // Compute the max SAFE deploy amount using the contract's own idle formula
+            // (total_deposits - total_deployed, not the raw token balance — those can
+            // differ by a unit or two from rounding, so mirror the contract exactly) and
+            // never try to deploy more than that.
+            const MIN_IDLE_BPS = 1000n;
+            const BPS_DENOM = 10000n;
+            const SAFETY_MARGIN = 100n; // a little slack against any residual rounding drift
+            const totalDepositsBefore = BigInt((vaultRaw.totalDeposits as anchor.BN).toString());
+            const totalDeployedBefore = protocols.reduce(
+              (sum, p) => sum + BigInt((p.deployedBalance as anchor.BN).toString()),
+              0n
+            );
+            const idleBefore = totalDepositsBefore - totalDeployedBefore;
+            const amountBig = BigInt(amount.toString());
+            const idleAfterDeposit = idleBefore + amountBig;
+            const totalAfterDeposit = totalDepositsBefore + amountBig;
+            const minIdle = (totalAfterDeposit * MIN_IDLE_BPS) / BPS_DENOM;
+            let maxSafeDeploy = idleAfterDeposit > minIdle ? idleAfterDeposit - minIdle : 0n;
+            maxSafeDeploy = maxSafeDeploy > SAFETY_MARGIN ? maxSafeDeploy - SAFETY_MARGIN : 0n;
+            const safeDeployAmount = amountBig < maxSafeDeploy ? amountBig : maxSafeDeploy;
+
+            if (receiptFieldName && safeDeployAmount > 0n) {
+              const res = await fetch(`/api/deploy-accounts?label=${encodeURIComponent(label)}`);
+              if (res.ok) {
+                const { instructionName, accounts: apiAccounts, remainingAccounts } = await res.json();
+                const deployAccounts: Record<string, PublicKey> = {
+                  keeper: publicKey,
+                  vault: vaultPubkey,
+                  vaultAuthority: vaultAuthorityPda,
+                  vaultTokenAccount,
+                  [receiptFieldName]: new PublicKey((winner.vaultReceiptAccount as PublicKey).toBase58()),
+                };
+                for (const [key, val] of Object.entries(apiAccounts as Record<string, string | undefined>)) {
+                  if (val) deployAccounts[key] = new PublicKey(val);
+                }
+                // Both possible sysvar field names resolve to the same real account —
+                // whichever one this instruction's IDL actually declares is the one
+                // Anchor will use; harmless to set both.
+                deployAccounts.txInstructionsSysvar = SYSVAR_INSTRUCTIONS_PUBKEY;
+                deployAccounts.instructionSysvar = SYSVAR_INSTRUCTIONS_PUBKEY;
+
+                const deployMethod = (program.methods as any)[instructionName];
+                if (typeof deployMethod === "function") {
+                  let builder = deployMethod(winnerIdx, new anchor.BN(safeDeployAmount.toString())).accounts(deployAccounts);
+                  if (remainingAccounts) {
+                    builder = builder.remainingAccounts(
+                      (remainingAccounts as string[]).map((pk) => ({ pubkey: new PublicKey(pk), isSigner: false, isWritable: false }))
+                    );
+                  }
+                  postIxs.push(await builder.instruction());
+                }
+              }
+            }
+          }
+        } catch {
+          // Instant-deploy bonus unavailable this time — deposit still proceeds below,
+          // keeper's next cycle deploys the idle balance as a fallback.
+        }
+
         return program.methods
           .deposit(amount)
           .accounts({
@@ -490,6 +584,7 @@ export function useYieldPilot(vaultAddresses: string[]) {
             "kamino-sol": "vaultCollateralAccount",
             "marinade-sol": "vaultMsolAccount",
             "jito-sol": "vaultLstAccount",
+            "psol-sol": "vaultLstAccount",
             "solend-usdc": "vaultCollateralAccount",
           };
 

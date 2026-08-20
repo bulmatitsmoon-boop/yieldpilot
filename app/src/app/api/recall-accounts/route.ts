@@ -47,10 +47,20 @@ const MARINADE_LIQ_POOL_SOL_LEG = "UefNb6z6yvArqe4cJHTXCqStRsKmWhGxnZzuHbikP5Q";
 const MARINADE_LIQ_POOL_MSOL_LEG = "7GgPYjS5Dza89wV6FpZ23kUJRG5vbQ1GM25ezspYFSoE";
 const MARINADE_TREASURY_MSOL = "B1aLzaNMeFVAyQ6f3XbbUyKcH2YPHu2fqiEagmiF23VR";
 
-// ── Jito (SPL Stake Pool fork) ──────────────────────────────────────────────
-const JITO_PROGRAM = "SPoo1Ku8WFXoNDMHPsrGSTSG1Y47rzgn41SLUNakuHy";
+// ── SPL Stake Pools (Jito, Phantom) ─────────────────────────────────────────
+// Both run on the STANDARD SPL Stake Pool program (SPoo1Ku8…) — the comment
+// calling it a "Jito fork" was wrong; it owns both pools. Recall is identical
+// for every stake pool (recall_from_sol_lst); only the pool + mint differ, so
+// they share one branch below. Adding another LST is one entry in SPL_STAKE_POOLS.
+const SPL_STAKE_POOL_PROGRAM = "SPoo1Ku8WFXoNDMHPsrGSTSG1Y47rzgn41SLUNakuHy";
 const JITO_POOL = "Jito4APyf642JPZPx3hGc6WWJ8zPKtRbRs4P815Awbb";
 const JITOSOL_MINT = "J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn";
+const PSOL_POOL = "pSPcvR8GmG9aKDUbn9nbKYjkxt9hxMS7kF1qqKJaPqJ";
+const PSOL_MINT = "pSo1f9nQXWgXibFtKf7NWYxb5enAM4qfP6UJSiXRQfL";
+const SPL_STAKE_POOLS: Record<string, { pool: string; mint: string }> = {
+  "jito-sol": { pool: JITO_POOL, mint: JITOSOL_MINT },
+  "psol-sol": { pool: PSOL_POOL, mint: PSOL_MINT },
+};
 
 // ── Solend ───────────────────────────────────────────────────────────────────
 const SOLEND_PROGRAM = "So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo";
@@ -105,36 +115,37 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    if (label === "jito-sol") {
-      // reserve_stake (offset 130..162) and manager_fee_account (offset
-      // 194..226) live inside the stake pool's own account data — same live
-      // decode the keeper does (getJitoPoolConfig in solanaClient.ts), since
-      // there's no fixed constant for either.
+    if (label in SPL_STAKE_POOLS) {
+      // reserve_stake (offset 130..162) and manager_fee_account (offset 194..226)
+      // live inside the stake pool's own account data — same live decode the keeper
+      // does (getSplStakePoolConfig in solanaClient.ts), since there's no fixed
+      // constant for either. Works for ANY standard SPL stake pool.
+      const { pool, mint } = SPL_STAKE_POOLS[label];
       const connection = new Connection(RPC_TARGET);
-      const poolInfo = await connection.getAccountInfo(new PublicKey(JITO_POOL));
+      const poolInfo = await connection.getAccountInfo(new PublicKey(pool));
       if (!poolInfo || poolInfo.data.length < 226) {
-        return NextResponse.json({ error: "Could not fetch/decode Jito stake pool account" }, { status: 502 });
+        return NextResponse.json({ error: `Could not fetch/decode ${label} stake pool account` }, { status: 502 });
       }
       const reserveStake = new PublicKey(poolInfo.data.slice(130, 162)).toBase58();
       const managerFeeAccount = new PublicKey(poolInfo.data.slice(194, 226)).toBase58();
       const [withdrawAuthority] = PublicKey.findProgramAddressSync(
-        [new PublicKey(JITO_POOL).toBuffer(), Buffer.from("withdraw")],
-        new PublicKey(JITO_PROGRAM)
+        [new PublicKey(pool).toBuffer(), Buffer.from("withdraw")],
+        new PublicKey(SPL_STAKE_POOL_PROGRAM)
       );
       return NextResponse.json({
         instructionName: "recallFromSolLst",
         accounts: {
-          stakePool: JITO_POOL,
+          stakePool: pool,
           withdrawAuthority: withdrawAuthority.toBase58(),
           reserveStake,
           managerFeeAccount,
-          poolMint: JITOSOL_MINT,
+          poolMint: mint,
           clockSysvar: CLOCK_SYSVAR,
           stakeHistorySysvar: STAKE_HISTORY_SYSVAR,
           stakeProgram: STAKE_PROGRAM,
           systemProgram: SYSTEM_PROGRAM,
           tokenProgram: TOKEN_PROGRAM,
-          stakePoolProgram: JITO_PROGRAM,
+          stakePoolProgram: SPL_STAKE_POOL_PROGRAM,
         },
       });
     }
