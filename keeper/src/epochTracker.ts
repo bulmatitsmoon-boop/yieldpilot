@@ -63,6 +63,41 @@ export function recordEntryIfFresh(
   logger.info(`Epoch-entry recorded: ${label} entered at epoch ${currentEpoch}`, { vaultAddress });
 }
 
+/**
+ * Backfill an entry for a position we ALREADY hold but have no record for.
+ *
+ * WHY THIS EXISTS (2026-08-20): the cooldown used to fail OPEN when no entry record
+ * existed, which made it silently useless in exactly the case it was built for. The SOL
+ * vault churned psol-sol three times between Aug 5-10 (recall→redeploy, twice only ~6-8
+ * minutes apart) paying a 10bps exit fee each time — ~0.0124 SOL against ~0.0161 SOL of
+ * gross yield, i.e. churn ate ~77% of the earnings and dropped realized return to ~2%
+ * APY against ~8.5% gross. Not one of those exits was blocked, because no psol-sol entry
+ * was ever on file, so `entryEpoch === undefined` short-circuited the check every time.
+ *
+ * Records only when the key is ABSENT — never overwrites a real entry, so it cannot
+ * reset a legitimately running cooldown (same invariant recordEntryIfFresh protects).
+ * Paired with the now fail-CLOSED check in rebalancer.ts, this self-heals: the first
+ * cycle after state loss stamps "entered now" and blocks the exit, and later cycles
+ * compare against it normally and release once the yield genuinely covers the fee.
+ */
+export function ensureEntryForHeldPosition(
+  vaultAddress: string,
+  label: string,
+  currentEpoch: number,
+): void {
+  if (!EPOCH_GATED_PROTOCOLS.has(label)) return;
+  const all = load();
+  const k = key(vaultAddress, label);
+  if (all[k] !== undefined) return; // never clobber a real entry
+  all[k] = currentEpoch;
+  save(all);
+  logger.warn(
+    `Epoch-entry MISSING for held position ${label} — backfilled at epoch ${currentEpoch}. ` +
+    `Exit is blocked until a full cooldown elapses from now.`,
+    { vaultAddress },
+  );
+}
+
 // Recalling a protocol down to zero clears its entry — the next deploy into it is a
 // fresh entry, not a continuation of the old cooldown window.
 export function clearEntry(vaultAddress: string, label: string): void {
