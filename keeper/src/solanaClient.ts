@@ -13,7 +13,7 @@ import os from "os";
 import path from "path";
 import { logger } from "./logger";
 import { EpochContext } from "./rebalancer";
-import { EPOCH_GATED_PROTOCOLS, getEntryEpochs, recordEntryIfFresh, clearEntry } from "./epochTracker";
+import { EPOCH_GATED_PROTOCOLS, getEntryEpochs, recordEntryIfFresh, clearEntry, ensureEntryForHeldPosition } from "./epochTracker";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Kamino mainnet constants
@@ -922,7 +922,16 @@ export class SolanaClient {
   // derived from a live slot-time sample rather than hardcoded, since mainnet slot
   // times drift (verified 2026-07-30: ~0.4225s/slot -> ~2.11 days/epoch, not the
   // ~2-3 day rule of thumb).
-  async getEpochContext(vaultAddress: string): Promise<EpochContext> {
+  //
+  // `vaultState` is optional only for backwards compatibility with any caller that
+  // doesn't have it handy — pass it whenever possible. With it, this backfills an
+  // entry-epoch for every epoch-gated position the vault CURRENTLY HOLDS but has no
+  // record for. That backfill is what makes the rebalancer's now fail-CLOSED cooldown
+  // safe: without it, a position whose record was lost (fresh runner, wiped state file,
+  // a deploy that happened before the tracker existed) could never be exited at all.
+  // With it, the first cycle stamps "entered now" + blocks, and later cycles compare
+  // normally. See epochTracker.ensureEntryForHeldPosition for the incident this fixes.
+  async getEpochContext(vaultAddress: string, vaultState?: VaultState): Promise<EpochContext> {
     const [epochInfo, perfSamples] = await Promise.all([
       this.connection.getEpochInfo(),
       this.connection.getRecentPerformanceSamples(1),
@@ -932,6 +941,16 @@ export class SolanaClient {
       ? sample.samplePeriodSecs / sample.numSlots
       : 0.4225; // fallback: last known-good live measurement
     const epochLengthDays = (epochInfo.slotsInEpoch * secsPerSlot) / 86_400;
+
+    if (vaultState) {
+      const held = vaultState.protocols.slice(0, vaultState.protocolCount);
+      for (const p of held) {
+        if (p.deployedBalance.toNumber() > 0) {
+          ensureEntryForHeldPosition(vaultAddress, p.label, epochInfo.epoch);
+        }
+      }
+    }
+
     return {
       currentEpoch: epochInfo.epoch,
       epochLengthDays,
