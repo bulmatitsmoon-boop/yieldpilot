@@ -5,6 +5,7 @@ import { SolanaClient } from "./solanaClient";
 import { computeRebalanceDecision, shouldCompound } from "./rebalancer";
 import { computeLpRepositionDecision, LpVaultRangeState } from "./lpVaultRebalancer";
 import { notifyTelegram } from "./telegramNotify";
+import { checkNewDeposits } from "./depositWatcher";
 
 /**
  * run_once.ts — single-cycle keeper run for GitHub Actions scheduled workflow.
@@ -45,9 +46,10 @@ async function runApyPollAndRebalance(client: SolanaClient) {
     // allocation. Tracked separately so the re-read only costs an RPC call when a
     // rebalance actually happened.
     let currentState = state;
+    const epochContext = await client.getEpochContext(address, state);
 
     if (state.autoRebalance) {
-      const decision = computeRebalanceDecision(state, apys);
+      const decision = computeRebalanceDecision(state, apys, epochContext);
       logger.info(`  Rebalance decision: ${decision.reason}`, {
         current: decision.currentAllocations,
         proposed: decision.newAllocations,
@@ -87,7 +89,7 @@ async function runApyPollAndRebalance(client: SolanaClient) {
     // auto_rebalance. With targets pinned (e.g. kamino 100% / solend 0%) this deploys
     // only to the healthy protocol and sends nothing to the disabled one.
     logger.info("  Syncing fund deployment to current targets...");
-    await client.executeRebalance(address, currentState);
+    await client.executeRebalance(address, currentState, epochContext.currentEpoch);
   }
 }
 
@@ -108,6 +110,16 @@ async function runCompound(client: SolanaClient) {
         );
       }
     }
+  }
+}
+
+async function runDepositWatch(client: SolanaClient) {
+  logger.info("── Deposit watch ──");
+  const vaults = await client.fetchAllVaults();
+  for (const { address, state } of vaults) {
+    await checkNewDeposits(client, address, state.name).catch(err => {
+      logger.warn(`Deposit watch failed (non-fatal): ${address.slice(0, 8)}... — ${err.message}`);
+    });
   }
 }
 
@@ -267,6 +279,7 @@ async function runLpIdleRecovery(client: SolanaClient, addresses: string[]) {
   }
 }
 
+
 async function runHealthCheck(client: SolanaClient) {
   const balanceSol = await client.getKeeperBalance();
   if (balanceSol < 0.05) {
@@ -296,6 +309,7 @@ async function main() {
 
   await runApyPollAndRebalance(client);
   await runCompound(client);
+  await runDepositWatch(client);
   await runLpVaultCheck(client);
   // Safety net: any vault left without an active position is earning nothing. Recover it
   // regardless of whether this run repositioned, so a failed redeploy on a previous run

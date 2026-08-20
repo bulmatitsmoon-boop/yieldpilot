@@ -1,6 +1,7 @@
 import { ProtocolApy } from "./apyFetcher";
 import { VaultState } from "./solanaClient";
 import { logger } from "./logger";
+import { EPOCH_GATED_PROTOCOLS } from "./epochTracker";
 
 const REBALANCE_THRESHOLD_BPS = parseInt(process.env.REBALANCE_THRESHOLD_BPS || "500");
 const MIN_APY_IMPROVEMENT_BPS = parseInt(process.env.MIN_APY_IMPROVEMENT_BPS || "100");
@@ -13,11 +14,79 @@ const BPS_DENOM = 10_000;
 // at a net loss.
 const EXIT_COST_BPS: Record<string, number> = {
   "kamino-usdc":      0,
+  "kamino-usdc-maple": 0, // same Kamino lending-market mechanics, no exit fee — proven on the local-validator harness before this was registered
   "kamino-sol":       0,
   "solend-usdc":      0,
   "marinade-sol":     30, // ~0.3% liquid unstake fee
   "jito-sol":         10, // ~0.1% DEX swap slippage to exit jitoSOL
+  // 10 bps read FIRST-PARTY from PSOL's own stake pool account (sol_withdrawal_fee =
+  // 10/10000). Cross-validated: the same field on Jito's pool reads 1/1000 = 10 bps,
+  // matching the hand-set jito-sol value above — which is what makes the offset
+  // interpretation trustworthy rather than a guess.
+  "psol-sol":         10,
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Epoch cooldown
+//
+// EPOCH_GATED_PROTOCOLS (marinade-sol, jito-sol, psol-sol) only reprice once per
+// Solana epoch, because their yield comes from native staking rewards, which land
+// once per epoch. Their exit fee, however, is a FLAT bps charge on the full amount
+// withdrawn (principal included), charged regardless of how long the position was
+// held. Exiting one of these before at least one epoch's worth of accrued yield
+// exceeds that flat fee is a guaranteed realized loss — verified 2026-07-30 live:
+// 3 SOL at 6% APY held exactly 1 epoch (~2.11 days at current mainnet slot times)
+// earns ~0.00104 SOL but pays ~0.003 SOL in exit fee, a net loss ~3x the yield.
+// Breakeven scales with APY, not with position size (both fee and yield are
+// proportional to principal, so size cancels out of the comparison).
+//
+// Lending protocols (Kamino, Solend) are NEVER in EPOCH_GATED_PROTOCOLS and this
+// check is a no-op for them — they accrue every slot, so there is no "epoch" to
+// wait on. Gating them here would mean a USDC-only rebalance waits forever on an
+// epoch signal that never fires for a lending market.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface EpochContext {
+  currentEpoch: number;
+  epochLengthDays: number;
+  /** label -> epoch this protocol slot was last (re)entered at, from epochTracker */
+  entryEpochs: Record<string, number>;
+}
+
+// Returns true if `label` cannot yet be safely exited given how long it's been held.
+//
+// Fails CLOSED (blocks) when we have no entry-epoch record for an epoch-gated position.
+// This was FAIL-OPEN until 2026-08-20 and that made the whole check silently useless:
+// the SOL vault churned psol-sol three times between Aug 5-10 — twice recalling and
+// redeploying the SAME protocol only ~6-8 minutes apart — paying the 10bps exit fee on
+// the full balance every time. That burned ~0.0124 SOL against ~0.0161 SOL of gross
+// yield (~77% of earnings), dropping realized return to ~2% APY versus ~8.5% gross.
+// Every one of those exits sailed through here because no psol-sol entry was ever
+// written, so `entryEpoch === undefined` returned false and waved the exit past.
+//
+// Blocking on a missing record cannot deadlock: solanaClient.getEpochContext backfills
+// an entry for any held epoch-gated position before building this context (see
+// ensureEntryForHeldPosition), so a missing record self-heals into a real one on the
+// very next cycle and then ages out normally. The failure mode of being wrong here is
+// "hold a good position slightly too long", which is strictly cheaper than "pay a real
+// exit fee for nothing" — the asymmetry that motivated the change.
+function epochCooldownBlocksExit(
+  label: string,
+  apyBps: number,
+  ctx: EpochContext | undefined,
+): boolean {
+  if (!ctx || !EPOCH_GATED_PROTOCOLS.has(label)) return false;
+  const entryEpoch = ctx.entryEpochs[label];
+  if (entryEpoch === undefined) return true; // fail CLOSED — see block comment above
+
+  const epochsHeld = ctx.currentEpoch - entryEpoch;
+  if (epochsHeld <= 0) return true; // same epoch as entry — earned $0 so far, guaranteed loss
+
+  const exitFeeFrac = (EXIT_COST_BPS[label] ?? 0) / BPS_DENOM;
+  const dailyApy = (apyBps / BPS_DENOM) / 365;
+  const accruedFrac = epochsHeld * ctx.epochLengthDays * dailyApy;
+  return accruedFrac < exitFeeFrac;
+}
 
 export interface RebalanceDecision {
   shouldRebalance: boolean;
@@ -33,7 +102,8 @@ export interface RebalanceDecision {
 
 export function computeRebalanceDecision(
   vault: VaultState,
-  apys: ProtocolApy[]
+  apys: ProtocolApy[],
+  epochContext?: EpochContext,
 ): RebalanceDecision {
   const protocols = vault.protocols.slice(0, vault.protocolCount);
 
@@ -89,6 +159,7 @@ export function computeRebalanceDecision(
     currentAllocations,
     protocolApys,
     protocolIds,
+    epochContext,
   );
 
   const optimalWeightedApy = computeWeightedApy(optimalAllocations, protocolApys);
@@ -102,6 +173,15 @@ export function computeRebalanceDecision(
     ...currentAllocations.map((cur, i) => Math.abs(cur - optimalAllocations[i]))
   );
 
+  // Surfaced separately from the reason string so operators can tell "nothing better
+  // exists" apart from "something better exists but the epoch cooldown is blocking it" —
+  // the two look identical from newAllocations alone (both hold current allocation).
+  const cooldownBlocked = protocolIds.some((id, i) =>
+    currentAllocations[i] > 0 &&
+    EPOCH_GATED_PROTOCOLS.has(id) &&
+    epochCooldownBlocksExit(id, protocolApys[i], epochContext)
+  );
+
   logger.debug("Rebalance evaluation", {
     currentWeightedApy:  `${(currentWeightedApy / 100).toFixed(2)}%`,
     optimalWeightedApy:  `${(optimalWeightedApy / 100).toFixed(2)}%`,
@@ -109,6 +189,7 @@ export function computeRebalanceDecision(
     netApyImprovementBps: netApyImprovement,
     maxDriftBps: maxDrift,
     thresholdBps: REBALANCE_THRESHOLD_BPS,
+    epochCooldownActive: cooldownBlocked,
   });
 
   const apyTrigger   = netApyImprovement >= MIN_APY_IMPROVEMENT_BPS;
@@ -136,6 +217,8 @@ export function computeRebalanceDecision(
     }
   } else if (!vault.autoRebalance) {
     reason = "Auto-rebalance is disabled";
+  } else if (cooldownBlocked) {
+    reason = `Holding — a better rate exists but exiting the current epoch-gated position now would pay the exit fee before enough epochs have passed to earn it back`;
   } else if (grossGain > 0) {
     reason = `Net APY gain ${netApyImprovement}bps (gross ${grossGain}bps - ${exitCostBps}bps exit cost) below the ${MIN_APY_IMPROVEMENT_BPS}bps minimum, and drift ${maxDrift}bps below the ${REBALANCE_THRESHOLD_BPS}bps threshold — holding position`;
   } else {
@@ -176,23 +259,51 @@ function computeExitCost(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Allocation optimizer
-// Strategy: 80% to top protocol, 20% to runner-up (as advertised).
+// Strategy: 100% to the highest live rate.
+//
+// This replaced a hardcoded 80/20 split (top protocol / runner-up) on
+// 2026-07-21. That split had no risk model behind it — its own comment
+// justified it as "matches what we advertise to users", i.e. the number came
+// from the marketing copy rather than from any calculation. Parking 20% in a
+// second-best rate is simply yield the user does not earn: at the rates that
+// day (Marinade 6.08%, Jito 5.17%) the split cost 18bps for nothing anyone
+// had chosen.
+//
+// Churn is already handled and does NOT need the split to damp it: a
+// reallocation only fires when the drift exceeds REBALANCE_THRESHOLD_BPS AND
+// the gain still beats computeExitCost() — which weights each protocol's exit
+// fee by the fraction of allocation actually being moved. Concentration makes
+// that cost bigger and therefore the guard stricter, not weaker.
+//
+// The tradeoff accepted here is single-protocol exposure: 100% in one venue
+// means an exploit there takes everything. That is a deliberate product call —
+// maximise what users earn, and express risk through which protocols are
+// eligible at all (SAFE_PROTOCOLS) rather than through an arbitrary constant.
+//
 // Never routes to Raydium/Orca LP positions — impermanent loss risk is
 // incompatible with principal safety.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const SAFE_PROTOCOLS = new Set([
   "kamino-usdc",
+  "kamino-usdc-maple",
   "kamino-sol",
   "solend-usdc",
   "marinade-sol",
   "jito-sol",
+  // Phantom Staked SOL. Added 2026-07-21 for candidate variety: under winner-takes-all,
+  // a wider eligible set means more chances the top rate in any given hour is genuinely
+  // the best one available. Measured on-chain at 6.14% vs Marinade ~6.0% and Jito 5.22% —
+  // close enough to Marinade that it is NOT a guaranteed upgrade, which is exactly why it
+  // belongs in the candidate set rather than being hardwired as the destination.
+  "psol-sol",
 ]);
 
 function computeOptimalAllocations(
   currentAllocations: number[],
   protocolApys: number[],
   protocolIds: string[],
+  epochContext?: EpochContext,
 ): number[] {
   const n = currentAllocations.length;
   if (n === 0) return [];
@@ -212,17 +323,50 @@ function computeOptimalAllocations(
     return allocations.map((_, i) => i === 0 ? equal + (BPS_DENOM - equal * n) : equal);
   }
 
-  if (eligible.length === 1) {
-    allocations[eligible[0].i] = BPS_DENOM;
-    return allocations;
+  // Winner takes all — but the winner is the one with the best NET gain, not the
+  // highest headline APY.
+  //
+  // WHY THIS IS NOT JUST eligible[0]. Proposing only the top-APY protocol and letting
+  // the caller reject it on cost means that when the best rate is unreachable, the
+  // keeper does NOTHING — even if moving somewhere else is clearly profitable.
+  //
+  // Observed live 2026-07-22 on the SOL vault (jito 2000 / marinade 8000):
+  //   -> psol-sol      gross +22.5bps, exit 26.0 (must leave BOTH legs)  = NET  -3.5
+  //   -> marinade-sol  gross +17.4bps, exit  2.0 (only jito's 20% moves) = NET +15.4
+  // psol had the higher rate, so it was the only candidate considered, it failed the
+  // cost check, and the vault sat at 5.900% while 6.074% was available for 2bps.
+  // Leaving 15.4bps on the table indefinitely is the opposite of the goal.
+  //
+  // So: score EVERY eligible destination net of what it actually costs to get there,
+  // and pick the best. Exit cost depends on where the funds currently sit, which is
+  // why the top rate is not automatically the right move.
+  const currentApy = computeWeightedApy(currentAllocations, protocolApys);
+  let best: { alloc: number[]; net: number } | null = null;
+
+  for (const cand of eligible) {
+    const proposed = Array(n).fill(0);
+    proposed[cand.i] = BPS_DENOM;
+
+    // Epoch cooldown: skip any candidate that requires exiting a gated position before
+    // it's been held long enough for accrued yield to exceed its flat exit fee. See the
+    // block comment above EPOCH_GATED_PROTOCOLS / epochCooldownBlocksExit.
+    const blockedByCooldown = protocolIds.some((id, i) =>
+      currentAllocations[i] > proposed[i] &&
+      epochCooldownBlocksExit(id, protocolApys[i], epochContext)
+    );
+    if (blockedByCooldown) continue;
+
+    const gross = (computeWeightedApy(proposed, protocolApys) - currentApy) * 100; // bps
+    const net = gross - computeExitCost(currentAllocations, proposed, protocolIds);
+    if (!best || net > best.net) best = { alloc: proposed, net };
   }
 
-  // 80/20 split — matches what we advertise to users
-  allocations[eligible[0].i] = 8000;
-  allocations[eligible[1].i] = 2000;
-
-  // Any remaining ineligible protocols (LP) stay at 0
-  return allocations;
+  // If no destination is profitable after costs (or every profitable one is
+  // cooldown-blocked), stay put. Returning the current allocation makes drift zero, so
+  // the caller's threshold check will not fire — the keeper holds rather than churning
+  // for a loss, or forcing an exit that would realize one.
+  if (!best || best.net <= 0) return [...currentAllocations];
+  return best.alloc;
 }
 
 function computeWeightedApy(allocations: number[], apys: number[]): number {

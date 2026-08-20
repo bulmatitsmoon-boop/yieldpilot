@@ -1,0 +1,32 @@
+name: Keeper Cadence Check
+
+# Self-hosted watchdog: measures how often the keeper ACTUALLY runs and alerts Telegram on
+# drift. Runs on GitHub, needs no laptop or app open. Quiet when healthy.
+#
+# Scheduled once a day on a low-contention minute. A daily check is enough to catch a
+# sustained cadence problem without adding meaningful Actions-minutes (this is a private
+# repo capped at 2000 min/month — the keeper itself is the main consumer).
+on:
+  schedule:
+    - cron: "23 13 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  actions: read # to read the keeper workflow's run history
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Measure keeper cadence, alert on drift
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: "-1004486893356"
+        run: node .github/scripts/keeper-cadence-check.mjs

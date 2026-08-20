@@ -6,8 +6,8 @@ import { Redis } from "@upstash/redis";
 // LIVE APY — FIRST-PARTY SOURCES ONLY. NO THIRD-PARTY AGGREGATOR.
 // ─────────────────────────────────────────────────────────────────────────────
 // Every rate here comes from the protocol that actually pays it: Kamino's own API,
-// Marinade's own API, Solend's own API, and — for Jito — the stake pool account
-// on-chain, because an LST's yield IS the growth of its exchange rate.
+// Marinade's own API, Solend's own API, and — for Jito and PSOL — the stake pool
+// account on-chain, because an LST's yield IS the growth of its exchange rate.
 //
 // WHY WE DROPPED DEFILLAMA (2026-07-18). We moved to DeFiLlama in July to escape
 // rotted per-protocol endpoints, but it is a third-party aggregator and it glitches.
@@ -37,31 +37,73 @@ const KAMINO_RESERVE: Record<string, string> = {
   "kamino-usdc": "D6q6wuQSrifJKZYpR1M8R4YawnLDtDsMmWM1NbBmgJ59",
   "kamino-sol":  "d4A2prbA2whesmvHaL88BH6Ewn5N4bTSU2Ze8P6Bc4Q",
 };
+// Maple Market — separate isolated Kamino USDC reserve, registered 2026-07-30 as
+// "kamino-usdc-maple" after proving deploy+recall end-to-end on the local-validator
+// harness against real cloned mainnet state. Own market ID, own API call.
+const KAMINO_MAPLE_MARKET = "6WEGfej9B9wjxRs6t4BYpb9iCXd8CpTpJ8fVSNzHCC5y";
+const KAMINO_MAPLE_USDC_RESERVE = "Atj6UREVWa7WxbF2EMKNyfmYUY1U1txughe2gjhcPDCo";
 const SOLEND_USDC_RESERVE = "BgxfHJDzm44T7XG68MYKx7YisTjZu73tVovyZSjJMpmw";
 const JITO_POOL = "Jito4APyf642JPZPx3hGc6WWJ8zPKtRbRs4P815Awbb";
+// PSOL runs on the same standard SPL Stake Pool program as Jito (SPoo1Ku8…, verified
+// when psol-sol was wired into deploy/recall — see api/recall-accounts/route.ts), so
+// the exact same account layout and offsets apply.
+const PSOL_POOL = "pSPcvR8GmG9aKDUbn9nbKYjkxt9hxMS7kF1qqKJaPqJ";
 
 // Static display metadata only — never a rate.
 const META = [
   { protocolId: "jito-sol",         name: "Jito",     asset: "SOL",      riskScore: 1, tvlUsd: 762_417_675 },
+  // No hardcoded TVL guess — we have no real figure for PSOL's pool size, and a
+  // made-up number here is exactly the failure class this file exists to prevent
+  // (see the DeFiLlama note above). Renders as 0/undefined until we have a live source.
+  { protocolId: "psol-sol",         name: "PSOL",     asset: "SOL",      riskScore: 1 },
   { protocolId: "kamino-sol",       name: "Kamino",   asset: "SOL",      riskScore: 1, tvlUsd:  17_698_922 },
   { protocolId: "marinade-sol",     name: "Marinade", asset: "SOL",      riskScore: 1, tvlUsd: 181_896_238 },
   { protocolId: "kamino-usdc",      name: "Kamino",   asset: "USDC",     riskScore: 1, tvlUsd:  23_525_228 },
+  // Isolated market, no-collateral (maxLtv=0) — smaller and less battle-tested than the
+  // main pool, hence riskScore 2 not 1. TVL is real but small (~$2.1M) and moves faster
+  // than the main market's, so no stale hardcoded guess kept here beyond a rough anchor.
+  { protocolId: "kamino-usdc-maple", name: "Kamino (Maple)", asset: "USDC", riskScore: 2, tvlUsd: 2_148_990 },
   { protocolId: "solend-usdc",      name: "Solend",   asset: "USDC",     riskScore: 1, tvlUsd:   7_143_891 },
-  { protocolId: "raydium-usdc-sol", name: "Raydium",  asset: "USDC-SOL", riskScore: 3, tvlUsd: 190_000_000 },
-  { protocolId: "orca-usdc-eth",    name: "Orca",     asset: "USDC-ETH", riskScore: 3, tvlUsd: 120_000_000 },
+  // LP pools. TVL is NOT hardcoded here — both fetchers return live TVL, and the
+  // placeholder that used to sit here claimed $190M/$120M against a real ~$6M/~$26M.
+  // Orca is the SOL/USDC Whirlpool we would actually route to (Czfq3xZZ…), not a
+  // USDC-ETH pool we have no integration with.
+  { protocolId: "raydium-usdc-sol", name: "Raydium",  asset: "USDC-SOL", riskScore: 3 },
+  { protocolId: "orca-sol-usdc",    name: "Orca",     asset: "SOL-USDC", riskScore: 3 },
 ];
 
 const COLORS: Record<string, string> = {
-  "kamino-usdc": "#3FE0A0", "kamino-sol": "#22B37E", "jito-sol": "#10B981",
+  "kamino-usdc": "#3FE0A0", "kamino-usdc-maple": "#2BB388", "kamino-sol": "#22B37E", "jito-sol": "#10B981",
+  "psol-sol": "#8B5CF6",
   "marinade-sol": "#06B6D4", "drift-sol": "#14B8A6", "solend-usdc": "#34D399",
-  "raydium-usdc-sol": "#EF4444", "orca-usdc-eth": "#EF4444",
+  "raydium-usdc-sol": "#EF4444", "orca-sol-usdc": "#EF4444",
 };
 
-/** A rate is only believable inside this band. Outside it we treat the source as broken. */
+/**
+ * A rate is only believable inside this band; outside it we treat the source as broken.
+ *
+ * The ceiling has to differ by protocol type. For LENDING, 25% is a good tripwire — a
+ * pool that normally pays 3% suddenly reporting 40% is a broken feed, and that guard is
+ * what has caught fake rates before.
+ *
+ * But concentrated-liquidity FEE APRs legitimately run far higher: measured live
+ * 2026-07-21, Raydium SOL/USDC was 29.5% and Orca SOL/USDC ~34%. The single 25% ceiling
+ * silently rejected both, so the LP rows rendered "—" while the fetchers were working
+ * perfectly — the guard was throwing the right answers away.
+ *
+ * 300% for LP is still a real tripwire (a fee APR above that is a data error, not a
+ * pool), just one set for the right instrument.
+ */
 const MIN_SANE_APY = 0.05;
-const MAX_SANE_APY = 25;
-const sane = (v: unknown): v is number =>
-  typeof v === "number" && Number.isFinite(v) && v >= MIN_SANE_APY && v <= MAX_SANE_APY;
+const MAX_SANE_APY = 25;      // lending
+const MAX_SANE_LP_APY = 300;  // concentrated-liquidity fee APR
+
+const inBand = (v: unknown, max: number): v is number =>
+  typeof v === "number" && Number.isFinite(v) && v >= MIN_SANE_APY && v <= max;
+
+const sane = (v: unknown): v is number => inBand(v, MAX_SANE_APY);
+/** Use for LP pools only — see the note above on why the ceiling differs. */
+const saneLp = (v: unknown): v is number => inBand(v, MAX_SANE_LP_APY);
 
 async function tryFetch(url: string, timeout = 8000): Promise<any> {
   const controller = new AbortController();
@@ -88,6 +130,17 @@ async function fetchKamino(): Promise<Record<string, Live>> {
     }
   } catch { /* leave empty — caller falls back to last-known */ }
   return out;
+}
+
+/** Maple Market — separate market ID from the main Kamino pool, own API call. */
+async function fetchKaminoMaple(): Promise<Live | null> {
+  try {
+    const arr = await tryFetch(`https://api.kamino.finance/kamino-market/${KAMINO_MAPLE_MARKET}/reserves/metrics`);
+    if (!Array.isArray(arr)) return null;
+    const r = arr.find((x: any) => x?.reserve === KAMINO_MAPLE_USDC_RESERVE);
+    const apy = parseFloat(r?.supplyApy) * 100;
+    return sane(apy) ? { apyPercent: apy, tvlUsd: Number(r?.totalSupply) || undefined } : null;
+  } catch { return null; }
 }
 
 /** Marinade — first-party realized mSOL yield. An LST's rate is inherently a recent
@@ -147,7 +200,9 @@ function findLastEpochRate(d: Buffer, supplyNow: number, lamportsNow: number, ra
   return matches.length === 1 ? matches[0] : null;
 }
 
-async function fetchJito(): Promise<Live | null> {
+/** Shared SPL Stake Pool reader — same account layout for every pool on the standard
+ *  program, so Jito and PSOL (and any future LST) both go through this one function. */
+async function fetchStakePool(poolAddress: string): Promise<Live | null> {
   try {
     const rpc = process.env.MAINNET_RPC_URL || "https://api.mainnet-beta.solana.com";
     const res = await fetch(rpc, {
@@ -155,7 +210,7 @@ async function fetchJito(): Promise<Live | null> {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         jsonrpc: "2.0", id: 1, method: "getAccountInfo",
-        params: [JITO_POOL, { encoding: "base64", commitment: "confirmed" }],
+        params: [poolAddress, { encoding: "base64", commitment: "confirmed" }],
       }),
       next: { revalidate: 60 },
     });
@@ -179,18 +234,50 @@ async function fetchJito(): Promise<Live | null> {
   } catch { return null; }
 }
 
+// Raydium CLMM SOL/USDC — the pool the LP adapter targets.
+//
+// The old v2 endpoint (api.raydium.io/v2/ammV3/ammPools) returned the ENTIRE pool list:
+// 216 MB, ~16s. It timed out in the serverless function every time, which is why
+// Raydium rendered "—" while looking like it had a working fetcher. v3 answers a
+// targeted query in ~7 KB.
+//
+// `day.apr` is already a percentage (29.65 = 29.65%), NOT a fraction — the old code
+// multiplied by 100 and would have shown 2965% had it ever returned.
+const RAYDIUM_SOL_USDC_POOL = "3ucNos4NbumPLZNWztqGHNFFgkHeRMBQAVemeeomsUxv";
+
 async function fetchRaydium(): Promise<Live | null> {
   try {
-    const data = await tryFetch("https://api.raydium.io/v2/ammV3/ammPools");
-    const pools: any[] = data?.data || [];
-    const pool = pools
-      .filter((p: any) =>
-        (p.mintA?.symbol === "USDC" && p.mintB?.symbol === "SOL") ||
-        (p.mintA?.symbol === "SOL"  && p.mintB?.symbol === "USDC"))
-      .sort((a: any, b: any) => (b.tvl || 0) - (a.tvl || 0))[0];
+    const data = await tryFetch(
+      `https://api-v3.raydium.io/pools/info/ids?ids=${RAYDIUM_SOL_USDC_POOL}`
+    );
+    const pool = (data?.data || [])[0];
     if (!pool) return null;
-    const apy = parseFloat(pool.day?.apr || pool.apr || "0") * 100;
-    return sane(apy) ? { apyPercent: apy, tvlUsd: parseFloat(pool.tvl || "0") || undefined } : null;
+    const apy = Number(pool.day?.apr);
+    const tvl = Number(pool.tvl);
+    return saneLp(apy) ? { apyPercent: apy, tvlUsd: Number.isFinite(tvl) ? tvl : undefined } : null;
+  } catch { return null; }
+}
+
+// Orca Whirlpool SOL/USDC — the exact pool the LP adapter opens positions in.
+//
+// Orca publishes no APR field, so derive it from first-party numbers: 24h fees over TVL,
+// annualised. stats["24h"].yieldOverTvl is a DAILY fraction (0.000937 = 0.0937%/day),
+// so x365 gives ~34% APR. The v1 whirlpool/list endpoint is 18 MB — use the v2 token
+// query (~170 KB) and pick our pool by address.
+const ORCA_SOL_USDC_WHIRLPOOL = "Czfq3xZZDmsdGdUyrNLtRhGc47cXcZtLG4crryfu44zE";
+
+async function fetchOrca(): Promise<Live | null> {
+  try {
+    const data = await tryFetch(
+      "https://api.orca.so/v2/solana/pools?token=So11111111111111111111111111111111111111112"
+    );
+    const pool = (data?.data || []).find((p: any) => p.address === ORCA_SOL_USDC_WHIRLPOOL);
+    if (!pool) return null;
+    const daily = Number(pool.stats?.["24h"]?.yieldOverTvl ?? pool.yieldOverTvl);
+    if (!Number.isFinite(daily)) return null;
+    const apy = daily * 365 * 100;
+    const tvl = Number(pool.tvlUsdc);
+    return saneLp(apy) ? { apyPercent: apy, tvlUsd: Number.isFinite(tvl) ? tvl : undefined } : null;
   } catch { return null; }
 }
 
@@ -218,18 +305,22 @@ async function writeKnown(id: string, k: Known) {
 }
 
 export async function GET(_req: NextRequest) {
-  const [kamino, marinade, solend, jito, raydium] = await Promise.all([
-    fetchKamino(), fetchMarinade(), fetchSolend(), fetchJito(), fetchRaydium(),
+  const [kamino, kaminoMaple, marinade, solend, jito, psol, raydium, orca] = await Promise.all([
+    fetchKamino(), fetchKaminoMaple(), fetchMarinade(), fetchSolend(),
+    fetchStakePool(JITO_POOL), fetchStakePool(PSOL_POOL),
+    fetchRaydium(), fetchOrca(),
   ]);
 
   const live: Record<string, Live | null> = {
     "kamino-usdc":      kamino["kamino-usdc"] ?? null,
+    "kamino-usdc-maple": kaminoMaple,
     "kamino-sol":       kamino["kamino-sol"] ?? null,
     "marinade-sol":     marinade,
     "solend-usdc":      solend,
     "jito-sol":         jito,
+    "psol-sol":         psol,
     "raydium-usdc-sol": raydium,
-    "orca-usdc-eth":    null, // no first-party source wired; shows "—"
+    "orca-sol-usdc":    orca,
   };
 
   const now = new Date().toISOString();

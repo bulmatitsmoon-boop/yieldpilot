@@ -22,6 +22,8 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { logger } from "./logger";
+import { EpochContext } from "./rebalancer";
+import { EPOCH_GATED_PROTOCOLS, getEntryEpochs, recordEntryIfFresh, clearEntry, ensureEntryForHeldPosition } from "./epochTracker";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Kamino mainnet constants
@@ -46,6 +48,20 @@ const KAMINO_SOL_COLLATERAL_MINT = new PublicKey("2UywZrUdyqs5vDchy7fKQJKau2RVyu
 const KAMINO_SOL_COLLATERAL_SUPPLY = new PublicKey("8NXMyRD91p3nof61BTkJvrfpGTASHygz1cUvc3HvwyGS"); // verified from reserve.collateral.supplyVault
 const KAMINO_SCOPE_PRICES = new PublicKey("3t4JZcueEzTbVP6kLxXrL3VpWx45jDer4eqysweBchNH"); // Scope price feed used by both USDC and SOL reserves
 
+// Kamino "Maple Market" — a separate, isolated USDC reserve on the SAME Kamino program.
+// Registered 2026-07-30 as protocol slot "kamino-usdc-maple" (0% initial target — the
+// rebalancer's normal cost/benefit comparison decides if/when it wins real weight).
+// Proven end-to-end (deploy + recall, both directions) against real cloned mainnet state
+// via the local-validator harness before this was wired up — see project memory.
+// No new on-chain code: reuses deploy_to_kamino/recall_from_kamino exactly, just with a
+// different reserve/market/authority/liquidity-supply/collateral-mint account set.
+const KAMINO_MAPLE_MARKET = new PublicKey("6WEGfej9B9wjxRs6t4BYpb9iCXd8CpTpJ8fVSNzHCC5y");
+const KAMINO_MAPLE_MARKET_AUTHORITY = new PublicKey("6QbtpY2jDNcncRFmVf343NThnCdaY8gCAsYATPnYQR9g"); // PDA ["lma", market]
+const KAMINO_MAPLE_USDC_RESERVE = new PublicKey("Atj6UREVWa7WxbF2EMKNyfmYUY1U1txughe2gjhcPDCo");
+const KAMINO_MAPLE_USDC_LIQUIDITY_SUPPLY = new PublicKey("BBcwMNSMyhhBnYE9pevEvkxKHGzTafMP9v3j7Kk7nAWM");
+const KAMINO_MAPLE_USDC_COLLATERAL_MINT = new PublicKey("6M89FWrQaqcy3domy85J1a1wVMnviL86WeUqbqTXf1qb");
+const KAMINO_MAPLE_USDC_COLLATERAL_SUPPLY = new PublicKey("25x4aEFoJE3bk4sdNLgHrrmchyop1JvcmGA4ccA6tWWT");
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Marinade mainnet constants
 // ─────────────────────────────────────────────────────────────────────────────
@@ -66,6 +82,30 @@ const JITOSOL_MINT = new PublicKey("J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn
 // Jito uses their own fork of SPL Stake Pool — verified from mainnet transaction
 const JITO_PROGRAM = new PublicKey("SPoo1Ku8WFXoNDMHPsrGSTSG1Y47rzgn41SLUNakuHy");
 const JITO_POOL = new PublicKey("Jito4APyf642JPZPx3hGc6WWJ8zPKtRbRs4P815Awbb"); // withdraw auth = 6iQKfEyh...
+
+// Phantom Staked SOL. Runs on the SAME program as jitoSOL — SPoo1Ku8… is the standard SPL
+// Stake Pool program, not a Jito fork (the JITO_PROGRAM comment above is wrong: verified
+// on-chain 2026-07-21 that this program owns both jitoSOL's and PSOL's pools).
+const PSOL_MINT = new PublicKey("pSo1f9nQXWgXibFtKf7NWYxb5enAM4qfP6UJSiXRQfL");
+const PSOL_POOL = new PublicKey("pSPcvR8GmG9aKDUbn9nbKYjkxt9hxMS7kF1qqKJaPqJ");
+
+/**
+ * Every SPL stake pool the keeper can route to, keyed by the vault's protocol LABEL.
+ *
+ * WHY THIS EXISTS: deployToSolLst/recallFromSolLst were always generic — they take a pool
+ * config as a parameter — but the only producer was getJitoPoolConfig(), which hardcoded
+ * JITO_POOL, and both dispatch sites matched on the literal string "jito-sol". So
+ * registering a second stake pool on the vault (psol-sol, 2026-07-21) created a live
+ * hazard: the rebalancer would name it the winner, executeRebalance would RECALL funds out
+ * of Marinade to fund the move, then fall through to `No deploy handler` and leave the
+ * vault sitting in cash. Idle funds are the one outcome this product exists to prevent.
+ *
+ * Adding another SPL stake pool is now one entry here — no new dispatch branch.
+ */
+const SPL_STAKE_POOLS: Record<string, { pool: PublicKey; program: PublicKey }> = {
+  "jito-sol": { pool: JITO_POOL, program: JITO_PROGRAM },
+  "psol-sol": { pool: PSOL_POOL, program: JITO_PROGRAM },
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Solend mainnet constants
@@ -184,9 +224,28 @@ export class SolanaClient {
 
   constructor() {
     const rpcUrl = process.env.RPC_URL || "https://api.devnet.solana.com";
+
+    // web3.js derives its websocket endpoint by swapping https:// for wss:// — and in
+    // doing so it DROPS THE QUERY STRING. For a provider that authenticates via
+    // `?api-key=…` (Helius, QuickNode) the socket therefore connects unauthenticated and
+    // is rejected with 429, once per confirmTransaction, forever.
+    //
+    // Nothing breaks: confirmTransaction falls back to HTTP polling, which is why the
+    // keeper kept succeeding while logging `ws error: Unexpected server response: 429`.
+    // But every confirmation then waits on polling instead of a push notification, and
+    // the noise masks real rate-limit problems — which is exactly what it did when the
+    // QuickNode subscription lapsed 2026-07-24: genuine 429s were indistinguishable
+    // from this permanent one.
+    //
+    // Carrying the query string over keeps the socket authenticated.
+    const wsEndpoint = rpcUrl.startsWith("http")
+      ? rpcUrl.replace(/^http/, "ws")
+      : undefined;
+
     this.connection = new Connection(rpcUrl, {
       commitment: "confirmed",
       confirmTransactionInitialTimeout: 60_000,
+      ...(wsEndpoint ? { wsEndpoint } : {}),
     });
 
     // Load keeper keypair
@@ -270,6 +329,7 @@ export class SolanaClient {
       { mint: KAMINO_SOL_COLLATERAL_MINT,    label: "kSOL (Kamino SOL collateral)" },
       { mint: MSOL_MINT,                     label: "mSOL (Marinade)" },
       { mint: JITOSOL_MINT,                  label: "jitoSOL (Jito)" },
+      { mint: PSOL_MINT,                     label: "PSOL (Phantom)" },
       { mint: SOLEND_USDC_COLLATERAL_MINT,   label: "cUSDC (Solend collateral)" },
     ];
 
@@ -338,6 +398,27 @@ export class SolanaClient {
       liquiditySupply: KAMINO_USDC_LIQUIDITY_SUPPLY,
       collateralMint: KAMINO_USDC_COLLATERAL_MINT,
       collateralSupply: KAMINO_USDC_COLLATERAL_SUPPLY,
+    };
+  }
+
+  /** Same shape as getKaminoAccounts, pointed at the Maple Market's isolated USDC reserve. */
+  getKaminoMapleAccounts(vaultPubkey: PublicKey, vaultState: VaultState): KaminoAccounts {
+    const vaultAuthority = this.getVaultAuthority(vaultPubkey, vaultState.authorityBump);
+    const vaultCollateralAccount = getAssociatedTokenAddressSync(
+      KAMINO_MAPLE_USDC_COLLATERAL_MINT,
+      vaultAuthority,
+      true
+    );
+    return {
+      vaultAuthority,
+      vaultCollateralAccount,
+      reserve: KAMINO_MAPLE_USDC_RESERVE,
+      lendingMarket: KAMINO_MAPLE_MARKET,
+      marketAuthority: KAMINO_MAPLE_MARKET_AUTHORITY,
+      liquidityMint: USDC_MINT,
+      liquiditySupply: KAMINO_MAPLE_USDC_LIQUIDITY_SUPPLY,
+      collateralMint: KAMINO_MAPLE_USDC_COLLATERAL_MINT,
+      collateralSupply: KAMINO_MAPLE_USDC_COLLATERAL_SUPPLY,
     };
   }
 
@@ -468,11 +549,14 @@ export class SolanaClient {
     vaultAddress: string,
     protocolIndex: number,
     amount: anchor.BN,
-    oracleAccounts: PublicKey[] = [KAMINO_PROGRAM_ID, KAMINO_PROGRAM_ID, KAMINO_PROGRAM_ID, KAMINO_SCOPE_PRICES]
+    oracleAccounts: PublicKey[] = [KAMINO_PROGRAM_ID, KAMINO_PROGRAM_ID, KAMINO_PROGRAM_ID, KAMINO_SCOPE_PRICES],
+    // Lets a second (or third...) Kamino reserve reuse this exact same on-chain
+    // instruction with a different account set — see getKaminoMapleAccounts.
+    kaminoAccountsOverride?: KaminoAccounts
   ): Promise<string | null> {
     const vaultPubkey = new PublicKey(vaultAddress);
     const vault = await this.fetchVault(vaultAddress);
-    const kamino = this.getKaminoAccounts(vaultPubkey, vault);
+    const kamino = kaminoAccountsOverride ?? this.getKaminoAccounts(vaultPubkey, vault);
 
     return this.sendWithRetry(
       () =>
@@ -510,11 +594,12 @@ export class SolanaClient {
     vaultAddress: string,
     protocolIndex: number,
     collateralAmount: anchor.BN,
-    oracleAccounts: PublicKey[] = [KAMINO_PROGRAM_ID, KAMINO_PROGRAM_ID, KAMINO_PROGRAM_ID, KAMINO_SCOPE_PRICES]
+    oracleAccounts: PublicKey[] = [KAMINO_PROGRAM_ID, KAMINO_PROGRAM_ID, KAMINO_PROGRAM_ID, KAMINO_SCOPE_PRICES],
+    kaminoAccountsOverride?: KaminoAccounts
   ): Promise<string | null> {
     const vaultPubkey = new PublicKey(vaultAddress);
     const vault = await this.fetchVault(vaultAddress);
-    const kamino = this.getKaminoAccounts(vaultPubkey, vault);
+    const kamino = kaminoAccountsOverride ?? this.getKaminoAccounts(vaultPubkey, vault);
 
     return this.sendWithRetry(
       () =>
@@ -874,6 +959,47 @@ export class SolanaClient {
     return lamports / 1e9;
   }
 
+  // Builds the epoch-cooldown context the rebalancer needs to refuse exiting an LST
+  // position before its accrued yield exceeds its flat exit fee. epochLengthDays is
+  // derived from a live slot-time sample rather than hardcoded, since mainnet slot
+  // times drift (verified 2026-07-30: ~0.4225s/slot -> ~2.11 days/epoch, not the
+  // ~2-3 day rule of thumb).
+  //
+  // `vaultState` is optional only for backwards compatibility with any caller that
+  // doesn't have it handy — pass it whenever possible. With it, this backfills an
+  // entry-epoch for every epoch-gated position the vault CURRENTLY HOLDS but has no
+  // record for. That backfill is what makes the rebalancer's now fail-CLOSED cooldown
+  // safe: without it, a position whose record was lost (fresh runner, wiped state file,
+  // a deploy that happened before the tracker existed) could never be exited at all.
+  // With it, the first cycle stamps "entered now" + blocks, and later cycles compare
+  // normally. See epochTracker.ensureEntryForHeldPosition for the incident this fixes.
+  async getEpochContext(vaultAddress: string, vaultState?: VaultState): Promise<EpochContext> {
+    const [epochInfo, perfSamples] = await Promise.all([
+      this.connection.getEpochInfo(),
+      this.connection.getRecentPerformanceSamples(1),
+    ]);
+    const sample = perfSamples[0];
+    const secsPerSlot = sample && sample.numSlots > 0
+      ? sample.samplePeriodSecs / sample.numSlots
+      : 0.4225; // fallback: last known-good live measurement
+    const epochLengthDays = (epochInfo.slotsInEpoch * secsPerSlot) / 86_400;
+
+    if (vaultState) {
+      const held = vaultState.protocols.slice(0, vaultState.protocolCount);
+      for (const p of held) {
+        if (p.deployedBalance.toNumber() > 0) {
+          ensureEntryForHeldPosition(vaultAddress, p.label, epochInfo.epoch);
+        }
+      }
+    }
+
+    return {
+      currentEpoch: epochInfo.epoch,
+      epochLengthDays,
+      entryEpochs: getEntryEpochs(vaultAddress),
+    };
+  }
+
   async getVaultCollateralBalance(
     vaultAddress: string,
     vaultState: VaultState
@@ -903,24 +1029,40 @@ export class SolanaClient {
 
   // ── Jito pool config (decoded from on-chain stake pool state) ─────────────
 
-  async getJitoPoolConfig() {
-    const data = (await this.connection.getAccountInfo(JITO_POOL))?.data;
-    if (!data || data.length < 226) throw new Error("Jito pool account not found or too small");
-    const reserveStake = new PublicKey(data.slice(130, 162));
+  /** Decode any SPL stake pool's account into the config deployToSolLst/recallFromSolLst
+   *  need. Offsets are fixed in the SPL StakePool layout and all three are verified:
+   *  reserveStake@130 and managerFeeAccount@194 are proven by the live jitoSOL CPIs, and
+   *  poolMint@162 was confirmed independently (decoding PSOL's pool at 162 yields
+   *  pSo1f9nQ…, and jitoSOL's yields J1toso1u…).
+   *
+   *  poolMint is READ FROM THE CHAIN rather than taken from a constant — one less place
+   *  for a per-pool value to be wrong. */
+  async getSplStakePoolConfig(label: string) {
+    const entry = SPL_STAKE_POOLS[label];
+    if (!entry) throw new Error(`No SPL stake pool registered for label "${label}"`);
+    const data = (await this.connection.getAccountInfo(entry.pool))?.data;
+    if (!data || data.length < 226) throw new Error(`${label}: stake pool account not found or too small`);
+    const reserveStake      = new PublicKey(data.slice(130, 162));
+    const poolMint          = new PublicKey(data.slice(162, 194));
     const managerFeeAccount = new PublicKey(data.slice(194, 226));
     const [withdrawAuthority] = PublicKey.findProgramAddressSync(
-      [JITO_POOL.toBuffer(), Buffer.from("withdraw")],
-      JITO_PROGRAM
+      [entry.pool.toBuffer(), Buffer.from("withdraw")],
+      entry.program
     );
     return {
-      stakePool: JITO_POOL,
+      stakePool: entry.pool,
       withdrawAuthority,
       reserveStake,
       managerFeeAccount,
-      poolMint: JITOSOL_MINT,
-      lstMint: JITOSOL_MINT,
-      stakePoolProgram: JITO_PROGRAM,
+      poolMint,
+      lstMint: poolMint,
+      stakePoolProgram: entry.program,
     };
+  }
+
+  /** @deprecated use getSplStakePoolConfig("jito-sol") */
+  async getJitoPoolConfig() {
+    return this.getSplStakePoolConfig("jito-sol");
   }
 
   // ── Execute rebalance: move funds to match target allocations ─────────────
@@ -928,7 +1070,7 @@ export class SolanaClient {
   // Phase 1 - recall from over-deployed protocols (frees idle vault balance)
   // Phase 2 - deploy to under-deployed protocols (uses idle vault balance)
 
-  async executeRebalance(vaultAddress: string, vault: VaultState): Promise<void> {
+  async executeRebalance(vaultAddress: string, vault: VaultState, currentEpoch?: number): Promise<void> {
     const totalDeposits = vault.totalDeposits.toNumber();
     if (totalDeposits === 0) {
       logger.info("executeRebalance: vault empty, skipping");
@@ -1006,12 +1148,19 @@ export class SolanaClient {
         let sig: string | null = null;
         if (d.label === "kamino-usdc") {
           sig = await this.recallFromKamino(vaultAddress, d.index, receiptToWithdraw);
+        } else if (d.label === "kamino-usdc-maple") {
+          const mapleAccounts = this.getKaminoMapleAccounts(new PublicKey(vaultAddress), vault);
+          sig = await this.recallFromKamino(
+            vaultAddress, d.index, receiptToWithdraw,
+            [KAMINO_PROGRAM_ID, KAMINO_PROGRAM_ID, KAMINO_PROGRAM_ID, KAMINO_SCOPE_PRICES],
+            mapleAccounts
+          );
         } else if (d.label === "kamino-sol") {
           sig = await this.recallFromKaminoSol(vaultAddress, d.index, receiptToWithdraw);
         } else if (d.label === "marinade-sol") {
           sig = await this.recallFromMarinade(vaultAddress, d.index, receiptToWithdraw);
-        } else if (d.label === "jito-sol") {
-          const cfg = await this.getJitoPoolConfig();
+        } else if (SPL_STAKE_POOLS[d.label]) {
+          const cfg = await this.getSplStakePoolConfig(d.label);
           sig = await this.recallFromSolLst(vaultAddress, d.index, receiptToWithdraw, cfg);
         } else if (d.label === "solend-usdc") {
           sig = await this.recallFromSolend(vaultAddress, d.index, receiptToWithdraw);
@@ -1020,6 +1169,13 @@ export class SolanaClient {
         }
         // Recalls move real funds back out of a protocol — alert like deploys do.
         if (sig) {
+          // A full exit (recalling down to target 0) clears the epoch-entry record,
+          // so a later re-deploy starts a fresh cooldown window rather than inheriting
+          // the old one. Partial recalls (target still > 0) are not a full exit and
+          // leave the record intact.
+          if (EPOCH_GATED_PROTOCOLS.has(d.label) && d.target === 0) {
+            clearEntry(vaultAddress, d.label);
+          }
           await notifyTelegram(
             `↩️ <b>Recalled</b> — ${d.label} → vault
 ` +
@@ -1061,12 +1217,19 @@ export class SolanaClient {
         let sig: string | null = null;
         if (d.label === "kamino-usdc") {
           sig = await this.deployToKamino(vaultAddress, d.index, amount);
+        } else if (d.label === "kamino-usdc-maple") {
+          const mapleAccounts = this.getKaminoMapleAccounts(new PublicKey(vaultAddress), vault);
+          sig = await this.deployToKamino(
+            vaultAddress, d.index, amount,
+            [KAMINO_PROGRAM_ID, KAMINO_PROGRAM_ID, KAMINO_PROGRAM_ID, KAMINO_SCOPE_PRICES],
+            mapleAccounts
+          );
         } else if (d.label === "kamino-sol") {
           sig = await this.deployToKaminoSol(vaultAddress, d.index, amount);
         } else if (d.label === "marinade-sol") {
           sig = await this.deployToMarinade(vaultAddress, d.index, amount);
-        } else if (d.label === "jito-sol") {
-          const cfg = await this.getJitoPoolConfig();
+        } else if (SPL_STAKE_POOLS[d.label]) {
+          const cfg = await this.getSplStakePoolConfig(d.label);
           sig = await this.deployToSolLst(vaultAddress, d.index, amount, cfg);
         } else if (d.label === "solend-usdc") {
           sig = await this.deployToSolend(vaultAddress, d.index, amount);
@@ -1078,6 +1241,11 @@ export class SolanaClient {
         // the ONLY action with no alert — notifyTelegram was wired to rebalance+compound
         // only. Found 2026-07-16: 4.5 USDC deployed to Kamino and the channel said nothing.
         if (sig) {
+          // Only a fresh 0 -> nonzero deploy starts the epoch cooldown clock — a
+          // top-up of an already-held position must not reset it (see epochTracker.ts).
+          if (EPOCH_GATED_PROTOCOLS.has(d.label) && d.deployed === 0 && currentEpoch !== undefined) {
+            recordEntryIfFresh(vaultAddress, d.label, true, currentEpoch);
+          }
           await notifyTelegram(
             `⚡ <b>Deployed</b> — ${fmtAmount(amount.toNumber(), vault.name)} → ${d.label}
 ` +
@@ -1511,7 +1679,6 @@ export class SolanaClient {
       `exitOrcaLpPosition(${lpVaultAddress.slice(0, 8)}...)`
     );
   }
-
 }
 
 function sleep(ms: number) {
