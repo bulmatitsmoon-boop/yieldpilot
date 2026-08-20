@@ -1,4 +1,5 @@
 import * as anchor from "@coral-xyz/anchor";
+import { getPositionTickArrays, getRaydiumPositionTickArrays } from "./lpVaultHelpers";
 import {
   Connection,
   Keypair,
@@ -6,7 +7,16 @@ import {
   SYSVAR_INSTRUCTIONS_PUBKEY,
 } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
-import { Transaction, SystemProgram } from "@solana/web3.js";
+import {
+  Transaction,
+  SystemProgram,
+  AddressLookupTableAccount,
+  TransactionMessage,
+  VersionedTransaction,
+  ComputeBudgetProgram,
+  TransactionInstruction,
+  AccountMeta,
+} from "@solana/web3.js";
 import { notifyTelegram } from "./telegramNotify";
 import fs from "fs";
 import os from "os";
@@ -123,6 +133,12 @@ const SOLEND_USDC_COLLATERAL_MINT = new PublicKey("993dVFL2uXWYeoXuEBFXR4BijeXdT
 const SOLEND_USDC_ORACLE = new PublicKey("Dpw1EAVrSB1ibxiDQyTAW6Zip3J4Btk2x4SgApQCeFbX"); // fixed 2026-07-06: previous value was stale/wrong, verified against Solend's public API (reserve.liquidity.pythOracle)
 const SOLEND_NULL_ORACLE = new PublicKey("nu11111111111111111111111111111111111111111"); // Solend's sentinel for "no switchboard oracle configured" — NOT the same as SystemProgram.programId; confirmed by decoding the real reserve account bytes 2026-07-07
 
+// ───────────────────────────────────────────────────────────────────────────────
+// Orca / Raydium LP vault constants
+// ──────────────────────────────────────────────────────────────────────────────
+const WHIRLPOOL_PROGRAM_ID = new PublicKey("whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc");
+const RAYDIUM_CLMM_PROGRAM_ID = new PublicKey("CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK");
+
 // MarginFi is intentionally not integrated — see apyFetcher.ts for why
 // (their SDK cannot decode their own current mainnet state).
 
@@ -157,6 +173,32 @@ export interface VaultState {
     deployedBalance: anchor.BN;
     label: string;
   }[];
+}
+
+export interface LpVaultState {
+  admin: PublicKey;
+  keeper: PublicKey;
+  treasury: PublicKey;
+  protocol: any; // { orca: {} } | { raydium: {} } -- Anchor fieldless-enum encoding
+  pool: PublicKey;
+  position: PublicKey;
+  protocolPosition: PublicKey;
+  positionMint: PublicKey;
+  positionTokenAccount: PublicKey;
+  tokenAMint: PublicKey;
+  tokenBMint: PublicKey;
+  vaultTokenAAccount: PublicKey;
+  vaultTokenBAccount: PublicKey;
+  lpSharesMint: PublicKey;
+  tickLowerIndex: number;
+  tickUpperIndex: number;
+  totalLiquidity: anchor.BN;
+  totalShares: anchor.BN;
+  paused: boolean;
+  positionActive: boolean;
+  bump: number;
+  authorityBump: number;
+  name: string;
 }
 
 export interface KaminoAccounts {
@@ -1217,6 +1259,426 @@ export class SolanaClient {
     }
   }
 
+  // ── LP vault (Orca Whirlpools + Raydium CLMM) ────────────────────────────
+  // See lp_vault.rs's module docs for the product design, lpVaultRebalancer.ts
+  // for the reposition decision logic this feeds, and lpVaultHelpers.ts for
+  // the PDA math used below.
+
+  async fetchLpVault(lpVaultAddress: string): Promise<LpVaultState> {
+    const pubkey = new PublicKey(lpVaultAddress);
+    return await (this.program.account as any)["lpVault"].fetch(pubkey) as LpVaultState;
+  }
+
+  async fetchAllLpVaults(): Promise<{ address: string; state: LpVaultState }[]> {
+    const addresses = (process.env.LP_VAULT_ADDRESSES || "")
+      .split(",")
+      .map(s => s.trim())
+      .filter(Boolean);
+
+    const results = await Promise.allSettled(
+      addresses.map(async addr => ({
+        address: addr,
+        state: await this.fetchLpVault(addr),
+      }))
+    );
+
+    return results
+      .filter((r): r is PromiseFulfilledResult<{ address: string; state: LpVaultState }> =>
+        r.status === "fulfilled"
+      )
+      .map(r => r.value);
+  }
+
+  /**
+   * Read the current tick and (for Raydium) tick spacing directly from the
+   * pool account bytes — same manual byte-offset decode as
+   * app/src/hooks/useLpVault.ts's decodeWhirlpool/decodeRaydiumPool, kept
+   * duplicated here for the same "no shared internal library today" reason
+   * documented elsewhere in this codebase.
+   */
+  /**
+   * Raw balances sitting in the LP vault's own token accounts.
+   *
+   * Used to pick a FUNDABLE range when redeploying: a vault that drifted out of range
+   * holds almost entirely one token, and a centred range needs both. Returns raw
+   * amounts (no decimal scaling) because the caller compares them against the pool
+   * price in raw units, where 1.0001^tick is already decimals-adjusted.
+   *
+   * Missing accounts read as 0 rather than throwing — an uninitialised side is
+   * genuinely a zero balance, and failing here would block recovery entirely.
+   */
+  async readLpVaultIdle(vault: LpVaultState): Promise<{ amountA: number; amountB: number }> {
+    const read = async (acct: PublicKey): Promise<number> => {
+      try {
+        const b = await this.connection.getTokenAccountBalance(acct);
+        return Number(b.value.amount) || 0;
+      } catch {
+        return 0;
+      }
+    };
+    const [amountA, amountB] = await Promise.all([
+      read(vault.vaultTokenAAccount),
+      read(vault.vaultTokenBAccount),
+    ]);
+    return { amountA, amountB };
+  }
+
+  async readPoolTickCurrent(vault: LpVaultState): Promise<{ tickCurrent: number; tickSpacing: number }> {
+    const info = await this.connection.getAccountInfo(vault.pool);
+    if (!info) throw new Error(`Pool account not found: ${vault.pool.toBase58()}`);
+    const isRaydium = "raydium" in (vault.protocol as any);
+    if (isRaydium) {
+      return {
+        tickCurrent: info.data.readInt32LE(269),
+        tickSpacing: info.data.readUInt16LE(235),
+      };
+    }
+    return {
+      tickCurrent: info.data.readInt32LE(81),
+      tickSpacing: info.data.readUInt16LE(41),
+    };
+  }
+
+  private readWhirlpoolVaults(data: Buffer): { tokenVaultA: PublicKey; tokenVaultB: PublicKey } {
+    return {
+      tokenVaultA: new PublicKey(data.subarray(133, 165)),
+      tokenVaultB: new PublicKey(data.subarray(213, 245)),
+    };
+  }
+  private readRaydiumPoolVaults(data: Buffer): { tokenVaultA: PublicKey; tokenVaultB: PublicKey } {
+    return {
+      tokenVaultA: new PublicKey(data.subarray(137, 169)),
+      tokenVaultB: new PublicKey(data.subarray(169, 201)),
+    };
+  }
+
+  /**
+   * Fully exit an LP vault's active position (decrease all liquidity, close
+   * the position) — keeper-signed, matches exit_orca_lp_position /
+   * exit_raydium_lp_position's on-chain `keeper` constraint. Branches on
+   * vault.protocol since each protocol needs different accounts, mirroring
+   * the on-chain program's own separate-instructions-per-protocol design.
+   *
+   * NOTE: reopening a position (open_new_*_lp_position) is admin-gated, not
+   * keeper-gated, on purpose — the keeper can pull a position out of harm's
+   * way autonomously, but choosing a brand-new price range is a judgment
+   * call reserved for the admin key. This method does not attempt that step;
+   * callers should surface the "needs admin reopen" case loudly instead of
+   * silently trying to sign an instruction the keeper key isn't authorized
+   * for (see index.ts's runLpVaultCheck).
+   */
+  /**
+   * Decode a Raydium CLMM pool's reward slots.
+   *
+   * Layout comes from Raydium's ON-CHAIN IDL, not guesswork: PoolState.reward_infos
+   * sits at offset 397 with a 169-byte stride, and within each RewardInfo
+   * reward_state@0, token_mint@57, token_vault@89.
+   *
+   * decrease_liquidity (used by withdraw AND exit) collects reward emissions in the
+   * same instruction and validates
+   *   remaining_accounts.len() == initialized_reward_count * 2
+   * failing InvalidRewardInputAccountNumber (6030) otherwise. A slot counts as
+   * initialized whenever reward_state != 0 — "Ended" (3) still counts.
+   */
+  readRaydiumRewards(poolData: Buffer): { mint: PublicKey; vault: PublicKey }[] {
+    const BASE = 397, STRIDE = 169, STATE = 0, MINT = 57, VAULT = 89;
+    const out: { mint: PublicKey; vault: PublicKey }[] = [];
+    for (let i = 0; i < 3; i++) {
+      const o = BASE + i * STRIDE;
+      if (o + STRIDE > poolData.length) break;
+      if (poolData[o + STATE] === 0) continue;
+      out.push({
+        mint: new PublicKey(poolData.subarray(o + MINT, o + MINT + 32)),
+        vault: new PublicKey(poolData.subarray(o + VAULT, o + VAULT + 32)),
+      });
+    }
+    return out;
+  }
+
+  /**
+   * Build the remaining accounts decrease_liquidity expects, plus any idempotent ATA
+   * creations needed so the recipients exist. The recipient is an ATA owned by the
+   * vault authority for each reward mint; if it does not exist the CPI fails.
+   */
+  buildRaydiumRewardAccounts(
+    rewards: { mint: PublicKey; vault: PublicKey }[],
+    vaultAuthority: PublicKey
+  ): { remaining: AccountMeta[]; preIxs: TransactionInstruction[] } {
+    const remaining: AccountMeta[] = [];
+    const preIxs: TransactionInstruction[] = [];
+    for (const r of rewards) {
+      const recipient = getAssociatedTokenAddressSync(r.mint, vaultAuthority, true);
+      preIxs.push(
+        createAssociatedTokenAccountIdempotentInstruction(
+          this.keeper.publicKey, recipient, vaultAuthority, r.mint
+        )
+      );
+      remaining.push({ pubkey: r.vault, isSigner: false, isWritable: true });
+      remaining.push({ pubkey: recipient, isSigner: false, isWritable: true });
+    }
+    return { remaining, preIxs };
+  }
+
+  /**
+   * Send instructions as a VERSIONED (v0) transaction, optionally through an Address
+   * Lookup Table.
+   *
+   * Raydium LP instructions do not fit a legacy transaction: initialize_raydium_lp_vault
+   * is 1245 bytes against the 1232 limit once the required compute-budget instruction is
+   * included, and there is no combination that fits without an ALT (measured on the local
+   * harness — with an ALT the same transaction is 878 bytes). They also exceed the 200k
+   * default compute budget, because open_position additionally creates Metaplex metadata.
+   *
+   * Set LP_ADDRESS_LOOKUP_TABLE to the published table. Without it this still sends a v0
+   * transaction, which is fine for the smaller instructions but WILL fail on
+   * initialize_raydium_lp_vault.
+   */
+  async sendV0(
+    instructions: TransactionInstruction[],
+    label: string,
+    opts: { computeUnits?: number; extraSigners?: Keypair[] } = {}
+  ): Promise<string | null> {
+    const lookupTables: AddressLookupTableAccount[] = [];
+    const altAddr = process.env.LP_ADDRESS_LOOKUP_TABLE;
+    if (altAddr) {
+      const fetched = await this.connection.getAddressLookupTable(new PublicKey(altAddr));
+      if (fetched.value) lookupTables.push(fetched.value);
+      else logger.warn(`LP_ADDRESS_LOOKUP_TABLE ${altAddr} not found on chain — sending without it`);
+    }
+
+    const ixs = [
+      ComputeBudgetProgram.setComputeUnitLimit({ units: opts.computeUnits ?? 600_000 }),
+      ...instructions,
+    ];
+
+    return this.sendWithRetry(async () => {
+      const { blockhash } = await this.connection.getLatestBlockhash();
+      const msg = new TransactionMessage({
+        payerKey: this.keeper.publicKey,
+        recentBlockhash: blockhash,
+        instructions: ixs,
+      }).compileToV0Message(lookupTables);
+      const tx = new VersionedTransaction(msg);
+      tx.sign([this.keeper, ...(opts.extraSigners ?? [])]);
+      const size = tx.serialize().length;
+      if (size > 1232) {
+        throw new Error(
+          `${label}: transaction is ${size} bytes, over the 1232 limit. ` +
+          `Set LP_ADDRESS_LOOKUP_TABLE to a published lookup table.`
+        );
+      }
+      const sig = await this.connection.sendTransaction(tx);
+      await this.connection.confirmTransaction(sig, "confirmed");
+      return sig;
+    }, label);
+  }
+
+  /**
+   * Open a NEW position at `tickLower`/`tickUpper` and move the vault's idle tokens into
+   * it. This is the second half of a reposition — without it the keeper can only exit,
+   * and the vault sits in cash until a human intervenes.
+   *
+   * Returns { openSig, redeploySig, liquidity } so the caller can log what happened.
+   *
+   * ON SIZING: the client does not replicate Orca/Raydium's liquidity math. It asks for
+   * the liquidity the vault held before the exit and, if the pool rejects it on slippage
+   * (the required token amounts exceed what the idle balance can cover at the NEW price),
+   * halves the request and retries. That converges on close-to-maximum deployment within
+   * a few attempts without a second implementation of the AMM math to get wrong. It is
+   * deliberately approximate — replicating the quote math on-chain or in the client is
+   * the exact byte-offset/precision territory that has cost this project the most.
+   */
+  async repositionLpVault(
+    lpVaultAddress: string,
+    tickLower: number,
+    tickUpper: number,
+    targetLiquidity: anchor.BN
+  ): Promise<{ openSig: string | null; redeploySig: string | null; liquidity: string } | null> {
+    const lpVaultPubkey = new PublicKey(lpVaultAddress);
+    const vault = await this.fetchLpVault(lpVaultAddress);
+    const isRaydium = "raydium" in (vault.protocol as any);
+    if (isRaydium) {
+      logger.warn("  Raydium reposition not wired yet — Orca only for now");
+      return null;
+    }
+
+    const [vaultAuthorityPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("lp_vault_authority"), lpVaultPubkey.toBuffer()],
+      this.program.programId
+    );
+
+    // A fresh position NFT mint. It does not exist yet, so it must sign.
+    const positionMint = Keypair.generate();
+    const [position] = PublicKey.findProgramAddressSync(
+      [Buffer.from("position"), positionMint.publicKey.toBuffer()],
+      WHIRLPOOL_PROGRAM_ID
+    );
+    const positionTokenAccount = getAssociatedTokenAddressSync(
+      positionMint.publicKey, vaultAuthorityPda, true
+    );
+
+    const openSig = await this.sendWithRetry(
+      () =>
+        this.program.methods
+          .openNewOrcaLpPosition(tickLower, tickUpper)
+          .accountsPartial({
+            authority: this.keeper.publicKey,
+            lpVault: lpVaultPubkey,
+            vaultAuthority: vaultAuthorityPda,
+            position,
+            positionMint: positionMint.publicKey,
+            positionTokenAccount,
+            whirlpool: vault.pool,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
+            rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+            whirlpoolProgram: WHIRLPOOL_PROGRAM_ID,
+          })
+          .signers([positionMint])
+          .rpc(),
+      `openNewOrcaLpPosition(${lpVaultAddress.slice(0, 8)}...)`
+    );
+    if (!openSig) return { openSig: null, redeploySig: null, liquidity: "0" };
+
+    const poolInfo = await this.connection.getAccountInfo(vault.pool);
+    if (!poolInfo) throw new Error("pool vanished mid-reposition");
+    const { tickSpacing } = await this.readPoolTickCurrent(vault);
+    const { tokenVaultA, tokenVaultB } = this.readWhirlpoolVaults(poolInfo.data);
+    const { tickArrayLower, tickArrayUpper } = getPositionTickArrays(
+      vault.pool, tickLower, tickUpper, tickSpacing, WHIRLPOOL_PROGRAM_ID
+    );
+
+    // Halving ladder — see note above.
+    let liquidity = targetLiquidity;
+    for (let attempt = 0; attempt < 6; attempt++) {
+      try {
+        const sig = await this.program.methods
+          .redeployOrcaLpLiquidity(liquidity, new anchor.BN("18446744073709551615"), new anchor.BN("18446744073709551615"))
+          .accountsPartial({
+            keeper: this.keeper.publicKey,
+            lpVault: lpVaultPubkey,
+            vaultAuthority: vaultAuthorityPda,
+            vaultTokenAAccount: vault.vaultTokenAAccount,
+            vaultTokenBAccount: vault.vaultTokenBAccount,
+            whirlpool: vault.pool,
+            position,
+            positionTokenAccount,
+            tokenVaultA,
+            tokenVaultB,
+            tickArrayLower,
+            tickArrayUpper,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            whirlpoolProgram: WHIRLPOOL_PROGRAM_ID,
+          })
+          .rpc();
+        logger.info(`  Redeployed ${liquidity.toString()} liquidity (attempt ${attempt + 1})`);
+        return { openSig, redeploySig: sig, liquidity: liquidity.toString() };
+      } catch (err: any) {
+        const msg = err.message || "";
+        // 0x1781 = 6017 PriceSlippageCheck — asked for more than the idle can back.
+        if (!/1781|PriceSlippage|SlippageExceeded/i.test(msg)) throw err;
+        liquidity = liquidity.divn(2);
+        if (liquidity.isZero()) break;
+        logger.warn(`  Redeploy too large, halving to ${liquidity.toString()}`);
+      }
+    }
+
+    logger.error("  Could not redeploy any liquidity — vault is left IDLE, will retry next run");
+    return { openSig, redeploySig: null, liquidity: "0" };
+  }
+
+  async exitLpPosition(lpVaultAddress: string): Promise<string | null> {
+    const lpVaultPubkey = new PublicKey(lpVaultAddress);
+    const vault = await this.fetchLpVault(lpVaultAddress);
+    const isRaydium = "raydium" in (vault.protocol as any);
+
+    const [vaultAuthorityPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("lp_vault_authority"), lpVaultPubkey.toBuffer()],
+      this.program.programId
+    );
+
+    const poolInfo = await this.connection.getAccountInfo(vault.pool);
+    if (!poolInfo) throw new Error(`Pool account not found: ${vault.pool.toBase58()}`);
+
+    if (isRaydium) {
+      const { tickSpacing } = await this.readPoolTickCurrent(vault);
+      const { tokenVaultA, tokenVaultB } = this.readRaydiumPoolVaults(poolInfo.data);
+      const { tickArrayLower, tickArrayUpper } = getRaydiumPositionTickArrays(
+        vault.pool, vault.tickLowerIndex, vault.tickUpperIndex, tickSpacing, RAYDIUM_CLMM_PROGRAM_ID
+      );
+
+      // Raydium's decrease_liquidity collects reward emissions in the same instruction
+      // and validates the remaining-account count against the pool's initialized
+      // rewards. Passing none fails InvalidRewardInputAccountNumber (6030) — proven on
+      // the local harness. Recipients must already exist, hence the idempotent ATA
+      // creations sent ahead of the exit in the same transaction.
+      const rewards = this.readRaydiumRewards(poolInfo.data);
+      const { remaining, preIxs } = this.buildRaydiumRewardAccounts(rewards, vaultAuthorityPda);
+      logger.info(`  Raydium rewards: ${rewards.length} initialized -> ${remaining.length} remaining accounts`);
+
+      const exitIx = await this.program.methods
+        .exitRaydiumLpPosition()
+        .accountsPartial({
+          keeper: this.keeper.publicKey,
+          lpVault: lpVaultPubkey,
+          vaultAuthority: vaultAuthorityPda,
+          vaultTokenAAccount: vault.vaultTokenAAccount,
+          vaultTokenBAccount: vault.vaultTokenBAccount,
+          positionNftAccount: vault.positionTokenAccount,
+          poolState: vault.pool,
+          protocolPosition: vault.protocolPosition,
+          personalPosition: vault.position,
+          positionNftMint: vault.positionMint,
+          tickArrayLower,
+          tickArrayUpper,
+          tokenVault0: tokenVaultA,
+          tokenVault1: tokenVaultB,
+          systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          raydiumProgram: RAYDIUM_CLMM_PROGRAM_ID,
+        })
+        .remainingAccounts(remaining)
+        .instruction();
+
+      // v0 + ALT: Raydium LP instructions do not fit a legacy transaction.
+      return this.sendV0(
+        [...preIxs, exitIx],
+        `exitRaydiumLpPosition(${lpVaultAddress.slice(0, 8)}...)`
+      );
+    }
+
+    const { tickSpacing } = await this.readPoolTickCurrent(vault);
+    const { tokenVaultA, tokenVaultB } = this.readWhirlpoolVaults(poolInfo.data);
+    const { tickArrayLower, tickArrayUpper } = getPositionTickArrays(
+      vault.pool, vault.tickLowerIndex, vault.tickUpperIndex, tickSpacing, WHIRLPOOL_PROGRAM_ID
+    );
+
+    return this.sendWithRetry(
+      () =>
+        this.program.methods
+          .exitOrcaLpPosition()
+          .accountsPartial({
+            keeper: this.keeper.publicKey,
+            lpVault: lpVaultPubkey,
+            vaultAuthority: vaultAuthorityPda,
+            vaultTokenAAccount: vault.vaultTokenAAccount,
+            vaultTokenBAccount: vault.vaultTokenBAccount,
+            whirlpool: vault.pool,
+            position: vault.position,
+            positionMint: vault.positionMint,
+            positionTokenAccount: vault.positionTokenAccount,
+            tokenVaultA,
+            tokenVaultB,
+            tickArrayLower,
+            tickArrayUpper,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            whirlpoolProgram: WHIRLPOOL_PROGRAM_ID,
+          })
+          .rpc(),
+      `exitOrcaLpPosition(${lpVaultAddress.slice(0, 8)}...)`
+    );
+  }
 }
 
 function sleep(ms: number) {

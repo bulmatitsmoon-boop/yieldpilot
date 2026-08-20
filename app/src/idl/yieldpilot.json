@@ -2186,6 +2186,2185 @@
           "type": "u64"
         }
       ]
+    },
+    {
+      "name": "deposit_orca_lp",
+      "discriminator": [
+        88,
+        107,
+        221,
+        55,
+        243,
+        42,
+        213,
+        224
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "lp_vault",
+          "writable": true
+        },
+        {
+          "name": "vault_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "lp_vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user_position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  95,
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "lp_vault"
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user_token_a_account",
+          "writable": true
+        },
+        {
+          "name": "user_token_b_account",
+          "writable": true
+        },
+        {
+          "name": "user_shares_account",
+          "writable": true
+        },
+        {
+          "name": "vault_token_a_account",
+          "writable": true
+        },
+        {
+          "name": "vault_token_b_account",
+          "writable": true
+        },
+        {
+          "name": "lp_shares_mint",
+          "writable": true
+        },
+        {
+          "name": "whirlpool",
+          "writable": true
+        },
+        {
+          "name": "position",
+          "writable": true
+        },
+        {
+          "name": "position_token_account"
+        },
+        {
+          "name": "token_vault_a",
+          "writable": true
+        },
+        {
+          "name": "token_vault_b",
+          "writable": true
+        },
+        {
+          "name": "tick_array_lower",
+          "writable": true
+        },
+        {
+          "name": "tick_array_upper",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "whirlpool_program",
+          "address": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "liquidity_amount",
+          "type": "u128"
+        },
+        {
+          "name": "token_max_a",
+          "type": "u64"
+        },
+        {
+          "name": "token_max_b",
+          "type": "u64"
+        },
+        {
+          "name": "acknowledge_impermanent_loss",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "deposit_raydium_lp",
+      "discriminator": [
+        93,
+        205,
+        207,
+        240,
+        112,
+        216,
+        33,
+        152
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "lp_vault",
+          "writable": true
+        },
+        {
+          "name": "vault_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "lp_vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user_position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  95,
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "lp_vault"
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user_token_a_account",
+          "writable": true
+        },
+        {
+          "name": "user_token_b_account",
+          "writable": true
+        },
+        {
+          "name": "user_shares_account",
+          "writable": true
+        },
+        {
+          "name": "vault_token_a_account",
+          "writable": true
+        },
+        {
+          "name": "vault_token_b_account",
+          "writable": true
+        },
+        {
+          "name": "lp_shares_mint",
+          "writable": true
+        },
+        {
+          "name": "nft_account"
+        },
+        {
+          "name": "pool_state",
+          "writable": true
+        },
+        {
+          "name": "protocol_position",
+          "docs": [
+            "the protocol position's accumulators; a CPI cannot escalate a read-only",
+            "account to writable."
+          ],
+          "writable": true
+        },
+        {
+          "name": "personal_position",
+          "writable": true
+        },
+        {
+          "name": "tick_array_lower",
+          "writable": true
+        },
+        {
+          "name": "tick_array_upper",
+          "writable": true
+        },
+        {
+          "name": "token_vault_0",
+          "writable": true
+        },
+        {
+          "name": "token_vault_1",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "raydium_program",
+          "address": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK"
+        }
+      ],
+      "args": [
+        {
+          "name": "liquidity_amount",
+          "type": "u128"
+        },
+        {
+          "name": "token_max_a",
+          "type": "u64"
+        },
+        {
+          "name": "token_max_b",
+          "type": "u64"
+        },
+        {
+          "name": "acknowledge_impermanent_loss",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "exit_orca_lp_position",
+      "docs": [
+        "Fully exit the current Whirlpool position (decrease all liquidity,",
+        "close the position). See lp_vault.rs's reposition design notes."
+      ],
+      "discriminator": [
+        125,
+        86,
+        14,
+        28,
+        141,
+        213,
+        104,
+        146
+      ],
+      "accounts": [
+        {
+          "name": "keeper",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "lp_vault",
+          "writable": true
+        },
+        {
+          "name": "vault_authority",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "lp_vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_token_a_account",
+          "writable": true
+        },
+        {
+          "name": "vault_token_b_account",
+          "writable": true
+        },
+        {
+          "name": "whirlpool",
+          "writable": true
+        },
+        {
+          "name": "position",
+          "writable": true
+        },
+        {
+          "name": "position_mint",
+          "writable": true
+        },
+        {
+          "name": "position_token_account",
+          "writable": true
+        },
+        {
+          "name": "token_vault_a",
+          "writable": true
+        },
+        {
+          "name": "token_vault_b",
+          "writable": true
+        },
+        {
+          "name": "tick_array_lower",
+          "writable": true
+        },
+        {
+          "name": "tick_array_upper",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "whirlpool_program",
+          "address": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "exit_raydium_lp_position",
+      "docs": [
+        "Fully exit the current Raydium position (decrease all liquidity,",
+        "close the position)."
+      ],
+      "discriminator": [
+        209,
+        232,
+        119,
+        20,
+        61,
+        100,
+        15,
+        24
+      ],
+      "accounts": [
+        {
+          "name": "keeper",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "lp_vault",
+          "writable": true
+        },
+        {
+          "name": "vault_authority",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "lp_vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_token_a_account",
+          "writable": true
+        },
+        {
+          "name": "vault_token_b_account",
+          "writable": true
+        },
+        {
+          "name": "position_nft_account",
+          "writable": true
+        },
+        {
+          "name": "pool_state",
+          "writable": true
+        },
+        {
+          "name": "protocol_position",
+          "docs": [
+            "the protocol position's accumulators; a CPI cannot escalate a read-only",
+            "account to writable."
+          ],
+          "writable": true
+        },
+        {
+          "name": "personal_position",
+          "writable": true
+        },
+        {
+          "name": "position_nft_mint",
+          "writable": true
+        },
+        {
+          "name": "tick_array_lower",
+          "writable": true
+        },
+        {
+          "name": "tick_array_upper",
+          "writable": true
+        },
+        {
+          "name": "token_vault_0",
+          "writable": true
+        },
+        {
+          "name": "token_vault_1",
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "raydium_program",
+          "address": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "initialize_orca_lp_vault",
+      "discriminator": [
+        199,
+        26,
+        208,
+        38,
+        159,
+        127,
+        205,
+        42
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "lp_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "token_a_mint"
+              },
+              {
+                "kind": "account",
+                "path": "token_b_mint"
+              },
+              {
+                "kind": "account",
+                "path": "admin"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_authority",
+          "docs": [
+            "this as Orca's `funder` (writable + signer), and a CPI cannot escalate an",
+            "account to writable if the outer instruction declared it read-only.",
+            "Found by the local harness 2026-07-20 (\"writable privilege escalated\")."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "lp_vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_a_mint"
+        },
+        {
+          "name": "token_b_mint"
+        },
+        {
+          "name": "vault_token_a_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "vault_authority"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "token_a_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "vault_token_b_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "vault_authority"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "token_b_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "lp_shares_mint",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "position",
+          "writable": true
+        },
+        {
+          "name": "position_mint",
+          "docs": [
+            "Position NFT mint. Does NOT exist yet - Orca's open_position inits it,",
+            "so this must be an unvalidated Signer, never Account<Mint>. Typing it as",
+            "Account<Mint> made Anchor deserialize it BEFORE the instruction body ran,",
+            "failing with AccountNotInitialized (3012) and making this instruction",
+            "permanently unreachable. Found by the local harness 2026-07-20 on the",
+            "first ever execution of this code path."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "position_token_account",
+          "docs": [
+            "by vault_authority. Same reason as above - cannot be Account<TokenAccount>",
+            "because it does not exist when Anchor validates accounts."
+          ],
+          "writable": true
+        },
+        {
+          "name": "whirlpool"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
+        },
+        {
+          "name": "associated_token_program"
+        },
+        {
+          "name": "whirlpool_program",
+          "address": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc"
+        }
+      ],
+      "args": [
+        {
+          "name": "params",
+          "type": {
+            "defined": {
+              "name": "InitLpVaultParams"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "initialize_raydium_lp_vault",
+      "discriminator": [
+        89,
+        34,
+        8,
+        37,
+        139,
+        168,
+        112,
+        171
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "lp_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "token_a_mint"
+              },
+              {
+                "kind": "account",
+                "path": "token_b_mint"
+              },
+              {
+                "kind": "account",
+                "path": "admin"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_authority",
+          "docs": [
+            "this as the funder (writable + signer), and a CPI cannot escalate an account",
+            "to writable if the outer instruction declared it read-only. Mirrors the Orca",
+            "fix, which was proven on the harness 2026-07-20."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "lp_vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_a_mint"
+        },
+        {
+          "name": "token_b_mint"
+        },
+        {
+          "name": "vault_token_a_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "vault_authority"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "token_a_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "vault_token_b_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "vault_authority"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "token_b_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "lp_shares_mint",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "position_nft_mint",
+          "docs": [
+            "Position NFT mint. Does NOT exist yet — Raydium's open_position inits it,",
+            "so it must be an unvalidated Signer. Typing it Account<Mint> makes Anchor",
+            "deserialize it before the body runs (AccountNotInitialized 3012) AND leaves",
+            "isSigner=false so the outer tx cannot carry the signature Raydium needs.",
+            "Identical to the Orca bug proven on the harness 2026-07-20."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "position_nft_account",
+          "writable": true
+        },
+        {
+          "name": "metadata_account",
+          "writable": true
+        },
+        {
+          "name": "pool_state",
+          "writable": true
+        },
+        {
+          "name": "protocol_position",
+          "docs": [
+            "see adapters/raydium.rs PDA seed notes). MUST be `mut`: open_position",
+            "initializes it on first use for a tick range, and every liquidity change",
+            "writes to it."
+          ],
+          "writable": true
+        },
+        {
+          "name": "tick_array_lower",
+          "writable": true
+        },
+        {
+          "name": "tick_array_upper",
+          "writable": true
+        },
+        {
+          "name": "personal_position",
+          "writable": true
+        },
+        {
+          "name": "token_account_0",
+          "writable": true
+        },
+        {
+          "name": "token_account_1",
+          "writable": true
+        },
+        {
+          "name": "token_vault_0",
+          "writable": true
+        },
+        {
+          "name": "token_vault_1",
+          "writable": true
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program"
+        },
+        {
+          "name": "metadata_program",
+          "address": "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
+        },
+        {
+          "name": "raydium_program",
+          "address": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK"
+        }
+      ],
+      "args": [
+        {
+          "name": "params",
+          "type": {
+            "defined": {
+              "name": "InitLpVaultParams"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "open_new_orca_lp_position",
+      "docs": [
+        "Open a fresh Whirlpool position at a new price range, after",
+        "exit_orca_lp_position. Vault's tokens remain idle until",
+        "redeploy_orca_lp_liquidity moves them into the new position."
+      ],
+      "discriminator": [
+        12,
+        96,
+        45,
+        190,
+        26,
+        151,
+        177,
+        204
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "docs": [
+            "Either the admin or the keeper. The keeper MUST be able to open a position:",
+            "it is the thing that exits on a reposition, and if it cannot re-enter the",
+            "vault sits in cash until a human intervenes."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "lp_vault",
+          "writable": true
+        },
+        {
+          "name": "vault_authority",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "lp_vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "position",
+          "writable": true
+        },
+        {
+          "name": "position_mint",
+          "docs": [
+            "Position NFT mint. Does NOT exist yet - Orca's open_position inits it,",
+            "so this must be an unvalidated Signer, never Account<Mint>. Typing it as",
+            "Account<Mint> made Anchor deserialize it BEFORE the instruction body ran,",
+            "failing with AccountNotInitialized (3012) and making this instruction",
+            "permanently unreachable. Found by the local harness 2026-07-20 on the",
+            "first ever execution of this code path."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "position_token_account",
+          "docs": [
+            "by vault_authority. Same reason as above - cannot be Account<TokenAccount>",
+            "because it does not exist when Anchor validates accounts."
+          ],
+          "writable": true
+        },
+        {
+          "name": "whirlpool"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
+        },
+        {
+          "name": "associated_token_program"
+        },
+        {
+          "name": "whirlpool_program",
+          "address": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc"
+        }
+      ],
+      "args": [
+        {
+          "name": "tick_lower_index",
+          "type": "i32"
+        },
+        {
+          "name": "tick_upper_index",
+          "type": "i32"
+        }
+      ]
+    },
+    {
+      "name": "open_new_raydium_lp_position",
+      "docs": [
+        "Open a fresh Raydium position at a new price range, after",
+        "exit_raydium_lp_position. Vault's tokens remain idle until",
+        "redeploy_raydium_lp_liquidity moves them into the new position."
+      ],
+      "discriminator": [
+        177,
+        252,
+        187,
+        102,
+        25,
+        134,
+        234,
+        76
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "docs": [
+            "Either the admin or the keeper. The keeper MUST be able to open a position:",
+            "it is the thing that exits on a reposition, and if it cannot re-enter the",
+            "vault sits in cash until a human intervenes."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "lp_vault",
+          "writable": true
+        },
+        {
+          "name": "vault_authority",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "lp_vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "position_nft_mint",
+          "docs": [
+            "Fresh position NFT mint for the NEW position — does not exist yet; Raydium's",
+            "open_position inits it. Must be a Signer for the same reason as the init",
+            "handler (AccountNotInitialized 3012, and isSigner must be true)."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "position_nft_account",
+          "writable": true
+        },
+        {
+          "name": "metadata_account",
+          "writable": true
+        },
+        {
+          "name": "pool_state",
+          "writable": true
+        },
+        {
+          "name": "protocol_position",
+          "docs": [
+            "`mut`: this is the NEW range's protocol position, which Raydium initializes",
+            "on first use and writes to on every liquidity change."
+          ],
+          "writable": true
+        },
+        {
+          "name": "tick_array_lower",
+          "writable": true
+        },
+        {
+          "name": "tick_array_upper",
+          "writable": true
+        },
+        {
+          "name": "personal_position",
+          "writable": true
+        },
+        {
+          "name": "token_account_0",
+          "writable": true
+        },
+        {
+          "name": "token_account_1",
+          "writable": true
+        },
+        {
+          "name": "token_vault_0",
+          "writable": true
+        },
+        {
+          "name": "token_vault_1",
+          "writable": true
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program"
+        },
+        {
+          "name": "metadata_program",
+          "address": "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
+        },
+        {
+          "name": "raydium_program",
+          "address": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK"
+        }
+      ],
+      "args": [
+        {
+          "name": "tick_lower_index",
+          "type": "i32"
+        },
+        {
+          "name": "tick_upper_index",
+          "type": "i32"
+        },
+        {
+          "name": "tick_array_lower_start_index",
+          "type": "i32"
+        },
+        {
+          "name": "tick_array_upper_start_index",
+          "type": "i32"
+        }
+      ]
+    },
+    {
+      "name": "redeploy_orca_lp_liquidity",
+      "docs": [
+        "Move the vault's own idle tokens into the currently active position",
+        "(e.g. after open_new_orca_lp_position, or simply topping up an",
+        "under-deployed position). Distinct from deposit_orca_lp, which pulls",
+        "from a user — this moves tokens the vault already owns."
+      ],
+      "discriminator": [
+        138,
+        122,
+        69,
+        27,
+        39,
+        32,
+        86,
+        36
+      ],
+      "accounts": [
+        {
+          "name": "keeper",
+          "signer": true
+        },
+        {
+          "name": "lp_vault",
+          "writable": true
+        },
+        {
+          "name": "vault_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "lp_vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_token_a_account",
+          "writable": true
+        },
+        {
+          "name": "vault_token_b_account",
+          "writable": true
+        },
+        {
+          "name": "whirlpool",
+          "writable": true
+        },
+        {
+          "name": "position",
+          "writable": true
+        },
+        {
+          "name": "position_token_account"
+        },
+        {
+          "name": "token_vault_a",
+          "writable": true
+        },
+        {
+          "name": "token_vault_b",
+          "writable": true
+        },
+        {
+          "name": "tick_array_lower",
+          "writable": true
+        },
+        {
+          "name": "tick_array_upper",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "whirlpool_program",
+          "address": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc"
+        }
+      ],
+      "args": [
+        {
+          "name": "liquidity_amount",
+          "type": "u128"
+        },
+        {
+          "name": "token_max_a",
+          "type": "u64"
+        },
+        {
+          "name": "token_max_b",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "redeploy_raydium_lp_liquidity",
+      "docs": [
+        "Move the vault's own idle tokens into the currently active position.",
+        "Distinct from deposit_raydium_lp, which pulls from a user."
+      ],
+      "discriminator": [
+        231,
+        134,
+        175,
+        60,
+        181,
+        95,
+        67,
+        19
+      ],
+      "accounts": [
+        {
+          "name": "keeper",
+          "signer": true
+        },
+        {
+          "name": "lp_vault",
+          "writable": true
+        },
+        {
+          "name": "vault_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "lp_vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_token_a_account",
+          "writable": true
+        },
+        {
+          "name": "vault_token_b_account",
+          "writable": true
+        },
+        {
+          "name": "nft_account"
+        },
+        {
+          "name": "pool_state",
+          "writable": true
+        },
+        {
+          "name": "protocol_position",
+          "docs": [
+            "the protocol position's accumulators; a CPI cannot escalate a read-only",
+            "account to writable."
+          ],
+          "writable": true
+        },
+        {
+          "name": "personal_position",
+          "writable": true
+        },
+        {
+          "name": "tick_array_lower",
+          "writable": true
+        },
+        {
+          "name": "tick_array_upper",
+          "writable": true
+        },
+        {
+          "name": "token_vault_0",
+          "writable": true
+        },
+        {
+          "name": "token_vault_1",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "raydium_program",
+          "address": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK"
+        }
+      ],
+      "args": [
+        {
+          "name": "liquidity_amount",
+          "type": "u128"
+        },
+        {
+          "name": "token_max_a",
+          "type": "u64"
+        },
+        {
+          "name": "token_max_b",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "withdraw_orca_lp",
+      "discriminator": [
+        245,
+        187,
+        141,
+        142,
+        71,
+        246,
+        235,
+        120
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "lp_vault",
+          "writable": true
+        },
+        {
+          "name": "vault_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "lp_vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user_position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  95,
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "lp_vault"
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user_token_a_account",
+          "writable": true
+        },
+        {
+          "name": "user_token_b_account",
+          "writable": true
+        },
+        {
+          "name": "user_shares_account",
+          "writable": true
+        },
+        {
+          "name": "vault_token_a_account",
+          "writable": true
+        },
+        {
+          "name": "vault_token_b_account",
+          "writable": true
+        },
+        {
+          "name": "lp_shares_mint",
+          "writable": true
+        },
+        {
+          "name": "whirlpool",
+          "writable": true
+        },
+        {
+          "name": "position",
+          "writable": true
+        },
+        {
+          "name": "position_token_account"
+        },
+        {
+          "name": "token_vault_a",
+          "writable": true
+        },
+        {
+          "name": "token_vault_b",
+          "writable": true
+        },
+        {
+          "name": "tick_array_lower",
+          "writable": true
+        },
+        {
+          "name": "tick_array_upper",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "whirlpool_program",
+          "address": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc"
+        }
+      ],
+      "args": [
+        {
+          "name": "shares",
+          "type": "u64"
+        },
+        {
+          "name": "token_min_a",
+          "type": "u64"
+        },
+        {
+          "name": "token_min_b",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "withdraw_raydium_lp",
+      "discriminator": [
+        98,
+        40,
+        61,
+        227,
+        237,
+        139,
+        213,
+        48
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "lp_vault",
+          "writable": true
+        },
+        {
+          "name": "vault_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "lp_vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user_position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  95,
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "lp_vault"
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user_token_a_account",
+          "writable": true
+        },
+        {
+          "name": "user_token_b_account",
+          "writable": true
+        },
+        {
+          "name": "user_shares_account",
+          "writable": true
+        },
+        {
+          "name": "vault_token_a_account",
+          "writable": true
+        },
+        {
+          "name": "vault_token_b_account",
+          "writable": true
+        },
+        {
+          "name": "lp_shares_mint",
+          "writable": true
+        },
+        {
+          "name": "nft_account"
+        },
+        {
+          "name": "pool_state",
+          "writable": true
+        },
+        {
+          "name": "protocol_position",
+          "docs": [
+            "the protocol position's accumulators; a CPI cannot escalate a read-only",
+            "account to writable."
+          ],
+          "writable": true
+        },
+        {
+          "name": "personal_position",
+          "writable": true
+        },
+        {
+          "name": "tick_array_lower",
+          "writable": true
+        },
+        {
+          "name": "tick_array_upper",
+          "writable": true
+        },
+        {
+          "name": "token_vault_0",
+          "writable": true
+        },
+        {
+          "name": "token_vault_1",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "raydium_program",
+          "address": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK"
+        }
+      ],
+      "args": [
+        {
+          "name": "shares",
+          "type": "u64"
+        },
+        {
+          "name": "token_min_a",
+          "type": "u64"
+        },
+        {
+          "name": "token_min_b",
+          "type": "u64"
+        }
+      ]
     }
   ],
   "accounts": [
@@ -2226,6 +4405,32 @@
         192,
         234,
         62
+      ]
+    },
+    {
+      "name": "LpUserPosition",
+      "discriminator": [
+        179,
+        185,
+        88,
+        139,
+        228,
+        145,
+        229,
+        195
+      ]
+    },
+    {
+      "name": "LpVault",
+      "discriminator": [
+        189,
+        45,
+        167,
+        23,
+        91,
+        118,
+        105,
+        190
       ]
     }
   ],
@@ -2385,6 +4590,84 @@
         52,
         221
       ]
+    },
+    {
+      "name": "LpDeposited",
+      "discriminator": [
+        85,
+        211,
+        184,
+        159,
+        176,
+        224,
+        28,
+        72
+      ]
+    },
+    {
+      "name": "LpLiquidityRedeployed",
+      "discriminator": [
+        184,
+        72,
+        19,
+        212,
+        94,
+        62,
+        241,
+        70
+      ]
+    },
+    {
+      "name": "LpPositionExited",
+      "discriminator": [
+        105,
+        114,
+        75,
+        77,
+        188,
+        189,
+        0,
+        46
+      ]
+    },
+    {
+      "name": "LpPositionReopened",
+      "discriminator": [
+        129,
+        107,
+        69,
+        228,
+        97,
+        180,
+        195,
+        32
+      ]
+    },
+    {
+      "name": "LpVaultInitialized",
+      "discriminator": [
+        210,
+        13,
+        220,
+        155,
+        3,
+        239,
+        68,
+        52
+      ]
+    },
+    {
+      "name": "LpWithdrawn",
+      "discriminator": [
+        188,
+        10,
+        43,
+        60,
+        223,
+        238,
+        51,
+        153
+      ]
     }
   ],
   "errors": [
@@ -2392,6 +4675,66 @@
       "code": 6000,
       "name": "ReserveDataTooShort",
       "msg": "Reserve account data too short to parse"
+    },
+    {
+      "code": 6000,
+      "name": "MustAcknowledgeImpermanentLoss",
+      "msg": "Must explicitly acknowledge impermanent loss risk to deposit"
+    },
+    {
+      "code": 6001,
+      "name": "LpVaultPaused",
+      "msg": "LP vault is paused"
+    },
+    {
+      "code": 6002,
+      "name": "ZeroAmount",
+      "msg": "Amount must be > 0"
+    },
+    {
+      "code": 6003,
+      "name": "ZeroShares",
+      "msg": "Zero shares calculated"
+    },
+    {
+      "code": 6004,
+      "name": "InsufficientShares",
+      "msg": "Insufficient shares"
+    },
+    {
+      "code": 6005,
+      "name": "MathOverflow",
+      "msg": "Math overflow"
+    },
+    {
+      "code": 6006,
+      "name": "Unauthorized",
+      "msg": "Unauthorized"
+    },
+    {
+      "code": 6007,
+      "name": "NameTooLong",
+      "msg": "Name too long (max 32 chars)"
+    },
+    {
+      "code": 6008,
+      "name": "SlippageExceeded",
+      "msg": "Output below minimum — slippage exceeded"
+    },
+    {
+      "code": 6009,
+      "name": "NoActivePosition",
+      "msg": "No active protocol position — vault is mid-reposition"
+    },
+    {
+      "code": 6010,
+      "name": "PositionStillActive",
+      "msg": "Position still has liquidity — exit it fully before reopening"
+    },
+    {
+      "code": 6011,
+      "name": "InsufficientIdleBalance",
+      "msg": "Vault does not hold enough idle balance for this redeploy amount"
     }
   ],
   "types": [
@@ -2940,6 +5283,349 @@
           {
             "name": "gain",
             "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "InitLpVaultParams",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "keeper",
+            "type": "pubkey"
+          },
+          {
+            "name": "treasury",
+            "type": "pubkey"
+          },
+          {
+            "name": "tick_lower_index",
+            "type": "i32"
+          },
+          {
+            "name": "tick_upper_index",
+            "type": "i32"
+          },
+          {
+            "name": "tick_array_lower_start_index",
+            "docs": [
+              "Raydium only — the start index of each tick array (a DIFFERENT value",
+              "than tick_lower_index/tick_upper_index; see adapters/raydium.rs PDA",
+              "seed notes). Ignored for Orca vaults."
+            ],
+            "type": "i32"
+          },
+          {
+            "name": "tick_array_upper_start_index",
+            "type": "i32"
+          },
+          {
+            "name": "name",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LpDeposited",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "lp_vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "liquidity_amount",
+            "type": "u128"
+          },
+          {
+            "name": "shares_minted",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LpLiquidityRedeployed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "lp_vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "liquidity_amount",
+            "type": "u128"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LpPositionExited",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "lp_vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "liquidity_removed",
+            "type": "u128"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LpPositionReopened",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "lp_vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "tick_lower_index",
+            "type": "i32"
+          },
+          {
+            "name": "tick_upper_index",
+            "type": "i32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LpProtocolKind",
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Orca"
+          },
+          {
+            "name": "Raydium"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LpUserPosition",
+      "docs": [
+        "Per-user LP position ledger — mirrors UserPosition's cost-basis-tracking",
+        "pattern from the main vault, but tracks liquidity units instead of a",
+        "single token amount (there's no single \"amount deposited\" for a two-sided",
+        "LP position)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "lp_vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "shares",
+            "type": "u64"
+          },
+          {
+            "name": "liquidity_at_deposit",
+            "type": "u128"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LpVault",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "keeper",
+            "type": "pubkey"
+          },
+          {
+            "name": "treasury",
+            "type": "pubkey"
+          },
+          {
+            "name": "protocol",
+            "type": {
+              "defined": {
+                "name": "LpProtocolKind"
+              }
+            }
+          },
+          {
+            "name": "pool",
+            "docs": [
+              "Orca: the Whirlpool account. Raydium: the pool_state account."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "position",
+            "docs": [
+              "Orca: the Position state account. Raydium: the PersonalPositionState",
+              "account."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "protocol_position",
+            "docs": [
+              "Raydium only (Pubkey::default() for Orca vaults) — the shared",
+              "per-tick-range ProtocolPositionState account Raydium requires on",
+              "every liquidity-modifying call. See adapters/raydium.rs's PDA seed",
+              "notes; marked \"deprecated\" in Raydium's own source but still",
+              "mandatory."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "position_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "position_token_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "token_a_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "token_b_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "vault_token_a_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "vault_token_b_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "lp_shares_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "tick_lower_index",
+            "type": "i32"
+          },
+          {
+            "name": "tick_upper_index",
+            "type": "i32"
+          },
+          {
+            "name": "total_liquidity",
+            "docs": [
+              "Total liquidity units currently contributed to the position (each",
+              "protocol's own u128 liquidity unit — NOT a token amount)."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "total_shares",
+            "type": "u64"
+          },
+          {
+            "name": "paused",
+            "type": "bool"
+          },
+          {
+            "name": "position_active",
+            "docs": [
+              "False between exit_*_lp_position and open_new_*_lp_position — the",
+              "vault holds idle tokens but has no live protocol position.",
+              "deposit_*_lp and withdraw_*_lp both require this to be true."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "authority_bump",
+            "type": "u8"
+          },
+          {
+            "name": "name",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LpVaultInitialized",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "lp_vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "protocol",
+            "type": {
+              "defined": {
+                "name": "LpProtocolKind"
+              }
+            }
+          },
+          {
+            "name": "pool",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LpWithdrawn",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "lp_vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "shares_burned",
+            "type": "u64"
+          },
+          {
+            "name": "liquidity_amount",
+            "type": "u128"
           }
         ]
       }

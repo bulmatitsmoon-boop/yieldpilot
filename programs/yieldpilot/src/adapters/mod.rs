@@ -72,3 +72,5 @@ pub mod kamino;
 pub mod marinade;
 pub mod spl_stake_pool;
 pub mod solend;
+pub mod orca;
+pub mod raydium;
