@@ -16,6 +16,12 @@ const nextConfig = {
       path: false,
       crypto: false,
     };
+    // Required for @orca-so/whirlpools-core (WASM-based, used by the LP
+    // vault's liquidity-quote math — see useLpVault.ts). Not yet build-
+    // tested; this is the standard webpack 5 flag for wasm-pack's browser
+    // target, but flagging it as unverified rather than assuming it's
+    // sufficient on its own.
+    config.experiments = { ...config.experiments, asyncWebAssembly: true, layers: true };
     return config;
   },
 };
