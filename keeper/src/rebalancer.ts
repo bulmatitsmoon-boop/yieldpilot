@@ -54,9 +54,22 @@ export interface EpochContext {
 }
 
 // Returns true if `label` cannot yet be safely exited given how long it's been held.
-// Fails OPEN (does not block) when we have no entry-epoch record for the position —
-// that just means this protective check can't be applied yet, not that the underlying
-// exit-cost check should be skipped; it still runs independently in computeExitCost.
+//
+// Fails CLOSED (blocks) when we have no entry-epoch record for an epoch-gated position.
+// This was FAIL-OPEN until 2026-08-20 and that made the whole check silently useless:
+// the SOL vault churned psol-sol three times between Aug 5-10 — twice recalling and
+// redeploying the SAME protocol only ~6-8 minutes apart — paying the 10bps exit fee on
+// the full balance every time. That burned ~0.0124 SOL against ~0.0161 SOL of gross
+// yield (~77% of earnings), dropping realized return to ~2% APY versus ~8.5% gross.
+// Every one of those exits sailed through here because no psol-sol entry was ever
+// written, so `entryEpoch === undefined` returned false and waved the exit past.
+//
+// Blocking on a missing record cannot deadlock: solanaClient.getEpochContext backfills
+// an entry for any held epoch-gated position before building this context (see
+// ensureEntryForHeldPosition), so a missing record self-heals into a real one on the
+// very next cycle and then ages out normally. The failure mode of being wrong here is
+// "hold a good position slightly too long", which is strictly cheaper than "pay a real
+// exit fee for nothing" — the asymmetry that motivated the change.
 function epochCooldownBlocksExit(
   label: string,
   apyBps: number,
@@ -64,7 +77,7 @@ function epochCooldownBlocksExit(
 ): boolean {
   if (!ctx || !EPOCH_GATED_PROTOCOLS.has(label)) return false;
   const entryEpoch = ctx.entryEpochs[label];
-  if (entryEpoch === undefined) return false;
+  if (entryEpoch === undefined) return true; // fail CLOSED — see block comment above
 
   const epochsHeld = ctx.currentEpoch - entryEpoch;
   if (epochsHeld <= 0) return true; // same epoch as entry — earned $0 so far, guaranteed loss
