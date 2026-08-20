@@ -1,10 +1,29 @@
 name: Keeper Cron
 
+# CADENCE — read before touching this.
+#
+# There is NO native `schedule:` trigger here on purpose. GitHub Actions' own scheduler is
+# fundamentally best-effort and was measured (2026-07-28, then again 2026-08-03) landing runs
+# 90-220 min apart on a nominal 30-min cadence, regardless of which minutes it was pointed at
+# (tried both contended :00/:45 and low-contention :09/:39 — neither materially helped). It can
+# silently drop scheduled ticks, especially on a low-activity private repo, with no way to
+# detect or retry from inside the workflow itself.
+#
+# Fix (2026-08-03): an external pinger (cron-job.org, free) calls this workflow's
+# `workflow_dispatch` REST endpoint every 30 minutes instead. That endpoint is the ONLY
+# trigger now. Re-adding a `schedule:` block alongside it would just cause DOUBLE the
+# invocations (one flaky native tick + one reliable external ping, independently), burning
+# extra Actions-minutes against the 2000/month private-repo cap for zero reliability benefit —
+# the external ping alone already provides the real cadence.
+#
+# If the external pinger is ever removed/lost, this workflow reverts to only running when
+# someone manually clicks "Run workflow" — there is no automatic fallback. Check
+# keeper-cadence-check.yml's Telegram alerts (or the Actions run history directly) if the
+# keeper ever seems to have gone quiet.
 on:
-  schedule:
-    - cron: "*/45 * * * *"
   workflow_dispatch: {}
-
+permissions:
+  contents: write
 jobs:
   run-keeper:
     runs-on: ubuntu-latest
@@ -46,3 +65,14 @@ jobs:
         if: always()
         working-directory: keeper
         run: rm -f keeper.json
+
+      # Persists the last-processed signature per vault for the deposit watcher (see
+      # depositWatcher.ts) so consecutive runs never re-announce the same deposit,
+      # and never miss one either. Same auto-commit pattern build.yml already uses
+      # for IDL syncing — no new secret/Redis dependency needed.
+      - name: Commit deposit-watch + epoch-entry state
+        if: always()
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: update keeper state [skip ci]"
+          file_pattern: "keeper/state/deposit-watch.json keeper/state/epoch-entries.json"

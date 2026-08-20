@@ -1,14 +1,19 @@
 "use client";
 
 import { useApys } from "@/hooks/useApys";
-import { Card, CardHeader, fmt } from "@/components/ui";
+// fmtTvl used to be redefined locally in this file — a second, independently-drifting
+// copy of the shared one in @/components/ui. That copy had no guard for missing TVL
+// (e.g. psol-sol, which has no live TVL source by design — see api/apys/route.ts) and
+// silently rendered the literal string "$NaNK" instead of "—". Import the shared,
+// already-fixed version instead of maintaining two.
+import { Card, CardHeader, fmt, fmtTvl } from "@/components/ui";
 import { useState, useEffect } from "react";
 
 // Only these protocol IDs have an on-chain deploy_to_* instruction — everything
 // else (Drift, and LP pools when opted in) must never get a "ROUTING HERE" /
-// "20% HERE" badge, regardless of riskScore or APY rank.
+// "ROUTING HERE" badge, regardless of riskScore or APY rank.
 const ROUTABLE_PROTOCOL_IDS = new Set([
-  "kamino-usdc", "kamino-sol", "marinade-sol", "jito-sol", "solend-usdc",
+  "kamino-usdc", "kamino-usdc-maple", "kamino-sol", "marinade-sol", "jito-sol", "psol-sol", "solend-usdc",
 ]);
 
 const RISK_LABEL: Record<number, { label: string; color: string }> = {
@@ -16,12 +21,6 @@ const RISK_LABEL: Record<number, { label: string; color: string }> = {
   2: { label: "Medium", color: "var(--warn)" },
   3: { label: "High",   color: "var(--loss)" },
 };
-
-function fmtTvl(usd: number) {
-  if (usd >= 1_000_000_000) return `$${(usd / 1e9).toFixed(1)}B`;
-  if (usd >= 1_000_000)     return `$${(usd / 1e6).toFixed(0)}M`;
-  return `$${(usd / 1e3).toFixed(0)}K`;
-}
 
 function ILRiskModal({ onAccept, onDecline }: { onAccept: () => void; onDecline: () => void }) {
   return (
@@ -127,13 +126,13 @@ function ILRiskModal({ onAccept, onDecline }: { onAccept: () => void; onDecline:
   );
 }
 
-const LP_PROTOCOL_IDS = new Set(["raydium-usdc-sol", "orca-usdc-eth"]);
+const LP_PROTOCOL_IDS = new Set(["raydium-usdc-sol", "orca-sol-usdc"]);
 
 // Purely a display grouping for the type-filter tabs — not a routability signal.
 const PROTOCOL_TYPE: Record<string, "Lending" | "Liquid stake" | "LP"> = {
-  "kamino-usdc": "Lending", "kamino-sol": "Lending", "solend-usdc": "Lending", "drift-sol": "Lending",
-  "marinade-sol": "Liquid stake", "jito-sol": "Liquid stake",
-  "raydium-usdc-sol": "LP", "orca-usdc-eth": "LP",
+  "kamino-usdc": "Lending", "kamino-usdc-maple": "Lending", "kamino-sol": "Lending", "solend-usdc": "Lending", "drift-sol": "Lending",
+  "marinade-sol": "Liquid stake", "jito-sol": "Liquid stake", "psol-sol": "Liquid stake",
+  "raydium-usdc-sol": "LP", "orca-sol-usdc": "LP",
 };
 
 type TypeFilter = "All" | "Lending" | "Liquid stake";
@@ -174,7 +173,7 @@ export default function ApysPage() {
     .filter(p => typeFilter === "All" || PROTOCOL_TYPE[p.protocolId] === typeFilter)
     .sort((a, b) => b.apyBps - a.apyBps);
 
-  // Only real routable protocols are eligible for ROUTING HERE / 20% HERE —
+  // Only real routable protocols are eligible for the ROUTING HERE badge —
   // riskScore alone isn't a safe proxy (Drift is riskScore 1 but not routable).
   const routableSorted = sorted.filter(p => ROUTABLE_PROTOCOL_IDS.has(p.protocolId));
 
@@ -204,8 +203,8 @@ export default function ApysPage() {
             Updated every 60 seconds.
           </h1>
           <p style={{ color: "var(--text-mid)", fontSize: 14, lineHeight: 1.7, maxWidth: 520 }}>
-            YieldPilot monitors these protocols continuously. 80% of vault assets route to the top rate,
-            20% stays in the runner-up. Rates here refresh every 60 seconds; the keeper re-evaluates
+            YieldPilot monitors these protocols continuously and routes 100% of vault assets to the
+            single highest rate. Rates here refresh every 60 seconds; the keeper re-evaluates
             allocations roughly hourly.
           </p>
         </div>
@@ -216,8 +215,9 @@ export default function ApysPage() {
           marginBottom: 40, border: "1px solid var(--line)", position: "relative", zIndex: 1,
         }}>
           {[
-            { label: "Primary allocation", value: "80%" },
-            { label: "Runner-up allocation", value: "20%" },
+            // 100%, not 80/20. The split was removed 2026-07-21 — it had no risk model behind
+            // it and simply left yield in a second-best rate. See rebalancer.ts.
+            { label: "Allocation to top rate", value: "100%" },
             // 5%, not 0.5% — REBALANCE_THRESHOLD_BPS defaults to 500 bps in rebalancer.ts and the
             // keeper cron does not override it. The page advertised 0.5% for a 5% trigger: off by 10x.
             { label: "Rebalance threshold", value: "5% drift" },
@@ -269,10 +269,8 @@ export default function ApysPage() {
             {activeNode && (
               <div style={{ borderTop: "1px solid var(--line)", paddingTop: 14, fontSize: 13, color: "var(--text-mid)", lineHeight: 1.6 }}>
                 {activeIdx === 0
-                  ? <>Highest live rate right now — receives <span className="mono-num" style={{ color: "var(--signal)" }}>80%</span> of the vault on the next rebalance.</>
-                  : activeIdx === 1
-                  ? <>Runner-up rate — holds <span className="mono-num" style={{ color: "var(--signal-dim)" }}>20%</span> of the vault for diversification.</>
-                  : <>Monitored continuously; routes here only if it overtakes the current leader by more than the 0.5% threshold.</>}
+                  ? <>Highest live rate right now — receives <span className="mono-num" style={{ color: "var(--signal)" }}>100%</span> of the vault on the next rebalance.</>
+                  : <>Monitored continuously; holds none of the vault today. Funds move here only if it overtakes the current leader by more than the 5% drift threshold, and the gain still beats the cost of exiting.</>}
                 {" "}TVL <span className="mono-num">{fmtTvl(activeNode.tvlUsd)}</span>.
               </div>
             )}
@@ -331,7 +329,7 @@ export default function ApysPage() {
             }
           />
 
-          <div style={{
+          <div className="apys-rate-row" style={{
             display: "grid", gridTemplateColumns: "1fr 80px 100px 80px 80px",
             padding: "8px 20px", borderBottom: "1px solid var(--line)",
             color: "var(--text-low)", fontSize: 11, fontWeight: 600,
@@ -350,7 +348,7 @@ export default function ApysPage() {
             const isRoutable = ROUTABLE_PROTOCOL_IDS.has(p.protocolId);
             const routableRank = routableSorted.findIndex(s => s.protocolId === p.protocolId);
             return (
-              <div key={p.protocolId} style={{
+              <div key={p.protocolId} className="apys-rate-row" style={{
                 display: "grid", gridTemplateColumns: "1fr 80px 100px 80px 80px",
                 padding: "14px 20px", borderTop: i === 0 ? "none" : "1px solid var(--line)",
                 alignItems: "center",
@@ -370,14 +368,6 @@ export default function ApysPage() {
                       color: "var(--signal)", border: "1px solid rgba(63,224,160,0.25)",
                       letterSpacing: "0.04em", fontFamily: "var(--font-mono)",
                     }}>ROUTING HERE</span>
-                  )}
-                  {routableRank === 1 && (
-                    <span style={{
-                      fontSize: 10, fontWeight: 700, padding: "2px 7px",
-                      borderRadius: 4, background: "rgba(34,179,126,0.1)",
-                      color: "var(--signal-dim)", border: "1px solid rgba(34,179,126,0.2)",
-                      letterSpacing: "0.04em", fontFamily: "var(--font-mono)",
-                    }}>20% HERE</span>
                   )}
                   {isLP && (
                     <span style={{
