@@ -45,7 +45,7 @@ async function runApyPollAndRebalance(client: SolanaClient) {
     // allocation. Tracked separately so the re-read only costs an RPC call when a
     // rebalance actually happened.
     let currentState = state;
-    const epochContext = await client.getEpochContext(address);
+    const epochContext = await client.getEpochContext(address, state);
 
     if (state.autoRebalance) {
       const decision = computeRebalanceDecision(state, apys, epochContext);
