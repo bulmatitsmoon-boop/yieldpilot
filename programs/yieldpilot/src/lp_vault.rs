@@ -145,10 +145,18 @@ pub struct InitLpVaultParams {
 
 // ── Errors ────────────────────────────────────────────────────────────────────
 
+// Explicit discriminant on the first variant: #[error_code] enums each default to
+// starting at 6000, and this program already has three others (VaultError,
+// AdapterError, KaminoError) claiming that range. Without this, e.g.
+// LpVaultError::MustAcknowledgeImpermanentLoss and VaultError::Unauthorized are both
+// numerically "6000" — harmless today since no single instruction can throw from two
+// enums at once, but ambiguous to anything that maps a bare code back to a message
+// without also knowing which vault type it came from. VaultError runs up to ~6036, so
+// 6100 leaves headroom.
 #[error_code]
 pub enum LpVaultError {
     #[msg("Must explicitly acknowledge impermanent loss risk to deposit")]
-    MustAcknowledgeImpermanentLoss,
+    MustAcknowledgeImpermanentLoss = 6100,
     #[msg("LP vault is paused")]
     LpVaultPaused,
     #[msg("Amount must be > 0")]
