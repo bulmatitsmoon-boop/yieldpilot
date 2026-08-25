@@ -548,7 +548,27 @@ export function useYieldPilot(vaultAddresses: string[]) {
         );
         const totalValueBN = idleBN.add(totalDeployedBN);
         const amountOutBN = totalSharesBN.gtn(0) ? shares.mul(totalValueBN).div(totalSharesBN) : new anchor.BN(0);
-        const minAmountOut = amountOutBN.muln(99).divn(100); // 1% slippage buffer
+
+        // Real, protocol-specific exit costs — mirrors the keeper's EXIT_COST_BPS
+        // (rebalancer.ts) and DepositWithdrawPanel.tsx's copy. A flat 1% slippage buffer
+        // on top of the naive "fair share of deployedBalance" number is not enough on its
+        // own: Marinade's instant-unstake fee alone measured ~0.735% on a real mainnet
+        // recall (2026-08-25), which nearly exhausts a 1% cushion before any real price
+        // movement even happens — the withdrawal failed SlippageExceeded twice in a row
+        // with byte-identical numbers, proving it was a deterministic shortfall, not noise.
+        // Discounting the protocols actually being recalled BEFORE applying the cushion
+        // fixes that; only protocols in this withdrawal's recall set are charged, so an
+        // idle-covered withdrawal (no recall needed) still gets the full amount minus 1%.
+        const EXIT_COST_BPS: Record<string, number> = {
+          "kamino-usdc": 0,
+          "kamino-usdc-maple": 0,
+          "kamino-sol": 0,
+          "solend-usdc": 0,
+          "marinade-sol": 80, // ~0.735% measured live 2026-08-25; was 30 (0.3%), too tight
+          "jito-sol": 10,
+          "psol-sol": 10,
+        };
+        let expectedExitFeeBN = new anchor.BN(0);
 
         // If idle can't cover the fair payout, bundle recall instructions ahead of
         // withdraw() in the same transaction. Relies on the on-chain recall_from_* gate
@@ -645,11 +665,22 @@ export function useYieldPilot(vaultAddresses: string[]) {
             }
             recallIxs.push(await builder.instruction());
             projectedIdle = projectedIdle.add(proto.deployedBalance as anchor.BN);
+            expectedExitFeeBN = expectedExitFeeBN.add(
+              (proto.deployedBalance as anchor.BN).muln(EXIT_COST_BPS[label] ?? 0).divn(10000)
+            );
           }
 
           // All recalls must execute before withdraw() in the same tx.
           preIxs.unshift(...recallIxs);
         }
+
+        // Discount the real cost of the recalls this withdrawal actually triggers, THEN
+        // apply the slippage cushion — not the other way around. Computed here (not up at
+        // amountOutBN) because only now do we know which protocols actually needed a recall.
+        const netAmountOutBN = amountOutBN.gt(expectedExitFeeBN)
+          ? amountOutBN.sub(expectedExitFeeBN)
+          : new anchor.BN(0);
+        const minAmountOut = netAmountOutBN.muln(99).divn(100); // 1% slippage buffer on top of known costs
 
         return program.methods
           .withdraw(shares, minAmountOut)
