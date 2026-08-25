@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useConnection } from "@solana/wallet-adapter-react";
 import * as anchor from "@coral-xyz/anchor";
 import { PublicKey } from "@solana/web3.js";
@@ -63,8 +63,18 @@ export function useFleetStats(): FleetStats {
   const [totalGainedUsd, setTotalGainedUsd] = useState<number | null>(null);
   const [lifetimeGainedUsd, setLifetimeGainedUsd] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  // Guards against out-of-order responses: the effect below re-fires this fetch every
+  // time solPrice ticks (not just every 60s), so two reads can be in flight at once —
+  // with no cancellation, whichever RESOLVES last wins the setState calls, even if it
+  // STARTED first and its data is now stale relative to a newer, faster response. Hit
+  // live 2026-08-25: a poll landing mid-burst of our own recall/redeploy/withdraw
+  // transactions produced one bogus "$2.39" reading before self-correcting on the next
+  // tick. Each fetch stamps its own id; a response only commits state if it's still the
+  // most recently STARTED call by the time it resolves — stale ones are discarded.
+  const requestIdRef = useRef(0);
 
   const fetch = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
     try {
       const provider = new anchor.AnchorProvider(
         connection,
@@ -82,6 +92,10 @@ export function useFleetStats(): FleetStats {
           )
         ),
       ]);
+
+      // A newer fetch already started (and possibly finished) while this one was in
+      // flight — discard this response rather than let a stale read overwrite it.
+      if (requestId !== requestIdRef.current) return;
 
       const withShares = positions.filter((p: any) => (p.account.shares as anchor.BN).gtn(0));
       setActivePositions(withShares.length);
@@ -124,7 +138,7 @@ export function useFleetStats(): FleetStats {
     } catch (err) {
       console.error("useFleetStats error", err);
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) setLoading(false);
     }
   }, [connection, solPrice]);
 
