@@ -100,14 +100,19 @@ async function runCompound(client: SolanaClient) {
     const { compound, reason } = shouldCompound(state);
     logger.info(`Vault ${address.slice(0, 8)}...: ${reason}`);
     if (compound) {
-      logger.info("  Sending compound transaction...");
+      // compound() is a heartbeat, not a real compounding action — it only advances
+      // last_compound_ts (which feeds the dashboard's "last compounded Xm ago" label)
+      // and emits an event. There is nothing to compound: LST/kToken exchange rates
+      // appreciate on their own, and that yield is realized into total_deposits on
+      // recall (settle_recall), not here. Sending "🔄 Compounded" every hour told
+      // users their yield was compounded when nothing happened — misleading, and it
+      // was costing a real fee for a no-op on top of that. Keep calling it (the
+      // dashboard timer still needs last_compound_ts to move), just stop claiming a
+      // result nothing about this instruction actually produces.
+      logger.info("  Sending compound heartbeat transaction...");
       const sig = await client.compound(address);
       if (sig) {
-        logger.info("  ✓ Compounded", { signature: sig });
-        await notifyTelegram(
-          `🔄 <b>Compounded</b> — ${state.name}\n` +
-          `<a href="https://solscan.io/tx/${sig}">View transaction</a>`
-        );
+        logger.info("  ✓ Compound heartbeat sent (no-op by design — yield realizes on recall)", { signature: sig });
       }
     }
   }
