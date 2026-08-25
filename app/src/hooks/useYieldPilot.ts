@@ -609,10 +609,8 @@ export function useYieldPilot(vaultAddresses: string[]) {
           };
 
           const recallIxs: anchor.web3.TransactionInstruction[] = [];
-          // Projected idle assumes a recall returns its full deployed value. It returns
-          // slightly less (exit fees), so this can under-recall by a hair — harmless:
-          // minAmountOut still protects the user, and the tx reverts rather than
-          // underpaying. Never over-recalls, so we never pay an unnecessary exit fee.
+          // Projected idle tracks the underlying value each recall is actually expected to
+          // return (below), not the full deployedBalance — see recallAmount comment.
           let projectedIdle = idleBN;
 
           for (const { proto, idx } of byDeployed) {
@@ -621,8 +619,31 @@ export function useYieldPilot(vaultAddresses: string[]) {
             const label = Buffer.from(proto.label).toString("utf8").replace(/\0/g, "");
             const receiptAccountPubkey = new PublicKey((proto.vaultReceiptAccount as PublicKey).toBase58());
             const receiptBalance = await connection.getTokenAccountBalance(receiptAccountPubkey);
-            const recallAmount = new anchor.BN(receiptBalance.value.amount);
-            if (!recallAmount.gtn(0)) continue;
+            const receiptBalanceBN = new anchor.BN(receiptBalance.value.amount);
+            if (!receiptBalanceBN.gtn(0)) continue;
+
+            // Recall only enough to cover the remaining shortfall, not the whole position.
+            // Recalling everything for a small withdrawal used to strand the rest of that
+            // protocol's balance as idle SOL until the keeper's next cycle redeployed it —
+            // fine for one user at a time, but at real concurrent volume (many deposits and
+            // withdrawals landing close together) every withdrawal would keep kicking the
+            // vault back to mostly-idle, and the vault would rarely stay actually deployed.
+            //
+            // deployedBalance is underlying-asset units; the receipt account is in the
+            // protocol's own receipt-token units (e.g. mSOL) — convert the needed
+            // underlying shortfall into receipt units via the current book rate
+            // (deployedBalance / receiptBalance), then pad by this protocol's known exit
+            // fee plus a small margin so the partial recall doesn't itself land short and
+            // force a second recall next loop iteration. Never requests more than the
+            // vault actually holds.
+            const deployedBN = proto.deployedBalance as anchor.BN;
+            const shortfallBN = amountOutBN.sub(projectedIdle);
+            const feeBps = EXIT_COST_BPS[label] ?? 0;
+            const bufferedShortfallBN = shortfallBN.muln(10100 + feeBps).divn(10000); // fee + 1% margin
+            let recallAmount = deployedBN.gtn(0)
+              ? bufferedShortfallBN.mul(receiptBalanceBN).div(deployedBN)
+              : receiptBalanceBN;
+            if (recallAmount.gt(receiptBalanceBN) || recallAmount.lten(0)) recallAmount = receiptBalanceBN;
 
             const res = await fetch(`/api/recall-accounts?label=${encodeURIComponent(label)}`);
             if (!res.ok) {
@@ -664,9 +685,13 @@ export function useYieldPilot(vaultAddresses: string[]) {
               );
             }
             recallIxs.push(await builder.instruction());
-            projectedIdle = projectedIdle.add(proto.deployedBalance as anchor.BN);
+            // Use the underlying value THIS partial recall is expected to return
+            // (recallAmount's share of deployedBalance), not the protocol's full
+            // deployedBalance — the rest of the position stays deployed and earning.
+            const recalledUnderlyingBN = recallAmount.mul(deployedBN).div(receiptBalanceBN);
+            projectedIdle = projectedIdle.add(recalledUnderlyingBN);
             expectedExitFeeBN = expectedExitFeeBN.add(
-              (proto.deployedBalance as anchor.BN).muln(EXIT_COST_BPS[label] ?? 0).divn(10000)
+              recalledUnderlyingBN.muln(EXIT_COST_BPS[label] ?? 0).divn(10000)
             );
           }
 
