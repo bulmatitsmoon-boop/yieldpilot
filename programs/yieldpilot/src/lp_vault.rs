@@ -235,9 +235,14 @@ pub mod orca_lp {
         #[account(mut)]
         pub admin: Signer<'info>,
 
+        // Trailing protocol byte (0 = Orca) keeps this PDA distinct from a Raydium vault
+        // on the identical (token_a, token_b, admin) triple — without it the two
+        // instructions would derive the SAME address and only one protocol could ever
+        // have a vault on a given pair. Found before either protocol had a live vault
+        // on any pair, so no existing PDA needed migrating.
         #[account(
             init, payer = admin, space = LpVault::LEN,
-            seeds = [b"lp_vault", token_a_mint.key().as_ref(), token_b_mint.key().as_ref(), admin.key().as_ref()],
+            seeds = [b"lp_vault", token_a_mint.key().as_ref(), token_b_mint.key().as_ref(), admin.key().as_ref(), &[0u8]],
             bump,
         )]
         pub lp_vault: Box<Account<'info, LpVault>>,
@@ -1088,9 +1093,12 @@ pub mod raydium_lp {
         #[account(mut)]
         pub admin: Signer<'info>,
 
+        // Trailing protocol byte (1 = Raydium) — see InitializeOrcaLpVault's identical
+        // seed for why this exists: without it, an Orca and a Raydium vault on the same
+        // (token_a, token_b, admin) triple would derive the identical PDA.
         #[account(
             init, payer = admin, space = LpVault::LEN,
-            seeds = [b"lp_vault", token_a_mint.key().as_ref(), token_b_mint.key().as_ref(), admin.key().as_ref()],
+            seeds = [b"lp_vault", token_a_mint.key().as_ref(), token_b_mint.key().as_ref(), admin.key().as_ref(), &[1u8]],
             bump,
         )]
         pub lp_vault: Box<Account<'info, LpVault>>,
