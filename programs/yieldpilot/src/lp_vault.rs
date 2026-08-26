@@ -42,8 +42,8 @@ use crate::adapters::orca::{
 };
 use crate::adapters::raydium::{
     METADATA_PROGRAM_ID, RAYDIUM_CLMM_PROGRAM_ID, RaydiumClosePosition, RaydiumModifyLiquidity,
-    RaydiumOpenPosition, raydium_close_position, raydium_decrease_liquidity,
-    raydium_increase_liquidity, raydium_open_position,
+    RaydiumOpenPosition, TICK_ARRAY_BITMAP_EXTENSION_SEED, raydium_close_position,
+    raydium_decrease_liquidity, raydium_increase_liquidity, raydium_open_position,
 };
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -1184,6 +1184,14 @@ pub mod raydium_lp {
         /// CHECK: address verified in adapter
         #[account(address = RAYDIUM_CLMM_PROGRAM_ID)]
         pub raydium_program: UncheckedAccount<'info>,
+
+        /// Always required by Raydium's open_position once the chosen tick range falls
+        /// outside its default in-place bitmap (see adapters/raydium.rs's module-level
+        /// note) — created automatically by Raydium's own create_pool, so every real
+        /// pool already has one; this program only derives + forwards it.
+        /// CHECK: seeds verified; Raydium validates the account itself
+        #[account(mut, seeds = [TICK_ARRAY_BITMAP_EXTENSION_SEED, pool_state.key().as_ref()], bump, seeds::program = RAYDIUM_CLMM_PROGRAM_ID)]
+        pub tick_array_bitmap_extension: UncheckedAccount<'info>,
     }
 
     #[derive(Accounts)]
@@ -1251,6 +1259,12 @@ pub mod raydium_lp {
         /// CHECK: address verified in adapter
         #[account(address = RAYDIUM_CLMM_PROGRAM_ID)]
         pub raydium_program: UncheckedAccount<'info>,
+
+        /// See InitializeRaydiumLpVault's identical field — increase_liquidity has the
+        /// same remaining_accounts[0] requirement as open_position.
+        /// CHECK: seeds verified; Raydium validates the account itself
+        #[account(mut, seeds = [TICK_ARRAY_BITMAP_EXTENSION_SEED, pool_state.key().as_ref()], bump, seeds::program = RAYDIUM_CLMM_PROGRAM_ID)]
+        pub tick_array_bitmap_extension: UncheckedAccount<'info>,
     }
 
     #[derive(Accounts)]
@@ -1318,6 +1332,14 @@ pub mod raydium_lp {
         /// CHECK: address verified in adapter
         #[account(address = RAYDIUM_CLMM_PROGRAM_ID)]
         pub raydium_program: UncheckedAccount<'info>,
+
+        /// decrease_liquidity finds this by KEY MATCH anywhere among the accounts it's
+        /// given (unlike open_position/increase_liquidity's rigid remaining_accounts[0]
+        /// — verified against Raydium's own source), so position relative to any reward
+        /// accounts here doesn't matter.
+        /// CHECK: seeds verified; Raydium validates the account itself
+        #[account(mut, seeds = [TICK_ARRAY_BITMAP_EXTENSION_SEED, pool_state.key().as_ref()], bump, seeds::program = RAYDIUM_CLMM_PROGRAM_ID)]
+        pub tick_array_bitmap_extension: UncheckedAccount<'info>,
     }
 
     #[derive(Accounts)]
@@ -1372,6 +1394,12 @@ pub mod raydium_lp {
         /// CHECK: address verified in adapter
         #[account(address = RAYDIUM_CLMM_PROGRAM_ID)]
         pub raydium_program: UncheckedAccount<'info>,
+
+        /// See WithdrawRaydiumLp's identical field — decrease_liquidity finds this by
+        /// key match, so it works alongside any reward accounts too.
+        /// CHECK: seeds verified; Raydium validates the account itself
+        #[account(mut, seeds = [TICK_ARRAY_BITMAP_EXTENSION_SEED, pool_state.key().as_ref()], bump, seeds::program = RAYDIUM_CLMM_PROGRAM_ID)]
+        pub tick_array_bitmap_extension: UncheckedAccount<'info>,
     }
 
     #[derive(Accounts)]
@@ -1444,6 +1472,12 @@ pub mod raydium_lp {
         /// CHECK: address verified in adapter
         #[account(address = RAYDIUM_CLMM_PROGRAM_ID)]
         pub raydium_program: UncheckedAccount<'info>,
+
+        /// See InitializeRaydiumLpVault's identical field for why this is always
+        /// required, not conditional.
+        /// CHECK: seeds verified; Raydium validates the account itself
+        #[account(mut, seeds = [TICK_ARRAY_BITMAP_EXTENSION_SEED, pool_state.key().as_ref()], bump, seeds::program = RAYDIUM_CLMM_PROGRAM_ID)]
+        pub tick_array_bitmap_extension: UncheckedAccount<'info>,
     }
 
     #[derive(Accounts)]
@@ -1494,6 +1528,12 @@ pub mod raydium_lp {
         /// CHECK: address verified in adapter
         #[account(address = RAYDIUM_CLMM_PROGRAM_ID)]
         pub raydium_program: UncheckedAccount<'info>,
+
+        /// See DepositRaydiumLp's identical field — increase_liquidity has the same
+        /// remaining_accounts[0] requirement as open_position.
+        /// CHECK: seeds verified; Raydium validates the account itself
+        #[account(mut, seeds = [TICK_ARRAY_BITMAP_EXTENSION_SEED, pool_state.key().as_ref()], bump, seeds::program = RAYDIUM_CLMM_PROGRAM_ID)]
+        pub tick_array_bitmap_extension: UncheckedAccount<'info>,
     }
 
     // ── Handlers ────────────────────────────────────────────────────────────
@@ -1537,6 +1577,7 @@ pub mod raydium_lp {
                     associated_token_program: ctx.accounts.associated_token_program.to_account_info(),
                     metadata_program:         ctx.accounts.metadata_program.to_account_info(),
                     raydium_program:          ctx.accounts.raydium_program.to_account_info(),
+                    tick_array_bitmap_extension: ctx.accounts.tick_array_bitmap_extension.to_account_info(),
                 },
                 &[seeds],
             ),
@@ -1630,7 +1671,7 @@ pub mod raydium_lp {
                     raydium_program:   ctx.accounts.raydium_program.to_account_info(),
                 },
                 &[seeds],
-            ),
+            ).with_remaining_accounts(vec![ctx.accounts.tick_array_bitmap_extension.to_account_info()]),
             liquidity_amount,
             token_max_a,
             token_max_b,
@@ -1752,8 +1793,15 @@ pub mod raydium_lp {
             )
             // Raydium validates remaining_accounts against the pool's initialized
             // reward count; a CpiContext only carries them if the caller attaches
-            // them, so forward this instruction's own.
-            .with_remaining_accounts(ctx.remaining_accounts.to_vec()),
+            // them, so forward this instruction's own. tick_array_bitmap_extension is
+            // appended too — decrease_liquidity finds it by key match anywhere in this
+            // list (unlike open_position/increase_liquidity's rigid [0] index), so
+            // order relative to reward accounts doesn't matter.
+            .with_remaining_accounts({
+                let mut accs = ctx.remaining_accounts.to_vec();
+                accs.push(ctx.accounts.tick_array_bitmap_extension.to_account_info());
+                accs
+            }),
             liquidity_amount,
             token_min_a,
             token_min_b,
@@ -1852,8 +1900,14 @@ pub mod raydium_lp {
                 )
                 // Raydium validates remaining_accounts against the pool's initialized
                 // reward count; a CpiContext only carries them if the caller attaches
-                // them, so forward this instruction's own.
-                .with_remaining_accounts(ctx.remaining_accounts.to_vec()),
+                // them, so forward this instruction's own. tick_array_bitmap_extension
+                // is appended too — see WithdrawRaydiumLp's identical handler for why
+                // key-match ordering doesn't matter here.
+                .with_remaining_accounts({
+                    let mut accs = ctx.remaining_accounts.to_vec();
+                    accs.push(ctx.accounts.tick_array_bitmap_extension.to_account_info());
+                    accs
+                }),
                 total_liquidity,
                 0,
                 0,
@@ -1920,6 +1974,7 @@ pub mod raydium_lp {
                     associated_token_program: ctx.accounts.associated_token_program.to_account_info(),
                     metadata_program:         ctx.accounts.metadata_program.to_account_info(),
                     raydium_program:          ctx.accounts.raydium_program.to_account_info(),
+                    tick_array_bitmap_extension: ctx.accounts.tick_array_bitmap_extension.to_account_info(),
                 },
                 &[seeds],
             ),
@@ -1994,7 +2049,7 @@ pub mod raydium_lp {
                     raydium_program:   ctx.accounts.raydium_program.to_account_info(),
                 },
                 &[seeds],
-            ),
+            ).with_remaining_accounts(vec![ctx.accounts.tick_array_bitmap_extension.to_account_info()]),
             liquidity_amount,
             token_max_a,
             token_max_b,
