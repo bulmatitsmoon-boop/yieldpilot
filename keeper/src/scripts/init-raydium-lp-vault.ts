@@ -177,8 +177,10 @@ async function main() {
   );
   const protocolPositionPda = getRaydiumProtocolPositionPda(opts.poolState, tickLowerIndex, tickUpperIndex, RAYDIUM_CLMM_PROGRAM_ID);
 
+  // Trailing 1 = Raydium — mirrors InitializeRaydiumLpVault's seed exactly, so a
+  // Raydium and an Orca vault on the same pair no longer collide at the same PDA.
   const [lpVaultPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("lp_vault"), opts.tokenAMint.toBuffer(), opts.tokenBMint.toBuffer(), admin.publicKey.toBuffer()],
+    [Buffer.from("lp_vault"), opts.tokenAMint.toBuffer(), opts.tokenBMint.toBuffer(), admin.publicKey.toBuffer(), Buffer.from([1])],
     programId
   );
   const [vaultAuthority] = PublicKey.findProgramAddressSync(
