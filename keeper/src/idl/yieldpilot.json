@@ -1232,6 +1232,96 @@
         {
           "name": "raydium_program",
           "address": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH"
+        },
+        {
+          "name": "tick_array_bitmap_extension",
+          "docs": [
+            "See InitializeRaydiumLpVault's identical field — increase_liquidity has the",
+            "same remaining_accounts[0] requirement as open_position."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108,
+                  95,
+                  116,
+                  105,
+                  99,
+                  107,
+                  95,
+                  97,
+                  114,
+                  114,
+                  97,
+                  121,
+                  95,
+                  98,
+                  105,
+                  116,
+                  109,
+                  97,
+                  112,
+                  95,
+                  101,
+                  120,
+                  116,
+                  101,
+                  110,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool_state"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                184,
+                152,
+                151,
+                52,
+                252,
+                179,
+                140,
+                145,
+                104,
+                216,
+                83,
+                199,
+                83,
+                182,
+                184,
+                164,
+                54,
+                16,
+                205,
+                211,
+                37,
+                175,
+                187,
+                199,
+                47,
+                212,
+                21,
+                54,
+                219,
+                205,
+                194,
+                88
+              ]
+            }
+          }
         }
       ],
       "args": [
@@ -1517,6 +1607,96 @@
         {
           "name": "raydium_program",
           "address": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH"
+        },
+        {
+          "name": "tick_array_bitmap_extension",
+          "docs": [
+            "See WithdrawRaydiumLp's identical field — decrease_liquidity finds this by",
+            "key match, so it works alongside any reward accounts too."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108,
+                  95,
+                  116,
+                  105,
+                  99,
+                  107,
+                  95,
+                  97,
+                  114,
+                  114,
+                  97,
+                  121,
+                  95,
+                  98,
+                  105,
+                  116,
+                  109,
+                  97,
+                  112,
+                  95,
+                  101,
+                  120,
+                  116,
+                  101,
+                  110,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool_state"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                184,
+                152,
+                151,
+                52,
+                252,
+                179,
+                140,
+                145,
+                104,
+                216,
+                83,
+                199,
+                83,
+                182,
+                184,
+                164,
+                54,
+                16,
+                205,
+                211,
+                37,
+                175,
+                187,
+                199,
+                47,
+                212,
+                21,
+                54,
+                219,
+                205,
+                194,
+                88
+              ]
+            }
+          }
         }
       ],
       "args": []
@@ -2169,6 +2349,98 @@
         {
           "name": "raydium_program",
           "address": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH"
+        },
+        {
+          "name": "tick_array_bitmap_extension",
+          "docs": [
+            "Always required by Raydium's open_position once the chosen tick range falls",
+            "outside its default in-place bitmap (see adapters/raydium.rs's module-level",
+            "note) — created automatically by Raydium's own create_pool, so every real",
+            "pool already has one; this program only derives + forwards it."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108,
+                  95,
+                  116,
+                  105,
+                  99,
+                  107,
+                  95,
+                  97,
+                  114,
+                  114,
+                  97,
+                  121,
+                  95,
+                  98,
+                  105,
+                  116,
+                  109,
+                  97,
+                  112,
+                  95,
+                  101,
+                  120,
+                  116,
+                  101,
+                  110,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool_state"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                184,
+                152,
+                151,
+                52,
+                252,
+                179,
+                140,
+                145,
+                104,
+                216,
+                83,
+                199,
+                83,
+                182,
+                184,
+                164,
+                54,
+                16,
+                205,
+                211,
+                37,
+                175,
+                187,
+                199,
+                47,
+                212,
+                21,
+                54,
+                219,
+                205,
+                194,
+                88
+              ]
+            }
+          }
         }
       ],
       "args": [
@@ -2646,6 +2918,96 @@
         {
           "name": "raydium_program",
           "address": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH"
+        },
+        {
+          "name": "tick_array_bitmap_extension",
+          "docs": [
+            "See InitializeRaydiumLpVault's identical field for why this is always",
+            "required, not conditional."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108,
+                  95,
+                  116,
+                  105,
+                  99,
+                  107,
+                  95,
+                  97,
+                  114,
+                  114,
+                  97,
+                  121,
+                  95,
+                  98,
+                  105,
+                  116,
+                  109,
+                  97,
+                  112,
+                  95,
+                  101,
+                  120,
+                  116,
+                  101,
+                  110,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool_state"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                184,
+                152,
+                151,
+                52,
+                252,
+                179,
+                140,
+                145,
+                104,
+                216,
+                83,
+                199,
+                83,
+                182,
+                184,
+                164,
+                54,
+                16,
+                205,
+                211,
+                37,
+                175,
+                187,
+                199,
+                47,
+                212,
+                21,
+                54,
+                219,
+                205,
+                194,
+                88
+              ]
+            }
+          }
         }
       ],
       "args": [
@@ -3490,6 +3852,96 @@
         {
           "name": "raydium_program",
           "address": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH"
+        },
+        {
+          "name": "tick_array_bitmap_extension",
+          "docs": [
+            "See DepositRaydiumLp's identical field — increase_liquidity has the same",
+            "remaining_accounts[0] requirement as open_position."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108,
+                  95,
+                  116,
+                  105,
+                  99,
+                  107,
+                  95,
+                  97,
+                  114,
+                  114,
+                  97,
+                  121,
+                  95,
+                  98,
+                  105,
+                  116,
+                  109,
+                  97,
+                  112,
+                  95,
+                  101,
+                  120,
+                  116,
+                  101,
+                  110,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool_state"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                184,
+                152,
+                151,
+                52,
+                252,
+                179,
+                140,
+                145,
+                104,
+                216,
+                83,
+                199,
+                83,
+                182,
+                184,
+                164,
+                54,
+                16,
+                205,
+                211,
+                37,
+                175,
+                187,
+                199,
+                47,
+                212,
+                21,
+                54,
+                219,
+                205,
+                194,
+                88
+              ]
+            }
+          }
         }
       ],
       "args": [
@@ -4291,6 +4743,98 @@
         {
           "name": "raydium_program",
           "address": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH"
+        },
+        {
+          "name": "tick_array_bitmap_extension",
+          "docs": [
+            "decrease_liquidity finds this by KEY MATCH anywhere among the accounts it's",
+            "given (unlike open_position/increase_liquidity's rigid remaining_accounts[0]",
+            "— verified against Raydium's own source), so position relative to any reward",
+            "accounts here doesn't matter."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108,
+                  95,
+                  116,
+                  105,
+                  99,
+                  107,
+                  95,
+                  97,
+                  114,
+                  114,
+                  97,
+                  121,
+                  95,
+                  98,
+                  105,
+                  116,
+                  109,
+                  97,
+                  112,
+                  95,
+                  101,
+                  120,
+                  116,
+                  101,
+                  110,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool_state"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                184,
+                152,
+                151,
+                52,
+                252,
+                179,
+                140,
+                145,
+                104,
+                216,
+                83,
+                199,
+                83,
+                182,
+                184,
+                164,
+                54,
+                16,
+                205,
+                211,
+                37,
+                175,
+                187,
+                199,
+                47,
+                212,
+                21,
+                54,
+                219,
+                205,
+                194,
+                88
+              ]
+            }
+          }
         }
       ],
       "args": [
