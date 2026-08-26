@@ -2,7 +2,7 @@
 /**
  * init-raydium-lp-vault.ts — initialize a Raydium CLMM LP vault.
  *
- * ======================== STATUS: PARTIALLY RUN, BLOCKED ========================
+ * ======================== STATUS: FULL LIFECYCLE PROVEN ON DEVNET ========================
  * Run for real against live devnet 2026-08-26 (previously never executed). Found and
  * fixed 3 real bugs on the way:
  *   - token_account_0/1 were wired to the VAULT's not-yet-existing ATAs; Raydium's
@@ -17,13 +17,14 @@
  *     real Address Lookup Table for the static accounts, built inline here since no
  *     vault exists yet to read from (create-lp-alt.ts assumes a live vault).
  *
- * Now blocked on something INSIDE Raydium's own program, not this script or the
- * on-chain adapter: `open_position` panics with "index out of bounds: the len is 0
- * but the index is 0" at programs/amm/src/instructions/open_position.rs:316. Prime
- * suspect: a missing `tick_array_bitmap_extension` account, which Raydium CLMM pools
- * use for tracking initialized tick arrays beyond the standard range and which
- * neither this script nor InitializeRaydiumLpVault currently passes. Needs its own
- * focused investigation into Raydium's real account requirements before retrying.
+ * Was then blocked on something INSIDE Raydium's own program: `open_position` panicked
+ * with "index out of bounds: the len is 0 but the index is 0" at
+ * programs/amm/src/instructions/open_position.rs:316, caused by a missing
+ * `tick_array_bitmap_extension` account. Fixed across the on-chain adapter, all 6
+ * Raydium LP vault instructions, and the client scripts/keeper (see
+ * adapters/raydium.rs's TICK_ARRAY_BITMAP_EXTENSION_SEED). After that fix, this script
+ * and the full deposit/withdraw/exit/open_new/redeploy lifecycle all ran successfully
+ * against real devnet — mirroring the Orca LP vault proof.
  * =============================================================================
  *
  * Usage:
