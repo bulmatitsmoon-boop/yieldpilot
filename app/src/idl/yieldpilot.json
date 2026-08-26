@@ -1541,36 +1541,7 @@
         },
         {
           "name": "lp_vault",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  108,
-                  112,
-                  95,
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "token_a_mint"
-              },
-              {
-                "kind": "account",
-                "path": "token_b_mint"
-              },
-              {
-                "kind": "account",
-                "path": "admin"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "vault_authority",
@@ -1882,36 +1853,7 @@
         },
         {
           "name": "lp_vault",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  108,
-                  112,
-                  95,
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "token_a_mint"
-              },
-              {
-                "kind": "account",
-                "path": "token_b_mint"
-              },
-              {
-                "kind": "account",
-                "path": "admin"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "vault_authority",
