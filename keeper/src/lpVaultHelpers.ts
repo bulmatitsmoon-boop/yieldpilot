@@ -139,3 +139,24 @@ export function getRaydiumProtocolPositionPda(
   );
   return address;
 }
+
+// Created automatically by Raydium's own create_pool — every real pool already has
+// one; this program only derives + forwards it, never creates it. Required whenever
+// the chosen tick range falls outside Raydium's default in-place bitmap (a range
+// around tick 0 whose size scales with tick spacing — narrow on a spacing-1 pool,
+// which most real ranges on such a pool fall outside of). Confirmed by reading
+// Raydium's own source after this exact gap caused a live panic on devnet
+// 2026-08-26: "index out of bounds: the len is 0 but the index is 0" at
+// open_position.rs:316 — Raydium reads remaining_accounts[0] unconditionally once it
+// decides the extension is needed. Passing it when not needed is harmless (Raydium's
+// own code just ignores remaining_accounts in that branch), so always derive and pass
+// it rather than replicating Raydium's own overflow-range math client-side.
+const RAYDIUM_TICK_ARRAY_BITMAP_EXTENSION_SEED = "pool_tick_array_bitmap_extension";
+
+export function getRaydiumTickArrayBitmapExtensionPda(poolState: PublicKey, programId: PublicKey): PublicKey {
+  const [address] = PublicKey.findProgramAddressSync(
+    [Buffer.from(RAYDIUM_TICK_ARRAY_BITMAP_EXTENSION_SEED), poolState.toBuffer()],
+    programId
+  );
+  return address;
+}
