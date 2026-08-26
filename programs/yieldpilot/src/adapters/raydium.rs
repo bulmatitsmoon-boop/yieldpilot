@@ -37,10 +37,27 @@ const CLOSE_POSITION_IX:     [u8; 8] = [123, 134, 81, 0, 49, 68, 98, 98];
 // protocol_position:  ["position", pool_state, tick_lower_index.to_be_bytes(), tick_upper_index.to_be_bytes()]
 //   (marked "deprecated, kept for compatibility" in Raydium's own source, but
 //   STILL REQUIRED as a real account on every call — not optional.)
+// tick_array_bitmap_extension: ["pool_tick_array_bitmap_extension", pool_state]
+//   Created automatically by Raydium's own create_pool (every real pool already
+//   has one) — this program never creates it, only derives + forwards it.
 //
 // IMPORTANT: Raydium encodes tick indices as BIG-ENDIAN bytes (to_be_bytes()),
 // unlike Orca's decimal-string encoding (see adapters/orca.rs) — a detail
-// that would silently derive the wrong address if the two were confused.
+// that would silently derive the wrong address if confused.
+//
+// TICK ARRAY BITMAP EXTENSION — required whenever the chosen tick range falls
+// outside Raydium's default in-place bitmap (a range around tick 0 whose size
+// scales with tick spacing; a spacing-1 pool's default range is narrow, so
+// most real ranges on such a pool need this). Confirmed by reading Raydium's
+// own source (open_position.rs, increase_liquidity.rs) after this exact gap
+// caused a live panic on devnet 2026-08-26:
+// "index out of bounds: the len is 0 but the index is 0" at
+// open_position.rs:316 — Raydium reads remaining_accounts[0] unconditionally
+// once it decides the extension is needed, with no length check of its own.
+// Passing it when NOT needed is harmless (Raydium's own code just ignores
+// remaining_accounts in that branch), so this adapter always includes it
+// rather than trying to replicate Raydium's own overflow-range math.
+pub const TICK_ARRAY_BITMAP_EXTENSION_SEED: &[u8] = b"pool_tick_array_bitmap_extension";
 
 // ── Account contexts ──────────────────────────────────────────────────────────
 //
@@ -125,6 +142,12 @@ pub struct RaydiumOpenPosition<'info> {
     /// CHECK: program ID verified by constraint
     #[account(address = RAYDIUM_CLMM_PROGRAM_ID)]
     pub raydium_program: AccountInfo<'info>,
+
+    /// Always forwarded as Raydium's remaining_accounts[0] — see the module-level
+    /// TICK_ARRAY_BITMAP_EXTENSION_SEED note for why this can't be conditional.
+    /// CHECK: Raydium program validates the key match
+    #[account(mut)]
+    pub tick_array_bitmap_extension: AccountInfo<'info>,
 }
 
 /// Shared by increase_liquidity and decrease_liquidity — Raydium uses
@@ -252,6 +275,7 @@ pub fn raydium_open_position<'info>(
         AccountMeta::new_readonly(*ctx.accounts.token_program.key, false),
         AccountMeta::new_readonly(*ctx.accounts.associated_token_program.key, false),
         AccountMeta::new_readonly(*ctx.accounts.metadata_program.key, false),
+        AccountMeta::new(*ctx.accounts.tick_array_bitmap_extension.key, false),
     ];
 
     anchor_lang::solana_program::program::invoke_signed(
@@ -280,6 +304,7 @@ pub fn raydium_open_position<'info>(
             ctx.accounts.token_program.to_account_info(),
             ctx.accounts.associated_token_program.clone(),
             ctx.accounts.metadata_program.clone(),
+            ctx.accounts.tick_array_bitmap_extension.clone(),
         ],
         &[authority_seeds],
     )?;
