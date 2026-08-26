@@ -174,8 +174,17 @@ async function main() {
   const vaultTokenAAccount = getAssociatedTokenAddressSync(opts.tokenAMint, vaultAuthority, true);
   const vaultTokenBAccount = getAssociatedTokenAddressSync(opts.tokenBMint, vaultAuthority, true);
   const sharesMintKp = Keypair.generate();
-  const positionKp = Keypair.generate();
+  // `position` is a Whirlpool-owned PDA derived from the position mint, NOT a random
+  // keypair the caller signs with — confirmed against solanaClient.ts's own working
+  // repositionLpVault, which derives it the same way. Found live 2026-08-26: this
+  // script originally generated a fresh Keypair for `position` and passed it as a
+  // co-signer, which fails with "unknown signer" since Anchor can't find a signature
+  // matching a pubkey the program expects to derive itself via CPI into Orca.
   const positionMintKp = Keypair.generate();
+  const [positionPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("position"), positionMintKp.publicKey.toBuffer()],
+    WHIRLPOOL_PROGRAM_ID
+  );
   const positionTokenAccount = getAssociatedTokenAddressSync(positionMintKp.publicKey, vaultAuthority, true);
 
   console.log(`\nAdmin:            ${admin.publicKey.toBase58()}`);
@@ -184,7 +193,7 @@ async function main() {
   console.log(`Vault token A:    ${vaultTokenAAccount.toBase58()}`);
   console.log(`Vault token B:    ${vaultTokenBAccount.toBase58()}`);
   console.log(`Shares mint:      ${sharesMintKp.publicKey.toBase58()}`);
-  console.log(`Position:         ${positionKp.publicKey.toBase58()}`);
+  console.log(`Position:         ${positionPda.toBase58()}`);
   console.log(`Position mint:    ${positionMintKp.publicKey.toBase58()}`);
   console.log(`Keeper:           ${keeper.toBase58()}`);
   console.log(`Treasury:         ${treasury.toBase58()}`);
@@ -208,6 +217,26 @@ async function main() {
     process.exit(1);
   }
 
+  // Orca's own open_position CPI makes vault_authority the `funder` — it pays the new
+  // Position account's rent directly via a native SystemProgram transfer INSIDE Orca's
+  // program, not something our own program funds on the PDA's behalf. A brand-new PDA
+  // holds 0 lamports, so without this the CPI fails with "insufficient lamports 0, need
+  // 2394240" — confirmed live on devnet 2026-08-26, first real execution of this script.
+  // This mirrors the known design note (see project memory on LP vault design) that the
+  // harness pre-funds vault_authority before init for the same reason.
+  const vaultAuthorityBalance = await connection.getBalance(vaultAuthority);
+  if (vaultAuthorityBalance < 0.01e9) {
+    console.log(`\nFunding vault authority ${vaultAuthority.toBase58()} with 0.01 SOL for Orca's position rent...`);
+    const fundSig = await connection.sendTransaction(
+      new anchor.web3.Transaction().add(
+        SystemProgram.transfer({ fromPubkey: admin.publicKey, toPubkey: vaultAuthority, lamports: 0.01e9 })
+      ),
+      [admin]
+    );
+    await connection.confirmTransaction(fundSig, "confirmed");
+    console.log(`  Funded: ${fundSig}`);
+  }
+
   console.log("\nInitializing Orca LP vault...");
   try {
     const sig = await program.methods
@@ -229,7 +258,7 @@ async function main() {
         vaultTokenAAccount,
         vaultTokenBAccount,
         lpSharesMint: sharesMintKp.publicKey,
-        position: positionKp.publicKey,
+        position: positionPda,
         positionMint: positionMintKp.publicKey,
         positionTokenAccount,
         whirlpool: opts.whirlpool,
@@ -239,7 +268,7 @@ async function main() {
         associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         whirlpoolProgram: WHIRLPOOL_PROGRAM_ID,
       })
-      .signers([admin, sharesMintKp, positionKp, positionMintKp])
+      .signers([admin, sharesMintKp, positionMintKp])
       .rpc();
     console.log(`  OK ${sig}`);
   } catch (err: any) {
