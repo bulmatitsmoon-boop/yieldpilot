@@ -163,8 +163,10 @@ async function main() {
     opts.whirlpool, tickLowerIndex, tickUpperIndex, pool.tickSpacing, WHIRLPOOL_PROGRAM_ID
   );
 
+  // Trailing 0 = Orca — mirrors InitializeOrcaLpVault's seed exactly, so an Orca and
+  // a Raydium vault on the same pair no longer collide at the same PDA.
   const [lpVaultPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("lp_vault"), opts.tokenAMint.toBuffer(), opts.tokenBMint.toBuffer(), admin.publicKey.toBuffer()],
+    [Buffer.from("lp_vault"), opts.tokenAMint.toBuffer(), opts.tokenBMint.toBuffer(), admin.publicKey.toBuffer(), Buffer.from([0])],
     programId
   );
   const [vaultAuthority] = PublicKey.findProgramAddressSync(
