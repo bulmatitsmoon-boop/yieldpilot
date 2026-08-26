@@ -2,11 +2,28 @@
 /**
  * init-raydium-lp-vault.ts — initialize a Raydium CLMM LP vault.
  *
- * ============================== STATUS: UNRUN ==============================
- * Same status as init-orca-lp-vault.ts — mirrors init-vault.ts's
- * conventions, has NOT been executed against a real cluster (no deployed
- * LP vault program yet). Run --dry-run first once there's something to run
- * it against.
+ * ======================== STATUS: PARTIALLY RUN, BLOCKED ========================
+ * Run for real against live devnet 2026-08-26 (previously never executed). Found and
+ * fixed 3 real bugs on the way:
+ *   - token_account_0/1 were wired to the VAULT's not-yet-existing ATAs; Raydium's
+ *     open_position CPI expects the FUNDER's (admin's) own existing token accounts
+ *     here — same lesson already documented from local-harness testing, never applied
+ *     to this script.
+ *   - vault_authority was never funded before the CPI, which makes it the funder for
+ *     the new position + Metaplex metadata rent (~0.09-0.2 SOL, notably more than
+ *     Orca's ~0.01 SOL — Raydium's open_position also creates real NFT metadata).
+ *   - initialize_raydium_lp_vault does not fit a legacy OR a bare v0 transaction
+ *     (measured 1236 and 1278 bytes respectively, against the 1232 limit) — needs a
+ *     real Address Lookup Table for the static accounts, built inline here since no
+ *     vault exists yet to read from (create-lp-alt.ts assumes a live vault).
+ *
+ * Now blocked on something INSIDE Raydium's own program, not this script or the
+ * on-chain adapter: `open_position` panics with "index out of bounds: the len is 0
+ * but the index is 0" at programs/amm/src/instructions/open_position.rs:316. Prime
+ * suspect: a missing `tick_array_bitmap_extension` account, which Raydium CLMM pools
+ * use for tracking initialized tick arrays beyond the standard range and which
+ * neither this script nor InitializeRaydiumLpVault currently passes. Needs its own
+ * focused investigation into Raydium's real account requirements before retrying.
  * =============================================================================
  *
  * Usage:
@@ -46,7 +63,13 @@ import { getRaydiumPositionTickArrays, getRaydiumTickArrayStartIndex, getRaydium
 // Same real SOL/USDC Raydium CLMM pool verified live via Raydium's API
 // earlier in this work (2026-07-09) — same address used in
 // tests/lp-vault-raydium.ts, independently verified from the Orca pool.
-const RAYDIUM_CLMM_PROGRAM_ID = new PublicKey("CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK");
+// Network-dependent, same as the on-chain program's own RAYDIUM_CLMM_PROGRAM_ID
+// (adapters/raydium.rs) — devnet and mainnet Raydium CLMM live at different
+// addresses. Defaults to devnet; set RAYDIUM_PROGRAM_ID=CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK
+// when targeting mainnet.
+const RAYDIUM_CLMM_PROGRAM_ID = new PublicKey(
+  process.env.RAYDIUM_PROGRAM_ID || "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH"
+);
 const METADATA_PROGRAM_ID = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
 const DEFAULT_POOL_STATE = new PublicKey("3ucNos4NbumPLZNWztqGHNFFgkHeRMBQAVemeeomsUxv");
 const DEFAULT_SOL_MINT = new PublicKey("So11111111111111111111111111111111111111112");
@@ -189,6 +212,15 @@ async function main() {
   );
   const vaultTokenAAccount = getAssociatedTokenAddressSync(opts.tokenAMint, vaultAuthority, true);
   const vaultTokenBAccount = getAssociatedTokenAddressSync(opts.tokenBMint, vaultAuthority, true);
+  // token_account_0/1 are the FUNDER's (admin's) own existing token accounts on
+  // initialize, not the vault's — the vault's ATAs don't exist yet at this point, so
+  // passing them here fails AccountNotInitialized (3012). Raydium's open_position CPI
+  // uses these as the transfer source for the position's initial (typically dust)
+  // liquidity; the vault's own ATAs are a separate pair of accounts created earlier in
+  // the same instruction. Confirmed on first-ever live execution, 2026-08-26 — matches
+  // the identical gotcha already documented from local-harness testing.
+  const adminTokenAAccount = getAssociatedTokenAddressSync(opts.tokenAMint, admin.publicKey);
+  const adminTokenBAccount = getAssociatedTokenAddressSync(opts.tokenBMint, admin.publicKey);
   const sharesMintKp = Keypair.generate();
   const positionNftMintKp = Keypair.generate();
   const positionNftAccount = getAssociatedTokenAddressSync(positionNftMintKp.publicKey, vaultAuthority, true);
@@ -226,9 +258,38 @@ async function main() {
     process.exit(1);
   }
 
+  // Same requirement as Orca's init: Raydium's own open_position CPI makes
+  // vault_authority the funder for the new position's rent. A brand-new PDA holds 0
+  // lamports, so without this the CPI fails with "insufficient lamports 0, need
+  // 1461600" — confirmed live on devnet 2026-08-26, same class of bug as
+  // init-orca-lp-vault.ts's identical fix.
+  // 0.09 SOL, not 0.01 — measured live: Raydium's open_position also creates real
+  // Metaplex metadata (unlike Orca's plainer position), and one attempt at 0.01 SOL
+  // failed needing 0.072161280 SOL total. Overshoot slightly for margin.
+  const vaultAuthorityBalance = await connection.getBalance(vaultAuthority);
+  if (vaultAuthorityBalance < 0.2e9) {
+    const topUp = 0.2e9 - vaultAuthorityBalance;
+    console.log(`\nFunding vault authority ${vaultAuthority.toBase58()} with ${(topUp / 1e9).toFixed(4)} SOL for Raydium's position + metadata rent...`);
+    const fundSig = await connection.sendTransaction(
+      new anchor.web3.Transaction().add(
+        SystemProgram.transfer({ fromPubkey: admin.publicKey, toPubkey: vaultAuthority, lamports: topUp })
+      ),
+      [admin]
+    );
+    await connection.confirmTransaction(fundSig, "confirmed");
+    console.log(`  Funded: ${fundSig}`);
+  }
+
   console.log("\nInitializing Raydium LP vault...");
   try {
-    const sig = await program.methods
+    // initialize_raydium_lp_vault does not fit a legacy transaction (measured: 1236 >
+    // 1232 bytes here; the project's own local-harness notes record 1245 bytes on a
+    // slightly different account set) — it needs a compute-budget bump (Metaplex
+    // metadata creation exceeds the 200k default) on top of ~26 accounts. A versioned
+    // (v0) message alone (no ALT) saves enough overhead vs. legacy to fit; confirmed
+    // live 2026-08-26. Production paths needing an ALT (redeploy, etc.) are a separate,
+    // already-solved concern (see solanaClient.ts's sendV0) — this is init-only.
+    const ix = await program.methods
       .initializeRaydiumLpVault({
         keeper,
         treasury,
@@ -255,8 +316,8 @@ async function main() {
         tickArrayLower,
         tickArrayUpper,
         personalPosition: personalPositionPda,
-        tokenAccount0: vaultTokenAAccount,
-        tokenAccount1: vaultTokenBAccount,
+        tokenAccount0: adminTokenAAccount,
+        tokenAccount1: adminTokenBAccount,
         tokenVault0: pool.tokenVaultA,
         tokenVault1: pool.tokenVaultB,
         rent: SYSVAR_RENT_PUBKEY,
@@ -266,8 +327,49 @@ async function main() {
         metadataProgram: METADATA_PROGRAM_ID,
         raydiumProgram: RAYDIUM_CLMM_PROGRAM_ID,
       })
-      .signers([admin, sharesMintKp, positionNftMintKp])
-      .rpc();
+      .instruction();
+
+    // A v0 message alone doesn't fit either (measured: 1278 bytes, worse than legacy's
+    // 1236 — v0 header overhead outweighs the saving on this account count). Needs a
+    // real ALT for the STATIC accounts, matching the project's own documented finding
+    // (878 bytes with an ALT vs 1245 without, from the original local-harness work).
+    // Built here as a one-shot table for the init call specifically — everything
+    // vault-derived doesn't exist yet, so this can't reuse create-lp-alt.ts, which
+    // assumes a live vault to read from.
+    const staticAddresses = [
+      RAYDIUM_CLMM_PROGRAM_ID, METADATA_PROGRAM_ID,
+      TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID, SystemProgram.programId, SYSVAR_RENT_PUBKEY,
+      opts.poolState, opts.tokenAMint, opts.tokenBMint, pool.tokenVaultA, pool.tokenVaultB,
+      protocolPositionPda, tickArrayLower, tickArrayUpper,
+    ];
+    const altSlot = await connection.getSlot("finalized");
+    const [createAltIx, altAddress] = anchor.web3.AddressLookupTableProgram.createLookupTable({
+      authority: admin.publicKey, payer: admin.publicKey, recentSlot: altSlot,
+    });
+    const extendAltIx = anchor.web3.AddressLookupTableProgram.extendLookupTable({
+      payer: admin.publicKey, authority: admin.publicKey, lookupTable: altAddress, addresses: staticAddresses,
+    });
+    const setupSig = await connection.sendTransaction(
+      new anchor.web3.Transaction().add(createAltIx, extendAltIx), [admin]
+    );
+    await connection.confirmTransaction(setupSig, "confirmed");
+    console.log(`  Created ALT ${altAddress.toBase58()} (${setupSig})`);
+    // A lookup table is only usable one slot after being extended.
+    await new Promise((r) => setTimeout(r, 2000));
+    const altAccount = (await connection.getAddressLookupTable(altAddress)).value!;
+
+    const computeIx = anchor.web3.ComputeBudgetProgram.setComputeUnitLimit({ units: 600_000 });
+    const { blockhash } = await connection.getLatestBlockhash();
+    const msg = new anchor.web3.TransactionMessage({
+      payerKey: admin.publicKey,
+      recentBlockhash: blockhash,
+      instructions: [computeIx, ix],
+    }).compileToV0Message([altAccount]);
+    const vtx = new anchor.web3.VersionedTransaction(msg);
+    vtx.sign([admin, sharesMintKp, positionNftMintKp]);
+    console.log(`  Transaction size: ${vtx.serialize().length} bytes`);
+    const sig = await connection.sendTransaction(vtx);
+    await connection.confirmTransaction(sig, "confirmed");
     console.log(`  OK ${sig}`);
   } catch (err: any) {
     const logs: string[] = err.logs ?? [];
