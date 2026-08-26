@@ -1,7 +1,17 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, Token, TokenAccount};
 
-// Raydium CLMM (concentrated liquidity AMM) mainnet program ID.
+// Raydium CLMM (concentrated liquidity AMM) program ID — differs by network, same
+// pattern as lib.rs's declare_id!. Raydium deploys devnet at a completely different
+// address than mainnet (confirmed live 2026-08-26), and this constant had no
+// network branch before now, unlike declare_id! which already did — meaning the
+// devnet build always carried the mainnet address baked in and could never pass
+// its own `address =` constraint against a real devnet Raydium pool. Real Raydium
+// LP testing on devnet was structurally impossible until this matched declare_id!'s
+// existing pattern.
+#[cfg(not(feature = "mainnet"))]
+pub const RAYDIUM_CLMM_PROGRAM_ID: Pubkey = pubkey!("DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH");
+#[cfg(feature = "mainnet")]
 pub const RAYDIUM_CLMM_PROGRAM_ID: Pubkey = pubkey!("CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK");
 // Metaplex Token Metadata program — required by open_position (mints a real
 // NFT with metadata for the position).
