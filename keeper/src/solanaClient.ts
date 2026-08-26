@@ -1,5 +1,5 @@
 import * as anchor from "@coral-xyz/anchor";
-import { getPositionTickArrays, getRaydiumPositionTickArrays } from "./lpVaultHelpers";
+import { getPositionTickArrays, getRaydiumPositionTickArrays, getRaydiumTickArrayBitmapExtensionPda } from "./lpVaultHelpers";
 import {
   Connection,
   Keypair,
@@ -137,7 +137,15 @@ const SOLEND_NULL_ORACLE = new PublicKey("nu111111111111111111111111111111111111
 // Orca / Raydium LP vault constants
 // ──────────────────────────────────────────────────────────────────────────────
 const WHIRLPOOL_PROGRAM_ID = new PublicKey("whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc");
-const RAYDIUM_CLMM_PROGRAM_ID = new PublicKey("CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK");
+// Network-dependent, same as the on-chain program's own RAYDIUM_CLMM_PROGRAM_ID
+// (adapters/raydium.rs) — devnet and mainnet Raydium CLMM live at different
+// addresses. Defaults to devnet; set RAYDIUM_PROGRAM_ID=CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK
+// when targeting mainnet. This constant was hardcoded to mainnet with no branch
+// until 2026-08-26, same gap already fixed in the on-chain adapter and the
+// init-raydium-lp-vault.ts script.
+const RAYDIUM_CLMM_PROGRAM_ID = new PublicKey(
+  process.env.RAYDIUM_PROGRAM_ID || "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH"
+);
 
 // MarginFi is intentionally not integrated — see apyFetcher.ts for why
 // (their SDK cannot decode their own current mainnet state).
@@ -1617,6 +1625,15 @@ export class SolanaClient {
       const { remaining, preIxs } = this.buildRaydiumRewardAccounts(rewards, vaultAuthorityPda);
       logger.info(`  Raydium rewards: ${rewards.length} initialized -> ${remaining.length} remaining accounts`);
 
+      // Required whenever the position's tick range falls outside Raydium's default
+      // in-place bitmap — see lpVaultHelpers.ts's getRaydiumTickArrayBitmapExtensionPda
+      // for the full story (a real devnet panic this exact gap caused, 2026-08-26).
+      // Passed here as its own named account (the on-chain Accounts struct now has a
+      // dedicated field); the program's own handler appends it to what it forwards to
+      // Raydium's CPI, so it must NOT also be pushed into .remainingAccounts() below —
+      // that would send it twice.
+      const tickArrayBitmapExtension = getRaydiumTickArrayBitmapExtensionPda(vault.pool, RAYDIUM_CLMM_PROGRAM_ID);
+
       const exitIx = await this.program.methods
         .exitRaydiumLpPosition()
         .accountsPartial({
@@ -1637,6 +1654,7 @@ export class SolanaClient {
           systemProgram: SystemProgram.programId,
           tokenProgram: TOKEN_PROGRAM_ID,
           raydiumProgram: RAYDIUM_CLMM_PROGRAM_ID,
+          tickArrayBitmapExtension,
         })
         .remainingAccounts(remaining)
         .instruction();

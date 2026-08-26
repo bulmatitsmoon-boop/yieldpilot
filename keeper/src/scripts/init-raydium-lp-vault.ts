@@ -57,7 +57,7 @@ import {
 import fs from "fs";
 import path from "path";
 import os from "os";
-import { getRaydiumPositionTickArrays, getRaydiumTickArrayStartIndex, getRaydiumProtocolPositionPda } from "../lpVaultHelpers";
+import { getRaydiumPositionTickArrays, getRaydiumTickArrayStartIndex, getRaydiumProtocolPositionPda, getRaydiumTickArrayBitmapExtensionPda } from "../lpVaultHelpers";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 // Same real SOL/USDC Raydium CLMM pool verified live via Raydium's API
@@ -199,6 +199,7 @@ async function main() {
     opts.poolState, tickLowerIndex, tickUpperIndex, pool.tickSpacing, RAYDIUM_CLMM_PROGRAM_ID
   );
   const protocolPositionPda = getRaydiumProtocolPositionPda(opts.poolState, tickLowerIndex, tickUpperIndex, RAYDIUM_CLMM_PROGRAM_ID);
+  const tickArrayBitmapExtensionPda = getRaydiumTickArrayBitmapExtensionPda(opts.poolState, RAYDIUM_CLMM_PROGRAM_ID);
 
   // Trailing 1 = Raydium — mirrors InitializeRaydiumLpVault's seed exactly, so a
   // Raydium and an Orca vault on the same pair no longer collide at the same PDA.
@@ -326,6 +327,7 @@ async function main() {
         associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         metadataProgram: METADATA_PROGRAM_ID,
         raydiumProgram: RAYDIUM_CLMM_PROGRAM_ID,
+        tickArrayBitmapExtension: tickArrayBitmapExtensionPda,
       })
       .instruction();
 
@@ -340,7 +342,7 @@ async function main() {
       RAYDIUM_CLMM_PROGRAM_ID, METADATA_PROGRAM_ID,
       TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID, SystemProgram.programId, SYSVAR_RENT_PUBKEY,
       opts.poolState, opts.tokenAMint, opts.tokenBMint, pool.tokenVaultA, pool.tokenVaultB,
-      protocolPositionPda, tickArrayLower, tickArrayUpper,
+      protocolPositionPda, tickArrayLower, tickArrayUpper, tickArrayBitmapExtensionPda,
     ];
     const altSlot = await connection.getSlot("finalized");
     const [createAltIx, altAddress] = anchor.web3.AddressLookupTableProgram.createLookupTable({
