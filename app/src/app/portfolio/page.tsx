@@ -58,15 +58,17 @@ export default function PortfolioPage() {
   const { setVisible } = useWalletModal();
 
   // Phase 2 gate. Visible when the reveal flag is on OR the connected wallet is the admin
-  // (preview mode). While autoConnect is still settling we render nothing rather than flash
-  // a 404 at a reconnecting admin; once settled, a non-admin with the flag off gets a real
-  // 404. See usePhase2Gate / phase2Access.mjs — this is a preview gate, not a security
-  // boundary, and is only safe while the LP vaults don't exist on mainnet.
+  // (preview mode). See usePhase2Gate / phase2Access.mjs — this is a preview gate, not a
+  // security boundary, and is only safe while the LP vaults don't exist on mainnet.
+  //
+  // IMPORTANT: this must NOT early-return here, before the rest of this component's hooks
+  // are called — every hook below (useYieldPilot, useApys, useLpVault, the useState/useEffect
+  // calls) has to run on EVERY render regardless of gate state, or the hook count changes
+  // between the "still deciding" render and the "resolved" render and React throws error
+  // #310 ("Rendered more hooks than during the previous render"). Confirmed live 2026-08-27
+  // — the gate check used to sit right here as an early return, which is exactly this bug.
+  // The actual gating now happens once, right before the final JSX return below.
   const { visible, adminPreview, deciding } = usePhase2Gate();
-  if (!visible) {
-    if (deciding) return null;
-    notFound();
-  }
 
   const { vaults, positions, deposit } = useYieldPilot(VAULT_ADDRESSES);
   const solPrice = useSolPrice();
@@ -208,6 +210,13 @@ export default function PortfolioPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  // Gate check happens HERE — after every hook above has already run this render — not as
+  // an early return further up. See the comment on usePhase2Gate() for why.
+  if (!visible) {
+    if (deciding) return null;
+    notFound();
   }
 
   if (!connected) {
