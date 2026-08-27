@@ -29,7 +29,9 @@ import {
   LpVaultInfo,
   parseDecimalToBaseUnits,
   formatBaseUnitsToDecimal,
+  computeLpVaultValueUsd,
 } from "@/hooks/useLpVault";
+import { useConnection } from "@solana/wallet-adapter-react";
 import { blendedApy, estYearly, planLegs } from "@/lib/splitDeposit.mjs";
 import { portfolioTotals } from "@/lib/portfolio.mjs";
 import { usePhase2Gate } from "@/hooks/usePhase2Gate";
@@ -90,6 +92,7 @@ export default function PortfolioPage() {
 
   const { vaults, positions, deposit } = useYieldPilot(VAULT_ADDRESSES);
   const solPrice = useSolPrice();
+  const { connection } = useConnection();
 
   // Combined portfolio total across the safe vaults (LP value needs a live quote — shown
   // separately below). Pure, tested math (portfolio.mjs / verify-split-deposit.mjs).
@@ -199,6 +202,42 @@ export default function PortfolioPage() {
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ── Real LP holdings across EVERY configured vault, not just whichever one is
+  // currently open in the deposit/withdraw form below. ──
+  //
+  // Before this, the "Your portfolio" total only ever knew about an LP position if the
+  // user had ALREADY clicked that specific vault's option in the form THIS SESSION —
+  // selectLp() is what populates lpInfo/lpPosition, and that only fires on a click. A
+  // real deposit that happened in an earlier session (or even just before a page
+  // refresh) was completely invisible here: "$0 · No positions yet" over an actual
+  // ~$600+ position. Confirmed live 2026-08-27. This scans every configured vault on
+  // load instead of waiting for the user to click into the one they already funded.
+  const [lpHoldings, setLpHoldings] = useState<{ info: LpVaultInfo; shares: number; valueUsd: number }[]>([]);
+  useEffect(() => {
+    if (!publicKey || lpOptions.length === 0 || solPrice <= 0) return;
+    let cancelled = false;
+    (async () => {
+      const results = await Promise.all(
+        lpOptions.map(async (info) => {
+          try {
+            const pos = await fetchLpPosition(info.address);
+            if (!pos || pos.shares <= 0 || info.totalShares <= 0) return null;
+            const vaultValueUsd = await computeLpVaultValueUsd(connection, info.address, solPrice);
+            const valueUsd = vaultValueUsd * (pos.shares / info.totalShares);
+            return { info, shares: pos.shares, valueUsd };
+          } catch {
+            return null;
+          }
+        })
+      );
+      if (!cancelled) {
+        setLpHoldings(results.filter((r): r is { info: LpVaultInfo; shares: number; valueUsd: number } => r !== null));
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [publicKey, lpOptions, solPrice, connection]);
 
   // ── Withdraw side — was only ever built on the separate /lp page, which meant a
   // real user had to know that page existed and navigate away from the deposit flow
@@ -359,7 +398,7 @@ export default function PortfolioPage() {
       <div style={{ background: "var(--ink-800, #1a1a1a)", borderRadius: 12, padding: "1.25rem 1.5rem", marginBottom: 24 }}>
         <div style={{ fontSize: 13, color: "var(--text-mid, #888)" }}>Total value</div>
         <div style={{ fontSize: 30, fontWeight: 500, marginBottom: 4 }}>
-          ${totals.totalValueUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+          ${(totals.totalValueUsd + lpHoldings.reduce((s, h) => s + h.valueUsd, 0)).toLocaleString(undefined, { maximumFractionDigits: 2 })}
         </div>
         {totals.totalEarnedUsd > 0 && (
           <div style={{ fontSize: 13, color: "#22b37e" }}>
@@ -381,18 +420,20 @@ export default function PortfolioPage() {
           </div>
         )}
 
-        {lpInfo && lpPosition && lpPosition.shares > 0 && (
-          <div style={{ borderTop: "0.5px solid var(--line, #2a2a2a)", marginTop: 8, paddingTop: 12, display: "flex", justifyContent: "space-between", fontSize: 13 }}>
-            <span style={{ color: "var(--text-mid, #888)" }}>
-              {lpInfo.name} · LP <span style={{ background: "rgba(216,90,48,0.12)", color: "#d85a30", fontSize: 11, padding: "1px 6px", borderRadius: 12, marginLeft: 4 }}>IL risk</span>
-            </span>
-            <span style={{ color: "var(--text-mid, #888)" }}>
-              live value on the <a href="/lp" style={{ color: "var(--text-accent, #6ea8fe)" }}>LP page</a>
-            </span>
+        {lpHoldings.length > 0 && (
+          <div style={{ borderTop: "0.5px solid var(--line, #2a2a2a)", marginTop: 8, paddingTop: 12 }}>
+            {lpHoldings.map((h) => (
+              <div key={h.info.address} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "4px 0" }}>
+                <span style={{ color: "var(--text-mid, #888)" }}>
+                  {h.info.name} · LP <span style={{ background: "rgba(216,90,48,0.12)", color: "#d85a30", fontSize: 11, padding: "1px 6px", borderRadius: 12, marginLeft: 4 }}>IL risk</span>
+                </span>
+                <span>${h.valueUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+              </div>
+            ))}
           </div>
         )}
 
-        {!hasSafe && !(lpPosition && lpPosition.shares > 0) && (
+        {!hasSafe && lpHoldings.length === 0 && (
           <div style={{ fontSize: 13, color: "var(--text-mid, #888)", marginTop: 4 }}>
             No positions yet — fund a vault below to start.
           </div>
