@@ -57,11 +57,13 @@ export default function LpVaultPage() {
   // Public users see a 404 with the flag off; the admin wallet gets a preview so they can
   // see the real UI before reveal. See usePhase2Gate / phase2Access.mjs -- a client preview
   // gate, not a security boundary, and only safe while the LP vaults don't exist on mainnet.
+  //
+  // IMPORTANT: do NOT early-return here, before the rest of this component's hooks are
+  // called (useLpVault + a dozen useState calls below) — the hook count would differ
+  // between the "still deciding" render and the "resolved" render, which throws minified
+  // React error #310. Same bug, same fix as portfolio/page.tsx (confirmed live 2026-08-27).
+  // The actual gating happens once, right before the final JSX return below.
   const { visible, adminPreview, deciding } = usePhase2Gate();
-  if (!visible) {
-    if (deciding) return null;
-    notFound();
-  }
   const {
     txStatus, txError, fetchLpVault,
     getDepositQuote, depositLp, getWithdrawQuote, withdrawLp,
@@ -172,6 +174,13 @@ export default function LpVaultPage() {
     }
     setWithdrawQuote(null);
     setWithdrawShares("");
+  }
+
+  // Gate check happens HERE — after every hook above has already run this render — not as
+  // an early return further up. See the comment on usePhase2Gate() for why.
+  if (!visible) {
+    if (deciding) return null;
+    notFound();
   }
 
   return (
