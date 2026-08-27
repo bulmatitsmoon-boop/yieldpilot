@@ -358,6 +358,80 @@ async function ensureAtaAndWrapIfNativeIxs(
   return ixs;
 }
 
+/**
+ * Real, current USD value of an LP vault's ENTIRE position — not per-user, the whole
+ * vault. Used by the homepage / dashboard TVL stats so an LP deposit actually shows up
+ * there (confirmed live 2026-08-27: it did not, because those stats only ever read the
+ * safe-vault Vault/UserPosition types, never lpVault).
+ *
+ * Same principle as useFleetStats' zero-share guard: if totalShares is 0, nobody has a
+ * claim on this vault, so its value is $0 for display purposes regardless of what
+ * totalLiquidity still reads — an LP vault that's been fully exited should read as
+ * empty, not as some leftover dust value.
+ *
+ * Uses each protocol's own official quote math (same as getWithdrawQuote /
+ * getRaydiumWithdrawQuote) evaluated at the vault's full totalLiquidity, so this is a
+ * real current-price valuation, not the historical deposit amount.
+ */
+export async function computeLpVaultValueUsd(
+  connection: Connection,
+  lpVaultAddress: string,
+  solPrice: number
+): Promise<number> {
+  const provider = new anchor.AnchorProvider(
+    connection,
+    { publicKey: PublicKey.default, signTransaction: async (t: any) => t, signAllTransactions: async (t: any) => t } as any,
+    { commitment: "confirmed" }
+  );
+  const program = new anchor.Program(IDL as any, provider);
+  const raw: any = await (program.account as any)["lpVault"].fetch(new PublicKey(lpVaultAddress));
+
+  if ((raw.totalShares as anchor.BN).isZero()) return 0;
+
+  const tokenAMint = raw.tokenAMint as PublicKey;
+  const tokenBMint = raw.tokenBMint as PublicKey;
+  const [mintA, mintB] = await Promise.all([getMint(connection, tokenAMint), getMint(connection, tokenBMint)]);
+  const isSolA = tokenAMint.equals(NATIVE_MINT);
+  const isSolB = tokenBMint.equals(NATIVE_MINT);
+
+  let rawA: bigint, rawB: bigint;
+
+  if (raw.protocol && "raydium" in raw.protocol) {
+    const poolInfoAccount = await connection.getAccountInfo(raw.pool as PublicKey);
+    if (!poolInfoAccount) return 0;
+    const poolInfo = decodeRaydiumPool(poolInfoAccount.data);
+    const { LiquidityMathUtil, TickUtil } = await import("@raydium-io/raydium-sdk-v2");
+    const sqrtPriceCurrentX64 = new anchor.BN(poolInfo.sqrtPriceX64.toString());
+    const sqrtPriceLowerX64 = TickUtil.getSqrtPriceAtTick(raw.tickLowerIndex as number);
+    const sqrtPriceUpperX64 = TickUtil.getSqrtPriceAtTick(raw.tickUpperIndex as number);
+    const { amountSlippageA, amountSlippageB } = LiquidityMathUtil.getAmountsFromLiquidityWithSlippage(
+      sqrtPriceCurrentX64, sqrtPriceLowerX64, sqrtPriceUpperX64, raw.totalLiquidity as anchor.BN, false, false, 0
+    );
+    rawA = BigInt(amountSlippageA.toString());
+    rawB = BigInt(amountSlippageB.toString());
+  } else {
+    const whirlpoolAccount = await connection.getAccountInfo(raw.pool as PublicKey);
+    if (!whirlpoolAccount) return 0;
+    const whirlpoolInfo = decodeWhirlpool(whirlpoolAccount.data);
+    const { decreaseLiquidityQuote } = await import("@orca-so/whirlpools-core");
+    const quote = decreaseLiquidityQuote(
+      BigInt((raw.totalLiquidity as anchor.BN).toString()),
+      0,
+      whirlpoolInfo.sqrtPrice,
+      raw.tickLowerIndex as number,
+      raw.tickUpperIndex as number
+    );
+    rawA = BigInt(quote.tokenEstA.toString());
+    rawB = BigInt(quote.tokenEstB.toString());
+  }
+
+  const uiA = Number(rawA) / Math.pow(10, mintA.decimals);
+  const uiB = Number(rawB) / Math.pow(10, mintB.decimals);
+  const usdA = isSolA ? uiA * solPrice : uiA;
+  const usdB = isSolB ? uiB * solPrice : uiB;
+  return usdA + usdB;
+}
+
 export function useLpVault() {
   const { connection } = useConnection();
   const { publicKey, signTransaction } = useWallet();

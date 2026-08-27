@@ -83,8 +83,12 @@ export function useFleetStats(): FleetStats {
       );
       const program = new anchor.Program(IDL as any, provider);
 
-      const [positions, signatures, vaultAccounts] = await Promise.all([
+      const [positions, lpPositions, signatures, vaultAccounts] = await Promise.all([
         (program.account as any)["userPosition"].all(),
+        // LP positions are a SEPARATE account type (lpUserPosition) from the safe-vault
+        // UserPosition above — a real LP deposit was invisible to "active positions" and
+        // every other stat here until this was added, confirmed live 2026-08-27.
+        (program.account as any)["lpUserPosition"].all().catch(() => []),
         connection.getSignaturesForAddress(PROGRAM_ID, { limit: 8 }),
         Promise.all(
           VAULT_ADDRESSES.map((addr) =>
@@ -98,8 +102,9 @@ export function useFleetStats(): FleetStats {
       if (requestId !== requestIdRef.current) return;
 
       const withShares = positions.filter((p: any) => (p.account.shares as anchor.BN).gtn(0));
-      setActivePositions(withShares.length);
-      setTotalDepositors(positions.length);
+      const withLpShares = lpPositions.filter((p: any) => (p.account.shares as anchor.BN).gtn(0));
+      setActivePositions(withShares.length + withLpShares.length);
+      setTotalDepositors(positions.length + lpPositions.length);
       setRecentActivity(
         signatures.map((s) => ({ signature: s.signature, slot: s.slot, blockTime: s.blockTime ?? null }))
       );
@@ -113,6 +118,19 @@ export function useFleetStats(): FleetStats {
         anyVaultResolved = true;
         const isSol = (v.name as string).toUpperCase().includes("SOL");
         const decimals = isSol ? 1e9 : 1e6;
+
+        // total_shares === 0 means nobody currently holds a claim on this vault. Whatever
+        // total_deposits still reads in that state belongs to no depositor — it is not a
+        // "realized gain currently sitting in the vault" for anyone, regardless of what the
+        // raw field says. Confirmed live 2026-08-27: the SOL vault read total_deposits =
+        // 33,139,492 lamports with total_shares = 0, idle balance = 0, and zero deployed
+        // balance across all 4 registered protocols — money the on-chain data itself cannot
+        // explain the location of. Attributing that to "currently gaining" produced a
+        // completely fabricated-looking number the moment the vault's only depositor
+        // withdrew everything. Treat a zero-share vault as contributing $0 here until the
+        // underlying total_deposits accounting issue is found and fixed at the source —
+        // showing nothing is honest; showing an unexplained number is not.
+        if ((v.totalShares as anchor.BN).isZero()) return;
 
         const totalDepositsRaw = BigInt((v.totalDeposits as anchor.BN).toString());
         const depositedSumRaw = positions
