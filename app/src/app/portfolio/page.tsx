@@ -28,6 +28,7 @@ import {
   useLpVault,
   LpVaultInfo,
   parseDecimalToBaseUnits,
+  formatBaseUnitsToDecimal,
 } from "@/hooks/useLpVault";
 import { blendedApy, estYearly, planLegs } from "@/lib/splitDeposit.mjs";
 import { portfolioTotals } from "@/lib/portfolio.mjs";
@@ -52,6 +53,18 @@ const LP_VAULT_ADDRESSES = (
   .filter(Boolean);
 
 const DEFAULT_SLIPPAGE_BPS = 100; // 1%, matching /lp
+
+// Real symbols for the two mints every configured LP vault actually uses, so the UI can
+// say "SOL" / "USDC" instead of the vague "Token A" / "Token B" that comes straight out of
+// the on-chain struct field names. Falls back to a truncated address for any future vault
+// using a mint not in this list, rather than guessing.
+const SOL_MINT = "So11111111111111111111111111111111111111112";
+const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+function symbolForMint(mint: string): string {
+  if (mint === SOL_MINT) return "SOL";
+  if (mint === USDC_MINT) return "USDC";
+  return `${mint.slice(0, 4)}…${mint.slice(-4)}`;
+}
 
 export default function PortfolioPage() {
   const { publicKey, connected } = useWallet();
@@ -123,6 +136,37 @@ export default function PortfolioPage() {
   const [ackIl, setAckIl] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Live quote for the OTHER side of the pair — nothing on this page previously showed
+  // the user how much of token B their token A amount actually requires before they hit
+  // deposit, even though the app always computed it internally right before sending the
+  // transaction. Debounced so it doesn't refetch on every keystroke.
+  const [lpQuoteB, setLpQuoteB] = useState<string | null>(null);
+  const [lpQuoteLoading, setLpQuoteLoading] = useState(false);
+  useEffect(() => {
+    if (!lpInfo || !lpAmountA || Number(lpAmountA) <= 0) {
+      setLpQuoteB(null);
+      return;
+    }
+    let cancelled = false;
+    setLpQuoteLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const rawA = new anchor.BN(parseDecimalToBaseUnits(lpAmountA, lpInfo.tokenADecimals).toString());
+        const q = lpInfo.protocol === "raydium"
+          ? await getRaydiumDepositQuote(lpInfo.address, rawA, DEFAULT_SLIPPAGE_BPS)
+          : await getDepositQuote(lpInfo.address, rawA, DEFAULT_SLIPPAGE_BPS);
+        if (cancelled) return;
+        setLpQuoteB(formatBaseUnitsToDecimal(q.tokenMaxB.toString(), lpInfo.tokenBDecimals));
+      } catch {
+        if (!cancelled) setLpQuoteB(null);
+      } finally {
+        if (!cancelled) setLpQuoteLoading(false);
+      }
+    }, 500);
+    return () => { cancelled = true; clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lpInfo, lpAmountA]);
 
   // Fetch every configured LP vault's info ONCE on mount so they can render as
   // click-to-select options with real names/protocols, not a blank address field the
@@ -388,7 +432,7 @@ export default function PortfolioPage() {
           <>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
               <span style={{ fontSize: 13, color: "var(--text-mid, #888)" }}>
-                {lpInfo.name} · {lpInfo.protocol} · bring both tokens
+                {lpInfo.name} · {lpInfo.protocol} · needs both {symbolForMint(lpInfo.tokenAMint)} and {symbolForMint(lpInfo.tokenBMint)}
               </span>
               {lpOptions.length > 1 && (
                 <button
@@ -400,11 +444,20 @@ export default function PortfolioPage() {
               )}
             </div>
             <input
-              placeholder="Token A amount"
+              placeholder={`${symbolForMint(lpInfo.tokenAMint)} amount`}
               value={lpAmountA}
               onChange={(e) => setLpAmountA(e.target.value)}
-              style={{ width: "100%", marginBottom: 10 }}
+              style={{ width: "100%", marginBottom: 6 }}
             />
+            <div style={{ fontSize: 13, color: "var(--text-mid, #888)", marginBottom: 10, minHeight: 18 }}>
+              {lpAmountA && Number(lpAmountA) > 0 && (
+                lpQuoteLoading
+                  ? "Calculating required " + symbolForMint(lpInfo.tokenBMint) + "…"
+                  : lpQuoteB
+                    ? `You'll also need up to ~${lpQuoteB} ${symbolForMint(lpInfo.tokenBMint)} (pool's current price + 1% slippage buffer)`
+                    : "Couldn't get a live quote — try a different amount."
+              )}
+            </div>
             <label style={{ display: "flex", gap: 8, fontSize: 13, alignItems: "flex-start" }}>
               <input type="checkbox" checked={ackIl} onChange={(e) => setAckIl(e.target.checked)} />
               <span>I understand LP positions carry impermanent-loss risk and my deposit&apos;s value can fall relative to holding.</span>
@@ -413,15 +466,36 @@ export default function PortfolioPage() {
         )}
       </section>
 
+      {/* Exactly what will happen if this button is pressed right now — computed from the
+          real state of the two legs, not a generic label. Nothing fires that isn't listed here. */}
+      {(() => {
+        const willRunSafe = !!(safeVault && safeAmount && Number(safeAmount) > 0);
+        const willRunLp = !!(lpInfo && lpAmountA && Number(lpAmountA) > 0 && ackIl);
+        const parts: string[] = [];
+        if (willRunSafe) parts.push(`${safeAmount} ${safeVault!.name.toUpperCase().includes("SOL") ? "SOL" : "USDC"} → ${safeVault!.name}`);
+        if (willRunLp) {
+          const symA = symbolForMint(lpInfo!.tokenAMint);
+          const symB = symbolForMint(lpInfo!.tokenBMint);
+          parts.push(`${lpAmountA} ${symA}${lpQuoteB ? ` + up to ~${lpQuoteB} ${symB}` : ""} → ${lpInfo!.name}`);
+        }
+        return (
+          <div style={{ fontSize: 13, color: "var(--text-mid, #888)", marginBottom: 12 }}>
+            {parts.length > 0
+              ? <>This will send: {parts.map((p, i) => <span key={i}>{i > 0 && " and "}<b style={{ color: "var(--text-hi, #E8EDF2)" }}>{p}</b></span>)}.</>
+              : "Enter an amount above to see exactly what this will send."}
+          </div>
+        );
+      })()}
+
       {error && <div style={{ color: "#c0392b", fontSize: 13, marginBottom: 12 }}>{error}</div>}
       {txStatus && <div style={{ fontSize: 13, marginBottom: 12 }}>{txStatus}</div>}
       {txError && <div style={{ color: "#c0392b", fontSize: 13, marginBottom: 12 }}>{txError}</div>}
 
       <button onClick={depositBoth} disabled={busy} style={{ ...btn, width: "100%", height: 44 }}>
-        {busy ? "Depositing…" : "Deposit into both vaults"}
+        {busy ? "Depositing…" : "Confirm and deposit"}
       </button>
       <p style={{ textAlign: "center", fontSize: 12, color: "var(--text-mid, #888)", marginTop: 8 }}>
-        Two on-chain deposits, one flow · funds stay in separate vaults
+        Each leg above is a separate on-chain transaction · funds stay in separate vaults, they are never combined
       </p>
     </main>
   );
