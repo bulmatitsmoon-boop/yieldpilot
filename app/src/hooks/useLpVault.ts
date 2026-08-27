@@ -34,6 +34,8 @@ import {
   getMint,
   TOKEN_PROGRAM_ID,
   createAssociatedTokenAccountIdempotentInstruction,
+  createSyncNativeInstruction,
+  NATIVE_MINT,
 } from "@solana/spl-token";
 import IDL from "@/idl/yieldpilot.mainnet.json";
 
@@ -311,6 +313,51 @@ export interface LpUserPositionInfo {
   liquidityAtDeposit: string;
 }
 
+/**
+ * Ensure a user's ATA for `mint` exists and, if `mint` is native SOL, holds at least
+ * `requiredLamports` as WRAPPED SOL — LP deposits transfer via SPL token::transfer, which
+ * needs an actual WSOL token account, not just a native SOL balance in the wallet.
+ *
+ * Confirmed live 2026-08-27: a wallet that has only ever held native SOL (i.e. every
+ * wallet, by default — nobody wraps SOL until something asks them to) has no WSOL ATA at
+ * all, so the very first LP deposit attempt failed simulation with AccountNotInitialized
+ * on user_token_a_account. This existed on both the Orca and Raydium deposit paths, and
+ * would have hit every real user's first deposit, not just this one.
+ *
+ * Returns the instructions to prepend to the deposit transaction — does not send anything
+ * itself, so it composes into the same atomic transaction as the actual deposit (if the
+ * deposit fails, the wrap never happened either, instead of leaving a stray WSOL balance
+ * behind from a separate transaction).
+ */
+async function ensureAtaAndWrapIfNativeIxs(
+  connection: Connection,
+  payer: PublicKey,
+  mint: PublicKey,
+  requiredLamports: anchor.BN
+): Promise<TransactionInstruction[]> {
+  const ata = await getAssociatedTokenAddress(mint, payer);
+  const ixs: TransactionInstruction[] = [
+    createAssociatedTokenAccountIdempotentInstruction(payer, ata, payer, mint),
+  ];
+  if (!mint.equals(NATIVE_MINT)) return ixs;
+
+  let currentBalance = 0n;
+  try {
+    const bal = await connection.getTokenAccountBalance(ata);
+    currentBalance = BigInt(bal.value.amount);
+  } catch {
+    // Account doesn't exist yet — the idempotent create instruction above handles that;
+    // currentBalance stays 0, so the full required amount gets wrapped below.
+  }
+  const required = BigInt(requiredLamports.toString());
+  if (required > currentBalance) {
+    const topUp = required - currentBalance;
+    ixs.push(anchor.web3.SystemProgram.transfer({ fromPubkey: payer, toPubkey: ata, lamports: Number(topUp) }));
+    ixs.push(createSyncNativeInstruction(ata));
+  }
+  return ixs;
+}
+
 export function useLpVault() {
   const { connection } = useConnection();
   const { publicKey, signTransaction } = useWallet();
@@ -504,8 +551,14 @@ export function useLpVault() {
         const tokenMaxA = new anchor.BN(quote.tokenMaxA.toString());
         const tokenMaxB = new anchor.BN(quote.tokenMaxB.toString());
 
+        const preIxs = [
+          ...(await ensureAtaAndWrapIfNativeIxs(connection, publicKey, tokenAMint, tokenMaxA)),
+          ...(await ensureAtaAndWrapIfNativeIxs(connection, publicKey, tokenBMint, tokenMaxB)),
+        ];
+
         return program.methods
           .depositOrcaLp(liquidityAmount, tokenMaxA, tokenMaxB, acknowledgeImpermanentLoss)
+          .preInstructions(preIxs)
           .accountsPartial({
             user: publicKey,
             lpVault: lpVaultPubkey,
@@ -727,8 +780,14 @@ export function useLpVault() {
         const userTokenBAccount = await getAssociatedTokenAddress(tokenBMint, publicKey);
         const userSharesAccount = await getAssociatedTokenAddress(sharesMint, publicKey);
 
+        const preIxs = [
+          ...(await ensureAtaAndWrapIfNativeIxs(connection, publicKey, tokenAMint, quote.tokenMaxA)),
+          ...(await ensureAtaAndWrapIfNativeIxs(connection, publicKey, tokenBMint, quote.tokenMaxB)),
+        ];
+
         return program.methods
           .depositRaydiumLp(quote.liquidityDelta, quote.tokenMaxA, quote.tokenMaxB, acknowledgeImpermanentLoss)
+          .preInstructions(preIxs)
           .accountsPartial({
             user: publicKey,
             lpVault: lpVaultPubkey,
