@@ -366,5 +366,6 @@ const btn: React.CSSProperties = {
   borderRadius: 8,
   padding: "8px 16px",
   background: "transparent",
+  color: "var(--text-hi, #E8EDF2)",
   cursor: "pointer",
 };
