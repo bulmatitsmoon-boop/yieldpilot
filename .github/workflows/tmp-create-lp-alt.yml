@@ -32,7 +32,7 @@ jobs:
         env:
           RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
           KEEPER_KEYPAIR_PATH: /tmp/admin.json
-          IDL_PATH: ../idl/yieldpilot.mainnet.json
+          IDL_PATH: src/idl/yieldpilot.mainnet.json
         run: npx ts-node src/scripts/create-combined-lp-alt.ts
 
       - name: Clean up keypair
