@@ -554,6 +554,7 @@ export function useLpVault() {
         const preIxs = [
           ...(await ensureAtaAndWrapIfNativeIxs(connection, publicKey, tokenAMint, tokenMaxA)),
           ...(await ensureAtaAndWrapIfNativeIxs(connection, publicKey, tokenBMint, tokenMaxB)),
+          createAssociatedTokenAccountIdempotentInstruction(publicKey, userSharesAccount, publicKey, sharesMint),
         ];
 
         return program.methods
@@ -783,6 +784,7 @@ export function useLpVault() {
         const preIxs = [
           ...(await ensureAtaAndWrapIfNativeIxs(connection, publicKey, tokenAMint, quote.tokenMaxA)),
           ...(await ensureAtaAndWrapIfNativeIxs(connection, publicKey, tokenBMint, quote.tokenMaxB)),
+          createAssociatedTokenAccountIdempotentInstruction(publicKey, userSharesAccount, publicKey, sharesMint),
         ];
 
         return program.methods
