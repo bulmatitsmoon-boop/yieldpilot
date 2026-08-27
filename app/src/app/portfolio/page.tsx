@@ -53,6 +53,11 @@ const LP_VAULT_ADDRESSES = (
   .filter(Boolean);
 
 const DEFAULT_SLIPPAGE_BPS = 100; // 1%, matching /lp
+// LP shares mint is always created with mint::decimals = 9 — see
+// initialize_orca_lp_vault_handler / initialize_raydium_lp_vault_handler in lp_vault.rs.
+const LP_SHARES_DECIMALS = 9;
+
+interface WithdrawQuoteDisplay { tokenMinA: anchor.BN; tokenMinB: anchor.BN; }
 
 // Real symbols for the two mints every configured LP vault actually uses, so the UI can
 // say "SOL" / "USDC" instead of the vague "Token A" / "Token B" that comes straight out of
@@ -98,6 +103,10 @@ export default function PortfolioPage() {
     depositLp,
     getRaydiumDepositQuote,
     depositRaydiumLp,
+    getWithdrawQuote,
+    withdrawLp,
+    getRaydiumWithdrawQuote,
+    withdrawRaydiumLp,
     txStatus,
     txError,
   } = useLpVault();
@@ -191,6 +200,14 @@ export default function PortfolioPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ── Withdraw side — was only ever built on the separate /lp page, which meant a
+  // real user had to know that page existed and navigate away from the deposit flow
+  // just to get their money back. Same vault, same card, one page. ──
+  const [lpTab, setLpTab] = useState<"deposit" | "withdraw">("deposit");
+  const [withdrawSharesInput, setWithdrawSharesInput] = useState("");
+  const [withdrawQuote, setWithdrawQuote] = useState<WithdrawQuoteDisplay | null>(null);
+  const [withdrawQuoteLoading, setWithdrawQuoteLoading] = useState(false);
+
   async function selectLp(info: LpVaultInfo) {
     setError(null);
     setLpInfo(info);
@@ -199,6 +216,58 @@ export default function PortfolioPage() {
       setLpPosition(pos ? { shares: pos.shares } : null);
     } catch {
       setLpPosition(null);
+    }
+  }
+
+  function setWithdrawMax() {
+    if (!lpPosition) return;
+    setWithdrawSharesInput(formatBaseUnitsToDecimal(lpPosition.shares.toString(), LP_SHARES_DECIMALS));
+  }
+
+  useEffect(() => {
+    if (!lpInfo || !withdrawSharesInput || Number(withdrawSharesInput) <= 0) {
+      setWithdrawQuote(null);
+      return;
+    }
+    let cancelled = false;
+    setWithdrawQuoteLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const rawShares = parseDecimalToBaseUnits(withdrawSharesInput, LP_SHARES_DECIMALS);
+        const q = lpInfo.protocol === "raydium"
+          ? await getRaydiumWithdrawQuote(lpInfo.address, rawShares, DEFAULT_SLIPPAGE_BPS)
+          : await getWithdrawQuote(lpInfo.address, rawShares, DEFAULT_SLIPPAGE_BPS);
+        if (cancelled) return;
+        setWithdrawQuote({ tokenMinA: new anchor.BN(q.tokenMinA.toString()), tokenMinB: new anchor.BN(q.tokenMinB.toString()) });
+      } catch {
+        if (!cancelled) setWithdrawQuote(null);
+      } finally {
+        if (!cancelled) setWithdrawQuoteLoading(false);
+      }
+    }, 500);
+    return () => { cancelled = true; clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lpInfo, withdrawSharesInput]);
+
+  async function withdrawLpLeg() {
+    if (!lpInfo || !withdrawSharesInput || !withdrawQuote) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const rawShares = parseDecimalToBaseUnits(withdrawSharesInput, LP_SHARES_DECIMALS);
+      if (lpInfo.protocol === "raydium") {
+        await withdrawRaydiumLp(lpInfo.address, rawShares, withdrawQuote);
+      } else {
+        await withdrawLp(lpInfo.address, rawShares, withdrawQuote as any);
+      }
+      setWithdrawSharesInput("");
+      setWithdrawQuote(null);
+      const pos = await fetchLpPosition(lpInfo.address);
+      setLpPosition(pos ? { shares: pos.shares } : null);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -443,25 +512,87 @@ export default function PortfolioPage() {
                 </button>
               )}
             </div>
-            <input
-              placeholder={`${symbolForMint(lpInfo.tokenAMint)} amount`}
-              value={lpAmountA}
-              onChange={(e) => setLpAmountA(e.target.value)}
-              style={{ width: "100%", marginBottom: 6 }}
-            />
-            <div style={{ fontSize: 13, color: "var(--text-mid, #888)", marginBottom: 10, minHeight: 18 }}>
-              {lpAmountA && Number(lpAmountA) > 0 && (
-                lpQuoteLoading
-                  ? "Calculating required " + symbolForMint(lpInfo.tokenBMint) + "…"
-                  : lpQuoteB
-                    ? `You'll also need up to ~${lpQuoteB} ${symbolForMint(lpInfo.tokenBMint)} (pool's current price + 1% slippage buffer)`
-                    : "Couldn't get a live quote — try a different amount."
-              )}
+
+            <div style={{ display: "flex", gap: 4, marginBottom: 14, background: "var(--ink-900, #0a0a0a)", borderRadius: 8, padding: 3 }}>
+              {(["deposit", "withdraw"] as const).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setLpTab(t)}
+                  style={{
+                    flex: 1, padding: "6px 0", borderRadius: 6, border: "none", cursor: "pointer",
+                    fontSize: 13, fontWeight: 500, textTransform: "capitalize",
+                    background: lpTab === t ? "var(--ink-700, #2a2a2a)" : "transparent",
+                    color: lpTab === t ? "var(--text-hi, #E8EDF2)" : "var(--text-mid, #888)",
+                  }}
+                >
+                  {t}
+                </button>
+              ))}
             </div>
-            <label style={{ display: "flex", gap: 8, fontSize: 13, alignItems: "flex-start" }}>
-              <input type="checkbox" checked={ackIl} onChange={(e) => setAckIl(e.target.checked)} />
-              <span>I understand LP positions carry impermanent-loss risk and my deposit&apos;s value can fall relative to holding.</span>
-            </label>
+
+            {lpTab === "deposit" ? (
+              <>
+                <input
+                  placeholder={`${symbolForMint(lpInfo.tokenAMint)} amount`}
+                  value={lpAmountA}
+                  onChange={(e) => setLpAmountA(e.target.value)}
+                  style={{ width: "100%", marginBottom: 6 }}
+                />
+                <div style={{ fontSize: 13, color: "var(--text-mid, #888)", marginBottom: 10, minHeight: 18 }}>
+                  {lpAmountA && Number(lpAmountA) > 0 && (
+                    lpQuoteLoading
+                      ? "Calculating required " + symbolForMint(lpInfo.tokenBMint) + "…"
+                      : lpQuoteB
+                        ? `You'll also need up to ~${lpQuoteB} ${symbolForMint(lpInfo.tokenBMint)} (pool's current price + 1% slippage buffer)`
+                        : "Couldn't get a live quote — try a different amount."
+                  )}
+                </div>
+                <label style={{ display: "flex", gap: 8, fontSize: 13, alignItems: "flex-start" }}>
+                  <input type="checkbox" checked={ackIl} onChange={(e) => setAckIl(e.target.checked)} />
+                  <span>I understand LP positions carry impermanent-loss risk and my deposit&apos;s value can fall relative to holding.</span>
+                </label>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: 13, color: "var(--text-mid, #888)", marginBottom: 8 }}>
+                  Your position:{" "}
+                  {lpPosition && lpPosition.shares > 0
+                    ? `${formatBaseUnitsToDecimal(lpPosition.shares.toString(), LP_SHARES_DECIMALS)} shares`
+                    : "nothing to withdraw"}
+                </div>
+                <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+                  <input
+                    placeholder="Shares to withdraw"
+                    value={withdrawSharesInput}
+                    onChange={(e) => setWithdrawSharesInput(e.target.value)}
+                    style={{ flex: 1 }}
+                  />
+                  <button
+                    onClick={setWithdrawMax}
+                    disabled={!lpPosition || lpPosition.shares === 0}
+                    style={{ ...btn, padding: "8px 14px" }}
+                  >
+                    MAX
+                  </button>
+                </div>
+                <div style={{ fontSize: 13, color: "var(--text-mid, #888)", marginBottom: 14, minHeight: 18 }}>
+                  {withdrawSharesInput && Number(withdrawSharesInput) > 0 && (
+                    withdrawQuoteLoading
+                      ? "Calculating payout…"
+                      : withdrawQuote
+                        ? `You'll receive at least ~${formatBaseUnitsToDecimal(withdrawQuote.tokenMinA.toString(), lpInfo.tokenADecimals)} ${symbolForMint(lpInfo.tokenAMint)} + ~${formatBaseUnitsToDecimal(withdrawQuote.tokenMinB.toString(), lpInfo.tokenBDecimals)} ${symbolForMint(lpInfo.tokenBMint)}`
+                        : "Couldn't get a live quote — try a different amount."
+                  )}
+                </div>
+                <button
+                  onClick={withdrawLpLeg}
+                  disabled={busy || !withdrawQuote}
+                  style={{ ...btn, width: "100%", height: 40 }}
+                >
+                  {busy ? "Withdrawing…" : "Withdraw"}
+                </button>
+              </>
+            )}
           </>
         )}
       </section>
