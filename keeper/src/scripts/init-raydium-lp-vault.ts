@@ -25,6 +25,11 @@
  * adapters/raydium.rs's TICK_ARRAY_BITMAP_EXTENSION_SEED). After that fix, this script
  * and the full deposit/withdraw/exit/open_new/redeploy lifecycle all ran successfully
  * against real devnet — mirroring the Orca LP vault proof.
+ *
+ * First mainnet run (2026-08-27) hit one more real gap devnet never surfaced: the account
+ * CHOICE for token_account_0/1 (admin's own ATAs) was already correct, but on a mainnet
+ * wallet that had never held wrapped SOL or USDC before, those ATAs didn't exist yet —
+ * AccountNotInitialized. Fixed by idempotently creating them as a preflight step.
  * =============================================================================
  *
  * Usage:
@@ -54,6 +59,7 @@ import {
   TOKEN_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
   getAssociatedTokenAddressSync,
+  createAssociatedTokenAccountIdempotentInstruction,
 } from "@solana/spl-token";
 import fs from "fs";
 import path from "path";
@@ -281,6 +287,21 @@ async function main() {
     await connection.confirmTransaction(fundSig, "confirmed");
     console.log(`  Funded: ${fundSig}`);
   }
+
+  // token_account_0/1 must be the ADMIN's own existing ATAs (see comment above), but on a
+  // wallet that has never held these mints before (e.g. a fresh mainnet admin wallet that
+  // only ever custodies native SOL, never wrapped/SPL SOL), they don't exist yet. Confirmed
+  // live on mainnet 2026-08-27: "AccountNotInitialized" on token_account_0 even though the
+  // account choice itself (admin's, not the vault's) was already correct — the account
+  // simply never existed. Idempotent create is safe whether or not they already exist.
+  const ataPreflight = new anchor.web3.Transaction().add(
+    createAssociatedTokenAccountIdempotentInstruction(admin.publicKey, adminTokenAAccount, admin.publicKey, opts.tokenAMint),
+    createAssociatedTokenAccountIdempotentInstruction(admin.publicKey, adminTokenBAccount, admin.publicKey, opts.tokenBMint),
+  );
+  console.log(`\nEnsuring admin's own token A/B accounts exist (${adminTokenAAccount.toBase58()}, ${adminTokenBAccount.toBase58()})...`);
+  const ataSig = await connection.sendTransaction(ataPreflight, [admin]);
+  await connection.confirmTransaction(ataSig, "confirmed");
+  console.log(`  OK: ${ataSig}`);
 
   console.log("\nInitializing Raydium LP vault...");
   try {
