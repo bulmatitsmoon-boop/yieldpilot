@@ -17,7 +17,7 @@
  *  - The "IL risk" acknowledgement is required before the LP leg can run, exactly as on the
  *    standalone /lp page.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { notFound } from "next/navigation";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
@@ -39,9 +39,17 @@ const VAULT_ADDRESSES = (process.env.NEXT_PUBLIC_VAULT_ADDRESSES ?? "")
   .map((a) => a.trim())
   .filter(Boolean);
 
-// Optional: the LP vault to pair with. When unset, the LP side asks for an address so the
-// page still works before an LP vault is minted/known.
-const LP_VAULT_ADDRESS = (process.env.NEXT_PUBLIC_LP_VAULT_ADDRESS ?? "").trim();
+// Known LP vaults, shown as click-to-select options instead of a raw address field —
+// nobody should have to copy/paste a pubkey to make a deposit. Falls back to the old
+// singular env var for compatibility with any existing deploy config, then to a manual
+// address field only if genuinely nothing is configured yet (e.g. between shipping this
+// page and minting the first LP vault).
+const LP_VAULT_ADDRESSES = (
+  process.env.NEXT_PUBLIC_LP_VAULT_ADDRESSES ?? process.env.NEXT_PUBLIC_LP_VAULT_ADDRESS ?? ""
+)
+  .split(",")
+  .map((a) => a.trim())
+  .filter(Boolean);
 
 const DEFAULT_SLIPPAGE_BPS = 100; // 1%, matching /lp
 
@@ -104,7 +112,9 @@ export default function PortfolioPage() {
 
   // ── Real deposit inputs (one per leg — the LP leg brings the pair) ──
   const [safeAmount, setSafeAmount] = useState("");
-  const [lpVaultAddr, setLpVaultAddr] = useState(LP_VAULT_ADDRESS);
+  const [lpOptions, setLpOptions] = useState<LpVaultInfo[]>([]);
+  const [lpOptionsLoading, setLpOptionsLoading] = useState(LP_VAULT_ADDRESSES.length > 0);
+  const [manualLpAddr, setManualLpAddr] = useState("");
   const [lpInfo, setLpInfo] = useState<LpVaultInfo | null>(null);
   const [lpPosition, setLpPosition] = useState<{ shares: number } | null>(null);
   const [lpAmountA, setLpAmountA] = useState("");
@@ -112,18 +122,45 @@ export default function PortfolioPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function loadLp() {
+  // Fetch every configured LP vault's info ONCE on mount so they can render as
+  // click-to-select options with real names/protocols, not a blank address field the
+  // user has to already know how to fill in.
+  useEffect(() => {
+    if (LP_VAULT_ADDRESSES.length === 0) {
+      setLpOptionsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const results = await Promise.allSettled(LP_VAULT_ADDRESSES.map((a) => fetchLpVault(a)));
+      if (cancelled) return;
+      setLpOptions(
+        results
+          .filter((r): r is PromiseFulfilledResult<LpVaultInfo> => r.status === "fulfilled")
+          .map((r) => r.value)
+      );
+      setLpOptionsLoading(false);
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function selectLp(info: LpVaultInfo) {
+    setError(null);
+    setLpInfo(info);
+    try {
+      const pos = await fetchLpPosition(info.address);
+      setLpPosition(pos ? { shares: pos.shares } : null);
+    } catch {
+      setLpPosition(null);
+    }
+  }
+
+  async function loadManualLp() {
     setError(null);
     try {
-      const info = await fetchLpVault(lpVaultAddr.trim());
-      setLpInfo(info);
-      // Also fetch the user's existing LP position for the portfolio summary (null if none).
-      try {
-        const pos = await fetchLpPosition(lpVaultAddr.trim());
-        setLpPosition(pos ? { shares: pos.shares } : null);
-      } catch {
-        setLpPosition(null);
-      }
+      const info = await fetchLpVault(manualLpAddr.trim());
+      await selectLp(info);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -302,19 +339,44 @@ export default function PortfolioPage() {
           <span style={ilBadge}>IL risk</span>
         </div>
         {!lpInfo ? (
-          <div style={{ display: "flex", gap: 8 }}>
-            <input
-              placeholder="LP vault address"
-              value={lpVaultAddr}
-              onChange={(e) => setLpVaultAddr(e.target.value)}
-              style={{ flex: 1 }}
-            />
-            <button onClick={loadLp} style={btn}>Load</button>
-          </div>
+          lpOptionsLoading ? (
+            <div style={{ fontSize: 13, color: "var(--text-mid, #888)" }}>Loading available LP vaults…</div>
+          ) : lpOptions.length > 0 ? (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {lpOptions.map((opt) => (
+                <button key={opt.address} onClick={() => selectLp(opt)} style={btn}>
+                  {opt.name} · {opt.protocol}
+                </button>
+              ))}
+            </div>
+          ) : (
+            // Fallback only: no LP vaults configured yet (NEXT_PUBLIC_LP_VAULT_ADDRESSES
+            // unset/empty), or every configured one failed to load. Manual entry keeps this
+            // page usable in that gap rather than dead-ending — not the normal path.
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                placeholder="LP vault address"
+                value={manualLpAddr}
+                onChange={(e) => setManualLpAddr(e.target.value)}
+                style={{ flex: 1 }}
+              />
+              <button onClick={loadManualLp} style={btn}>Load</button>
+            </div>
+          )
         ) : (
           <>
-            <div style={{ fontSize: 13, color: "var(--text-mid, #888)", marginBottom: 10 }}>
-              {lpInfo.name} · {lpInfo.protocol} · bring both tokens
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <span style={{ fontSize: 13, color: "var(--text-mid, #888)" }}>
+                {lpInfo.name} · {lpInfo.protocol} · bring both tokens
+              </span>
+              {lpOptions.length > 1 && (
+                <button
+                  onClick={() => { setLpInfo(null); setLpAmountA(""); setAckIl(false); }}
+                  style={{ ...btn, padding: "2px 10px", fontSize: 12 }}
+                >
+                  Change
+                </button>
+              )}
             </div>
             <input
               placeholder="Token A amount"
