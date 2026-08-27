@@ -557,9 +557,8 @@ export function useLpVault() {
           createAssociatedTokenAccountIdempotentInstruction(publicKey, userSharesAccount, publicKey, sharesMint),
         ];
 
-        return program.methods
+        const ix = await program.methods
           .depositOrcaLp(liquidityAmount, tokenMaxA, tokenMaxB, acknowledgeImpermanentLoss)
-          .preInstructions(preIxs)
           .accountsPartial({
             user: publicKey,
             lpVault: lpVaultPubkey,
@@ -581,10 +580,18 @@ export function useLpVault() {
             tokenProgram: TOKEN_PROGRAM_ID,
             whirlpoolProgram: WHIRLPOOL_PROGRAM_ID,
           })
-          .rpc();
+          .instruction();
+
+        // v0 + ALT, not Anchor's plain legacy .rpc() — this instruction alone (25
+        // accounts) already serializes to 973/1232 bytes on its own, leaving almost no
+        // room for a wallet's own safety-simulation instructions (Phantom's "Lighthouse"
+        // guard) appended before signing. Confirmed live 2026-08-27: Phantom warned about
+        // this exact transaction being unable to fit its own guard. See sendLpV0's doc
+        // comment for the measured before/after on the same class of transaction.
+        return sendLpV0(connection, { publicKey, signTransaction: signTransaction! }, [...preIxs, ix]);
       });
     },
-    [publicKey, wrapTx, fetchLpDepositContext]
+    [publicKey, signTransaction, wrapTx, fetchLpDepositContext, connection]
   );
 
   /**
@@ -655,7 +662,7 @@ export function useLpVault() {
         const tokenMinA = new anchor.BN(quote.tokenMinA.toString());
         const tokenMinB = new anchor.BN(quote.tokenMinB.toString());
 
-        return program.methods
+        const ix = await program.methods
           .withdrawOrcaLp(shares, tokenMinA, tokenMinB)
           .accountsPartial({
             user: publicKey,
@@ -678,10 +685,12 @@ export function useLpVault() {
             tokenProgram: TOKEN_PROGRAM_ID,
             whirlpoolProgram: WHIRLPOOL_PROGRAM_ID,
           })
-          .rpc();
+          .instruction();
+
+        return sendLpV0(connection, { publicKey, signTransaction: signTransaction! }, [ix]);
       });
     },
-    [publicKey, wrapTx, fetchLpDepositContext]
+    [publicKey, signTransaction, wrapTx, fetchLpDepositContext, connection]
   );
 
   // ── Raydium CLMM side ────────────────────────────────────────────────────
@@ -787,9 +796,8 @@ export function useLpVault() {
           createAssociatedTokenAccountIdempotentInstruction(publicKey, userSharesAccount, publicKey, sharesMint),
         ];
 
-        return program.methods
+        const ix = await program.methods
           .depositRaydiumLp(quote.liquidityDelta, quote.tokenMaxA, quote.tokenMaxB, acknowledgeImpermanentLoss)
-          .preInstructions(preIxs)
           .accountsPartial({
             user: publicKey,
             lpVault: lpVaultPubkey,
@@ -813,10 +821,12 @@ export function useLpVault() {
             systemProgram: anchor.web3.SystemProgram.programId,
             raydiumProgram: RAYDIUM_CLMM_PROGRAM_ID,
           })
-          .rpc();
+          .instruction();
+
+        return sendLpV0(connection, { publicKey, signTransaction: signTransaction! }, [...preIxs, ix]);
       });
     },
-    [publicKey, wrapTx, fetchRaydiumLpDepositContext]
+    [publicKey, signTransaction, connection, wrapTx, fetchRaydiumLpDepositContext]
   );
 
   const getRaydiumWithdrawQuote = useCallback(
