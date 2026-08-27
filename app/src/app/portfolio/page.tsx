@@ -352,11 +352,23 @@ export default function PortfolioPage() {
             <div style={{ fontSize: 13, color: "var(--text-mid, #888)" }}>Loading available LP vaults…</div>
           ) : lpOptions.length > 0 ? (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {lpOptions.map((opt) => (
-                <button key={opt.address} onClick={() => selectLp(opt)} style={btn}>
-                  {opt.name} · {opt.protocol}
-                </button>
-              ))}
+              {lpOptions.map((opt) => {
+                // Same live fee-APY numbers as the Live Rates page (useApys) — matched by
+                // protocolId containing the protocol name, same pattern lpApy above uses.
+                const rate = apys.find((x) => x.protocolId?.toLowerCase().includes(opt.protocol.toLowerCase()));
+                return (
+                  <button
+                    key={opt.address}
+                    onClick={() => selectLp(opt)}
+                    style={{ ...btn, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4, minWidth: 140 }}
+                  >
+                    <span>{opt.name} · {opt.protocol}</span>
+                    <span style={{ fontSize: 16, fontWeight: 600, color: rate?.stale ? "var(--text-mid, #888)" : "#22b37e" }}>
+                      {rate && !rate.stale ? `${rate.apyPercent.toFixed(1)}%` : "—"}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           ) : (
             // Fallback only: no LP vaults configured yet (NEXT_PUBLIC_LP_VAULT_ADDRESSES
