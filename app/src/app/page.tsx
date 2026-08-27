@@ -7,6 +7,9 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { useApys } from "@/hooks/useApys";
 import { useYieldPilot } from "@/hooks/useYieldPilot";
 import { useSolPrice } from "@/hooks/useSolPrice";
+import { computeLpVaultValueUsd } from "@/hooks/useLpVault";
+import { useConnection } from "@solana/wallet-adapter-react";
+import { useEffect, useState } from "react";
 import { fmt } from "@/components/ui";
 import { RoutingVisual } from "@/components/dashboard/RoutingVisual";
 import { FleetRadar } from "@/components/dashboard/FleetRadar";
@@ -26,6 +29,13 @@ const VAULT_ADDRESSES = (process.env.NEXT_PUBLIC_VAULT_ADDRESSES || "F1r513ZZdof
   .filter(Boolean);
 
 const IS_MAINNET = process.env.NEXT_PUBLIC_SOLANA_NETWORK === "mainnet-beta";
+
+const LP_VAULT_ADDRESSES = (
+  process.env.NEXT_PUBLIC_LP_VAULT_ADDRESSES ?? process.env.NEXT_PUBLIC_LP_VAULT_ADDRESS ?? ""
+)
+  .split(",")
+  .map((a) => a.trim())
+  .filter(Boolean);
 
 
 function Reveal({ children, delay = 0 }: { children: React.ReactNode; delay?: number }) {
@@ -65,9 +75,34 @@ export default function Home() {
   const solPrice = useSolPrice();
   const usdcVault = vaults.find(v => v.name.toUpperCase().includes("USDC"));
   const solVault = vaults.find(v => v.name.toUpperCase().includes("SOL"));
-  const totalDepositedUsd =
-    (usdcVault ? usdcVault.totalDeposits / 1e6 : 0) +
-    (solVault ? (solVault.totalDeposits / 1e9) * solPrice : 0);
+  // totalShares === 0 means nobody currently holds a claim on that vault — whatever
+  // total_deposits still reads in that state isn't a real depositor balance (see
+  // useFleetStats.ts's identical guard for the full story on the SOL vault's stuck
+  // 33,139,492-lamport residue, confirmed live 2026-08-27). Show $0 for that vault
+  // rather than an unowned number.
+  const safeDepositedUsd =
+    (usdcVault && usdcVault.totalShares > 0 ? usdcVault.totalDeposits / 1e6 : 0) +
+    (solVault && solVault.totalShares > 0 ? (solVault.totalDeposits / 1e9) * solPrice : 0);
+
+  // LP vault value was completely missing from this stat before — a real LP deposit
+  // never showed up here because this only ever read the safe-vault Vault type.
+  // Fetched separately since it needs live protocol-quote math (Orca/Raydium WASM),
+  // not a synchronous field read like the safe vaults above.
+  const { connection } = useConnection();
+  const [lpDepositedUsd, setLpDepositedUsd] = useState(0);
+  useEffect(() => {
+    if (LP_VAULT_ADDRESSES.length === 0 || solPrice <= 0) return;
+    let cancelled = false;
+    (async () => {
+      const values = await Promise.all(
+        LP_VAULT_ADDRESSES.map((addr) => computeLpVaultValueUsd(connection, addr, solPrice).catch(() => 0))
+      );
+      if (!cancelled) setLpDepositedUsd(values.reduce((a, b) => a + b, 0));
+    })();
+    return () => { cancelled = true; };
+  }, [connection, solPrice]);
+
+  const totalDepositedUsd = safeDepositedUsd + lpDepositedUsd;
   // Excludes stale entries: averaging a rate we did not actually fetch would put a
   // fabricated number in the hero. null (not 0) when nothing is live, so FleetRadar
   // can render "—" — 0.0% would read as a real, terrible rate.
