@@ -30,6 +30,14 @@
  * CHOICE for token_account_0/1 (admin's own ATAs) was already correct, but on a mainnet
  * wallet that had never held wrapped SOL or USDC before, those ATAs didn't exist yet —
  * AccountNotInitialized. Fixed by idempotently creating them as a preflight step.
+ *
+ * That fix then exposed a second, separate mainnet-only gap: the real SOL/USDC Raydium
+ * pool used here is extremely high-traffic (confirmed live: 8+ transactions landing in
+ * the same second, writable-locking pool_state constantly). The zero-priority-fee,
+ * fire-and-forget send that worked fine on quiet devnet got starved out of block space
+ * TWICE on mainnet — sent, never landed, no error, just silence. Fixed with a real
+ * priority fee (20_000 microLamports/CU, above the observed p90 for this account) and a
+ * resend-while-polling loop instead of a single send + single confirm poll.
  * =============================================================================
  *
  * Usage:
@@ -383,17 +391,45 @@ async function main() {
     const altAccount = (await connection.getAddressLookupTable(altAddress)).value!;
 
     const computeIx = anchor.web3.ComputeBudgetProgram.setComputeUnitLimit({ units: 600_000 });
-    const { blockhash } = await connection.getLatestBlockhash();
+    // This pool (3ucNos4N...) is extremely high-traffic — confirmed live 2026-08-27: 8+
+    // transactions landing in the same second, writable-locking pool_state constantly.
+    // A zero-priority-fee tx got starved out twice in a row (sent, never landed, no error
+    // — just silently lost the race for block space). 20_000 micro-lamports/CU sits above
+    // the observed p90 (3_762) for this exact account with real margin.
+    const priorityIx = anchor.web3.ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 20_000 });
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
     const msg = new anchor.web3.TransactionMessage({
       payerKey: admin.publicKey,
       recentBlockhash: blockhash,
-      instructions: [computeIx, ix],
+      instructions: [computeIx, priorityIx, ix],
     }).compileToV0Message([altAccount]);
     const vtx = new anchor.web3.VersionedTransaction(msg);
     vtx.sign([admin, sharesMintKp, positionNftMintKp]);
     console.log(`  Transaction size: ${vtx.serialize().length} bytes`);
-    const sig = await connection.sendTransaction(vtx);
-    await connection.confirmTransaction(sig, "confirmed");
+
+    // Plain sendTransaction + confirmTransaction(signature) is fire-and-forget: one send,
+    // one poll, no rebroadcast — easy to lose against a busy pool's block-space contention
+    // with no error, just silence. Resend every 3s while polling status until the
+    // blockhash actually expires, same pattern real production sends should use on a hot
+    // mainnet account.
+    const rawTx = vtx.serialize();
+    let sig = await connection.sendRawTransaction(rawTx, { skipPreflight: true, maxRetries: 0 });
+    let confirmed = false;
+    while (!confirmed) {
+      const height = await connection.getBlockHeight("confirmed");
+      if (height > lastValidBlockHeight) break;
+      const status = await connection.getSignatureStatus(sig, { searchTransactionHistory: false });
+      if (status.value?.confirmationStatus === "confirmed" || status.value?.confirmationStatus === "finalized") {
+        if (status.value.err) throw new Error(`Transaction failed on-chain: ${JSON.stringify(status.value.err)}`);
+        confirmed = true;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 3000));
+      await connection.sendRawTransaction(rawTx, { skipPreflight: true, maxRetries: 0 }).catch(() => {});
+    }
+    if (!confirmed) {
+      throw new Error(`Transaction ${sig} did not confirm before blockhash expired (height > ${lastValidBlockHeight}). Check its real on-chain status before retrying.`);
+    }
     console.log(`  OK ${sig}`);
   } catch (err: any) {
     const logs: string[] = err.logs ?? [];
