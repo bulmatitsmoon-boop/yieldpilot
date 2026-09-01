@@ -12,6 +12,7 @@ const INCREASE_LIQUIDITY_IX: [u8; 8] = [46, 156, 243, 118, 13, 205, 251, 178];
 const DECREASE_LIQUIDITY_IX: [u8; 8] = [160, 38, 208, 111, 104, 91, 44, 1];
 const CLOSE_POSITION_IX:     [u8; 8] = [123, 134, 81, 0, 49, 68, 98, 98];
 const COLLECT_FEES_IX:       [u8; 8] = [164, 152, 207, 99, 30, 186, 19, 182];
+const UPDATE_FEES_AND_REWARDS_IX: [u8; 8] = [154, 230, 250, 13, 236, 209, 75, 223];
 
 // ── Account contexts ──────────────────────────────────────────────────────────
 //
@@ -383,6 +384,54 @@ pub fn orca_collect_fees<'info>(
     )?;
 
     msg!("orca_collect_fees");
+    Ok(())
+}
+
+/// Refresh a position's `fee_owed_a`/`fee_owed_b` checkpoint against the pool's
+/// current fee-growth accounting, WITHOUT changing liquidity or moving any tokens.
+///
+/// Needed because `decrease_liquidity` — the CPI this program used everywhere else
+/// to trigger that same checkpoint — HARD-REJECTS a zero liquidity_amount
+/// (`LiquidityZero`, confirmed live against a real mainnet position 2026-09-01: a
+/// `decrease_liquidity(0, 0, 0)` call, otherwise harmless, reverted the whole
+/// transaction before `collect_fees` ever ran). Orca ships this dedicated
+/// instruction for exactly this "checkpoint only, no principal change" case —
+/// it's fully permissionless (no position_authority signer, no token accounts at
+/// all), matching its own Anchor account struct
+/// (programs/whirlpool/src/instructions/update_fees_and_rewards.rs upstream).
+///
+/// Call BEFORE `orca_collect_fees`: collect only pays out whatever is already
+/// checkpointed into fee_owed, so this has to run first or collect sweeps stale
+/// (zero, on a position nothing else has touched) numbers.
+pub fn orca_update_fees_and_rewards<'info>(
+    whirlpool_program: &AccountInfo<'info>,
+    whirlpool: &AccountInfo<'info>,
+    position: &AccountInfo<'info>,
+    tick_array_lower: &AccountInfo<'info>,
+    tick_array_upper: &AccountInfo<'info>,
+) -> Result<()> {
+    let metas = vec![
+        AccountMeta::new(*whirlpool.key, false),
+        AccountMeta::new(*position.key, false),
+        AccountMeta::new_readonly(*tick_array_lower.key, false),
+        AccountMeta::new_readonly(*tick_array_upper.key, false),
+    ];
+
+    anchor_lang::solana_program::program::invoke(
+        &anchor_lang::solana_program::instruction::Instruction {
+            program_id: *whirlpool_program.key,
+            accounts: metas,
+            data: UPDATE_FEES_AND_REWARDS_IX.to_vec(),
+        },
+        &[
+            whirlpool.clone(),
+            position.clone(),
+            tick_array_lower.clone(),
+            tick_array_upper.clone(),
+        ],
+    )?;
+
+    msg!("orca_update_fees_and_rewards");
     Ok(())
 }
 
