@@ -7,7 +7,7 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { useApys } from "@/hooks/useApys";
 import { useYieldPilot } from "@/hooks/useYieldPilot";
 import { useSolPrice } from "@/hooks/useSolPrice";
-import { computeLpVaultValueUsd } from "@/hooks/useLpVault";
+import { computeLpVaultValueUsd, computeLpVaultLifetimeFeesUsd } from "@/hooks/useLpVault";
 import { useConnection } from "@solana/wallet-adapter-react";
 import { useEffect, useState } from "react";
 import { fmt } from "@/components/ui";
@@ -98,6 +98,23 @@ export default function Home() {
         LP_VAULT_ADDRESSES.map((addr) => computeLpVaultValueUsd(connection, addr, solPrice).catch(() => 0))
       );
       if (!cancelled) setLpDepositedUsd(values.reduce((a, b) => a + b, 0));
+    })();
+    return () => { cancelled = true; };
+  }, [connection, solPrice]);
+
+  // Real, all-time LP trading fees collected — proof the vaults are actually making
+  // money, not just holding a position. Reads lp_vault.rs's lifetime_fees_a/b directly
+  // (added 2026-09-01), the same "only ever goes up" model as the safe vaults'
+  // lifetime_gains stat above.
+  const [lpFeesUsd, setLpFeesUsd] = useState(0);
+  useEffect(() => {
+    if (LP_VAULT_ADDRESSES.length === 0 || solPrice <= 0) return;
+    let cancelled = false;
+    (async () => {
+      const values = await Promise.all(
+        LP_VAULT_ADDRESSES.map((addr) => computeLpVaultLifetimeFeesUsd(connection, addr, solPrice).catch(() => 0))
+      );
+      if (!cancelled) setLpFeesUsd(values.reduce((a, b) => a + b, 0));
     })();
     return () => { cancelled = true; };
   }, [connection, solPrice]);
@@ -280,7 +297,7 @@ export default function Home() {
         </div>
 
         {/* ── Fleet Radar (real, live data — no fabricated numbers) ──────────── */}
-        <FleetRadar totalDeposited={totalDepositedUsd} blendedApy={blendedApy} />
+        <FleetRadar totalDeposited={totalDepositedUsd} blendedApy={blendedApy} lpFeesEarnedUsd={lpFeesUsd} />
 
         {/* ── How it works (animated stepper) ─────────────────────────────────── */}
         <div style={{ marginBottom: 96, position: "relative", zIndex: 1 }}>
@@ -289,7 +306,7 @@ export default function Home() {
           </Reveal>
         </div>
 
-        {/* ── Live rates ─────────────────────────────────────────────────────── */}
+        {/* ── Live rates ─────────���───────────────────────────────────────────── */}
         <div style={{ marginBottom: 96, position: "relative", zIndex: 1 }}>
           <Reveal>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 24 }}>
@@ -524,5 +541,6 @@ export default function Home() {
     </div>
   );
 }
+
 
 
