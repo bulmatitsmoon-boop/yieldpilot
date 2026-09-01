@@ -1903,7 +1903,7 @@ pub mod yieldpilot {
     /// Harvest accrued Raydium swap fees + reward emissions and immediately redeploy
     /// them as added liquidity — keeper-only, no user-facing "claim" step. See
     /// collect_raydium_lp_fees_handler's doc comment for the full mechanism.
-    pub fn collect_raydium_lp_fees(ctx: Context<RedeployRaydiumLpLiquidity>) -> Result<()> {
+    pub fn collect_raydium_lp_fees<'info>(ctx: Context<'_, '_, '_, 'info, RedeployRaydiumLpLiquidity<'info>>) -> Result<()> {
         collect_raydium_lp_fees_handler(ctx)
     }
 
