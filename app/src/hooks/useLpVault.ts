@@ -716,7 +716,7 @@ export function useLpVault() {
    * getDepositQuote, same "don't hand-roll fixed-point math" reasoning.
    */
   const getWithdrawQuote = useCallback(
-    async (lpVaultAddress: string, shares: anchor.BN, slippageToleranceBps: number): Promise<DecreaseLiquidityQuote> => {
+    async (lpVaultAddress: string, shares: anchor.BN, slippageToleranceBps: number): Promise<DecreaseLiquidityQuote & { idleA: bigint; idleB: bigint }> => {
       const { raw, whirlpoolInfo } = await fetchLpDepositContext(lpVaultAddress);
       const tickLowerIndex = raw.tickLowerIndex as number;
       const tickUpperIndex = raw.tickUpperIndex as number;
@@ -739,10 +739,17 @@ export function useLpVault() {
       // instruction also pays out a pro-rata slice of the vault's IDLE token balance —
       // shares represent a claim on the whole vault, not just the deployed position
       // (see withdraw_orca_lp_handler's own idle_a/idle_b comment). Collected-but-not-
-      // yet-redeployed fees (collect_orca_lp_fees) sit in idle balance, so without this
-      // the quote silently undercounts what the user actually receives — confirmed live
-      // 2026-09-01, a real dust-position quote came back missing ~$1 of just-collected
-      // fees. Uses the PRE-withdraw share count, matching the handler exactly.
+      // yet-redeployed fees (collect_orca_lp_fees) sit in idle balance, so a plain
+      // decreaseLiquidityQuote silently undercounts what the user actually receives.
+      //
+      // IMPORTANT: tokenMinA/tokenMinB below stay exactly as decreaseLiquidityQuote
+      // computed them — withdrawLp forwards these straight into the on-chain CPI as
+      // the slippage floor for decrease_liquidity, which only ever pays out the
+      // deployed portion. Inflating them by idleA/idleB (tried first, reverted) makes
+      // the CPI's real (deployed-only) output come in under an inflated minimum it can
+      // never satisfy — confirmed live 2026-09-01: TokenMinSubceeded (0x1782), caught
+      // in simulation, no funds moved. idleA/idleB are returned as SEPARATE fields for
+      // display math only, added on top of the quote in the UI, never sent on-chain.
       const [vaultABalance, vaultBBalance] = await Promise.all([
         connection.getTokenAccountBalance(raw.vaultTokenAAccount as PublicKey).catch(() => null),
         connection.getTokenAccountBalance(raw.vaultTokenBAccount as PublicKey).catch(() => null),
@@ -754,13 +761,7 @@ export function useLpVault() {
         ? (BigInt(vaultBBalance.value.amount) * BigInt(shares.toString())) / totalShares
         : 0n;
 
-      return {
-        ...quote,
-        tokenEstA: quote.tokenEstA + idleA,
-        tokenEstB: quote.tokenEstB + idleB,
-        tokenMinA: quote.tokenMinA + idleA,
-        tokenMinB: quote.tokenMinB + idleB,
-      };
+      return { ...quote, idleA, idleB };
     },
     [fetchLpDepositContext, connection]
   );
