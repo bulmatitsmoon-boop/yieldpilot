@@ -38,7 +38,7 @@ use anchor_spl::token::{Mint, Token, TokenAccount, Transfer};
 use crate::adapters::orca::{
     OrcaClosePosition, OrcaCollectFees, OrcaModifyLiquidity, OrcaOpenPosition, WHIRLPOOL_PROGRAM_ID,
     orca_close_position, orca_collect_fees, orca_decrease_liquidity, orca_increase_liquidity,
-    orca_open_position,
+    orca_open_position, orca_update_fees_and_rewards,
 };
 use crate::adapters::raydium::{
     METADATA_PROGRAM_ID, RAYDIUM_CLMM_PROGRAM_ID, RaydiumClosePosition, RaydiumModifyLiquidity,
@@ -1121,27 +1121,17 @@ pub mod orca_lp {
         let balance_a_before = ctx.accounts.vault_token_a_account.amount;
         let balance_b_before = ctx.accounts.vault_token_b_account.amount;
 
-        orca_decrease_liquidity(
-            CpiContext::new_with_signer(
-                ctx.accounts.whirlpool_program.to_account_info(),
-                OrcaModifyLiquidity {
-                    vault_authority:      ctx.accounts.vault_authority.to_account_info(),
-                    whirlpool:            ctx.accounts.whirlpool.to_account_info(),
-                    token_program:        ctx.accounts.token_program.clone(),
-                    position_authority:   ctx.accounts.vault_authority.to_account_info(),
-                    position:             ctx.accounts.position.to_account_info(),
-                    position_token_account: (*ctx.accounts.position_token_account).clone(),
-                    token_owner_account_a: (*ctx.accounts.vault_token_a_account).clone(),
-                    token_owner_account_b: (*ctx.accounts.vault_token_b_account).clone(),
-                    token_vault_a:        ctx.accounts.token_vault_a.to_account_info(),
-                    token_vault_b:        ctx.accounts.token_vault_b.to_account_info(),
-                    tick_array_lower:     ctx.accounts.tick_array_lower.to_account_info(),
-                    tick_array_upper:     ctx.accounts.tick_array_upper.to_account_info(),
-                    whirlpool_program:    ctx.accounts.whirlpool_program.to_account_info(),
-                },
-                &[seeds],
-            ),
-            0, 0, 0, seeds,
+        // NOT orca_decrease_liquidity(0, ...) — Orca's decrease_liquidity hard-rejects
+        // a zero liquidity_amount (LiquidityZero), confirmed live against a real
+        // mainnet position 2026-09-01. update_fees_and_rewards is Orca's own
+        // purpose-built "checkpoint fee_owed without touching liquidity" instruction —
+        // see its doc comment in adapters/orca.rs for the full story.
+        orca_update_fees_and_rewards(
+            &ctx.accounts.whirlpool_program.to_account_info(),
+            &ctx.accounts.whirlpool.to_account_info(),
+            &ctx.accounts.position.to_account_info(),
+            &ctx.accounts.tick_array_lower.to_account_info(),
+            &ctx.accounts.tick_array_upper.to_account_info(),
         )?;
 
         orca_collect_fees(
