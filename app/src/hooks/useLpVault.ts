@@ -432,6 +432,48 @@ export async function computeLpVaultValueUsd(
   return usdA + usdB;
 }
 
+/**
+ * Real, cumulative USD value of trading fees an LP vault has collected via
+ * collect_orca_lp_fees / collect_raydium_lp_fees (see lp_vault.rs's
+ * lifetime_fees_a/lifetime_fees_b — carved out of LpVault's existing padding,
+ * added 2026-09-01). ALL-TIME, same as the safe vaults' lifetime_gains stat: this
+ * only ever goes up, survives full withdrawals, and answers "how much has this
+ * vault ever earned in fees" rather than a point-in-time snapshot.
+ *
+ * These fields already reflect real value directly — collected fees sit as
+ * idle tokens in the vault's own token accounts (or, once auto-compounded via
+ * redeploy_*_lp_liquidity, as added liquidity), never as some other unit needing
+ * a quote — so no protocol-specific math is needed here, unlike
+ * computeLpVaultValueUsd above.
+ */
+export async function computeLpVaultLifetimeFeesUsd(
+  connection: Connection,
+  lpVaultAddress: string,
+  solPrice: number
+): Promise<number> {
+  const provider = new anchor.AnchorProvider(
+    connection,
+    { publicKey: PublicKey.default, signTransaction: async (t: any) => t, signAllTransactions: async (t: any) => t } as any,
+    { commitment: "confirmed" }
+  );
+  const program = new anchor.Program(IDL as any, provider);
+  const raw: any = await (program.account as any)["lpVault"].fetch(new PublicKey(lpVaultAddress));
+
+  const tokenAMint = raw.tokenAMint as PublicKey;
+  const tokenBMint = raw.tokenBMint as PublicKey;
+  const [mintA, mintB] = await Promise.all([getMint(connection, tokenAMint), getMint(connection, tokenBMint)]);
+  const isSolA = tokenAMint.equals(NATIVE_MINT);
+  const isSolB = tokenBMint.equals(NATIVE_MINT);
+
+  const feesA = raw.lifetimeFeesA as anchor.BN | undefined;
+  const feesB = raw.lifetimeFeesB as anchor.BN | undefined;
+  const uiA = feesA ? Number(feesA.toString()) / Math.pow(10, mintA.decimals) : 0;
+  const uiB = feesB ? Number(feesB.toString()) / Math.pow(10, mintB.decimals) : 0;
+  const usdA = isSolA ? uiA * solPrice : uiA;
+  const usdB = isSolB ? uiB * solPrice : uiB;
+  return usdA + usdB;
+}
+
 export function useLpVault() {
   const { connection } = useConnection();
   const { publicKey, signTransaction } = useWallet();
