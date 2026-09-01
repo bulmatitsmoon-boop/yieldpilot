@@ -97,6 +97,16 @@ pub struct LpVault {
     pub bump:                     u8,
     pub authority_bump:           u8,
     pub name:                     String,
+    /// Lifetime raw token amounts collected from Orca/Raydium swap fees and
+    /// immediately re-deployed back into the position (auto-compound, same model
+    /// the safe vaults already use for lending yield — no separate per-user claim,
+    /// share value just reflects it). Added 2026-08-27 alongside collect_*_lp_fees;
+    /// only ever increases, survives exits/reopens, so it answers "how much has
+    /// this position actually earned" the same way Vault.lifetime_gains does for
+    /// the safe vaults. Carved out of the existing padding below — no realloc
+    /// needed, LpVault::LEN is unchanged.
+    pub lifetime_fees_a:          u64,
+    pub lifetime_fees_b:          u64,
 }
 
 impl LpVault {
@@ -109,7 +119,8 @@ impl LpVault {
         + 2         // paused + position_active
         + 2         // bumps
         + 4 + 32    // name
-        + 64;       // padding for future fields
+        + 8 * 2     // lifetime_fees_a, lifetime_fees_b
+        + 48;       // padding for future fields (was 64; 16 spent on the two fields above)
 }
 
 /// Per-user LP position ledger — mirrors UserPosition's cost-basis-tracking
@@ -222,6 +233,7 @@ fn calculate_withdraw_liquidity(shares: u64, total_liquidity: u128, total_shares
 #[event] pub struct LpPositionExited   { pub lp_vault: Pubkey, pub liquidity_removed: u128 }
 #[event] pub struct LpPositionReopened { pub lp_vault: Pubkey, pub tick_lower_index: i32, pub tick_upper_index: i32 }
 #[event] pub struct LpLiquidityRedeployed { pub lp_vault: Pubkey, pub liquidity_amount: u128 }
+#[event] pub struct LpFeesCollected    { pub lp_vault: Pubkey, pub fees_a: u64, pub fees_b: u64 }
 
 pub mod orca_lp {
     //! Orca Whirlpool-specific LP vault instructions.
@@ -1077,6 +1089,91 @@ pub mod orca_lp {
         v.total_liquidity = v.total_liquidity.checked_add(liquidity_amount).ok_or(LpVaultError::MathOverflow)?;
 
         emit!(LpLiquidityRedeployed { lp_vault: lp_vault_key, liquidity_amount });
+        Ok(())
+    }
+
+    /// Harvest accrued swap fees from the position and immediately redeploy them as
+    /// added liquidity — auto-compound, same model Vault::compound already uses for
+    /// safe-vault lending yield. No separate per-user claim: share value simply
+    /// reflects the compounded fees from here on.
+    ///
+    /// Reuses RedeployOrcaLpLiquidity's account set as-is: collect_fees needs exactly
+    /// the same accounts increase_liquidity does (position, whirlpool, vault token
+    /// accounts, token_vault_a/b, token_program), so no new Accounts struct is needed.
+    ///
+    /// Two CPIs, in order:
+    ///  1. decrease_liquidity with liquidity_amount=0 — Orca only checkpoints
+    ///     fee_owed_a/b onto the position when a liquidity-modifying instruction runs;
+    ///     a zero-amount decrease is the standard way to sync fees without touching
+    ///     principal (see orca_collect_fees's own doc comment on this).
+    ///  2. collect_fees — transfers the now-checkpointed fee_owed_a/b out of the
+    ///     position into the vault's own token accounts.
+    ///
+    /// The collected amount is measured directly from the vault token accounts'
+    /// balance delta (not trusted from any CPI return value) — reading real state
+    /// before/after is the same principle every other balance-sensitive handler in
+    /// this program already follows.
+    pub fn collect_orca_lp_fees_handler(ctx: Context<RedeployOrcaLpLiquidity>) -> Result<()> {
+        let lp_vault_key = ctx.accounts.lp_vault.key();
+        let authority_bump = ctx.accounts.lp_vault.authority_bump;
+        let seeds: &[&[u8]] = &[b"lp_vault_authority", lp_vault_key.as_ref(), &[authority_bump]];
+
+        let balance_a_before = ctx.accounts.vault_token_a_account.amount;
+        let balance_b_before = ctx.accounts.vault_token_b_account.amount;
+
+        orca_decrease_liquidity(
+            CpiContext::new_with_signer(
+                ctx.accounts.whirlpool_program.to_account_info(),
+                OrcaModifyLiquidity {
+                    vault_authority:      ctx.accounts.vault_authority.to_account_info(),
+                    whirlpool:            ctx.accounts.whirlpool.to_account_info(),
+                    token_program:        ctx.accounts.token_program.clone(),
+                    position_authority:   ctx.accounts.vault_authority.to_account_info(),
+                    position:             ctx.accounts.position.to_account_info(),
+                    position_token_account: (*ctx.accounts.position_token_account).clone(),
+                    token_owner_account_a: (*ctx.accounts.vault_token_a_account).clone(),
+                    token_owner_account_b: (*ctx.accounts.vault_token_b_account).clone(),
+                    token_vault_a:        ctx.accounts.token_vault_a.to_account_info(),
+                    token_vault_b:        ctx.accounts.token_vault_b.to_account_info(),
+                    tick_array_lower:     ctx.accounts.tick_array_lower.to_account_info(),
+                    tick_array_upper:     ctx.accounts.tick_array_upper.to_account_info(),
+                    whirlpool_program:    ctx.accounts.whirlpool_program.to_account_info(),
+                },
+                &[seeds],
+            ),
+            0, 0, 0, seeds,
+        )?;
+
+        orca_collect_fees(
+            CpiContext::new_with_signer(
+                ctx.accounts.whirlpool_program.to_account_info(),
+                OrcaCollectFees {
+                    whirlpool:              ctx.accounts.whirlpool.to_account_info(),
+                    position_authority:     ctx.accounts.vault_authority.to_account_info(),
+                    position:               ctx.accounts.position.to_account_info(),
+                    position_token_account: (*ctx.accounts.position_token_account).clone(),
+                    token_owner_account_a:  (*ctx.accounts.vault_token_a_account).clone(),
+                    token_vault_a:          ctx.accounts.token_vault_a.to_account_info(),
+                    token_owner_account_b:  (*ctx.accounts.vault_token_b_account).clone(),
+                    token_vault_b:          ctx.accounts.token_vault_b.to_account_info(),
+                    token_program:          ctx.accounts.token_program.clone(),
+                    whirlpool_program:      ctx.accounts.whirlpool_program.to_account_info(),
+                },
+                &[seeds],
+            ),
+            seeds,
+        )?;
+
+        ctx.accounts.vault_token_a_account.reload()?;
+        ctx.accounts.vault_token_b_account.reload()?;
+        let fees_a = ctx.accounts.vault_token_a_account.amount.saturating_sub(balance_a_before);
+        let fees_b = ctx.accounts.vault_token_b_account.amount.saturating_sub(balance_b_before);
+
+        let v = &mut ctx.accounts.lp_vault;
+        v.lifetime_fees_a = v.lifetime_fees_a.saturating_add(fees_a);
+        v.lifetime_fees_b = v.lifetime_fees_b.saturating_add(fees_b);
+
+        emit!(LpFeesCollected { lp_vault: lp_vault_key, fees_a, fees_b });
         Ok(())
     }
 }
@@ -2060,6 +2157,73 @@ pub mod raydium_lp {
         v.total_liquidity = v.total_liquidity.checked_add(liquidity_amount).ok_or(LpVaultError::MathOverflow)?;
 
         emit!(LpLiquidityRedeployed { lp_vault: lp_vault_key, liquidity_amount });
+        Ok(())
+    }
+
+    /// Harvest accrued swap fees + reward emissions from the position and immediately
+    /// redeploy them as added liquidity — auto-compound, same model Vault::compound
+    /// already uses for safe-vault lending yield, and the same design as
+    /// collect_orca_lp_fees_handler above.
+    ///
+    /// Unlike Orca (which needs a separate collect_fees CPI), Raydium's own
+    /// decrease_liquidity ALWAYS collects accrued fees and rewards as part of any
+    /// liquidity change — confirmed against Raydium's real source this project
+    /// already read closely for the tick_array_bitmap_extension fix. A liquidity_amount
+    /// of 0 changes no principal but still triggers that same collection, landing the
+    /// harvested tokens directly in the vault's own token accounts. One CPI, not two.
+    ///
+    /// Reuses RedeployRaydiumLpLiquidity's account set as-is — decrease_liquidity needs
+    /// exactly the same accounts increase_liquidity does.
+    pub fn collect_raydium_lp_fees_handler(ctx: Context<RedeployRaydiumLpLiquidity>) -> Result<()> {
+        let lp_vault_key = ctx.accounts.lp_vault.key();
+        let authority_bump = ctx.accounts.lp_vault.authority_bump;
+        let seeds: &[&[u8]] = &[b"lp_vault_authority", lp_vault_key.as_ref(), &[authority_bump]];
+
+        let balance_a_before = ctx.accounts.vault_token_a_account.amount;
+        let balance_b_before = ctx.accounts.vault_token_b_account.amount;
+
+        raydium_decrease_liquidity(
+            CpiContext::new_with_signer(
+                ctx.accounts.raydium_program.to_account_info(),
+                RaydiumModifyLiquidity {
+                    vault_authority:   ctx.accounts.vault_authority.to_account_info(),
+                    nft_account:       (*ctx.accounts.nft_account).clone(),
+                    pool_state:        ctx.accounts.pool_state.to_account_info(),
+                    protocol_position: ctx.accounts.protocol_position.to_account_info(),
+                    personal_position: ctx.accounts.personal_position.to_account_info(),
+                    tick_array_lower:  ctx.accounts.tick_array_lower.to_account_info(),
+                    tick_array_upper:  ctx.accounts.tick_array_upper.to_account_info(),
+                    token_account_0:   (*ctx.accounts.vault_token_a_account).clone(),
+                    token_account_1:   (*ctx.accounts.vault_token_b_account).clone(),
+                    token_vault_0:     ctx.accounts.token_vault_0.to_account_info(),
+                    token_vault_1:     ctx.accounts.token_vault_1.to_account_info(),
+                    token_program:     ctx.accounts.token_program.clone(),
+                    raydium_program:   ctx.accounts.raydium_program.to_account_info(),
+                },
+                &[seeds],
+            )
+            // Same as withdraw_raydium_lp_handler: forward this instruction's own
+            // remaining_accounts (reward vault + recipient pairs, set up client-side)
+            // plus tick_array_bitmap_extension, which decrease_liquidity finds by key
+            // match anywhere in this list.
+            .with_remaining_accounts({
+                let mut accs = ctx.remaining_accounts.to_vec();
+                accs.push(ctx.accounts.tick_array_bitmap_extension.to_account_info());
+                accs
+            }),
+            0, 0, 0, seeds,
+        )?;
+
+        ctx.accounts.vault_token_a_account.reload()?;
+        ctx.accounts.vault_token_b_account.reload()?;
+        let fees_a = ctx.accounts.vault_token_a_account.amount.saturating_sub(balance_a_before);
+        let fees_b = ctx.accounts.vault_token_b_account.amount.saturating_sub(balance_b_before);
+
+        let v = &mut ctx.accounts.lp_vault;
+        v.lifetime_fees_a = v.lifetime_fees_a.saturating_add(fees_a);
+        v.lifetime_fees_b = v.lifetime_fees_b.saturating_add(fees_b);
+
+        emit!(LpFeesCollected { lp_vault: lp_vault_key, fees_a, fees_b });
         Ok(())
     }
 }
