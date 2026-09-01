@@ -215,6 +215,316 @@
       "args": []
     },
     {
+      "name": "collect_orca_lp_fees",
+      "docs": [
+        "Harvest accrued Orca swap fees and immediately redeploy them as added",
+        "liquidity — keeper-only, no user-facing \"claim\" step. See",
+        "collect_orca_lp_fees_handler's doc comment for the full mechanism."
+      ],
+      "discriminator": [
+        101,
+        247,
+        112,
+        208,
+        47,
+        58,
+        24,
+        44
+      ],
+      "accounts": [
+        {
+          "name": "keeper",
+          "signer": true
+        },
+        {
+          "name": "lp_vault",
+          "writable": true
+        },
+        {
+          "name": "vault_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "lp_vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_token_a_account",
+          "writable": true
+        },
+        {
+          "name": "vault_token_b_account",
+          "writable": true
+        },
+        {
+          "name": "whirlpool",
+          "writable": true
+        },
+        {
+          "name": "position",
+          "writable": true
+        },
+        {
+          "name": "position_token_account"
+        },
+        {
+          "name": "token_vault_a",
+          "writable": true
+        },
+        {
+          "name": "token_vault_b",
+          "writable": true
+        },
+        {
+          "name": "tick_array_lower",
+          "writable": true
+        },
+        {
+          "name": "tick_array_upper",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "whirlpool_program",
+          "address": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "collect_raydium_lp_fees",
+      "docs": [
+        "Harvest accrued Raydium swap fees + reward emissions and immediately redeploy",
+        "them as added liquidity — keeper-only, no user-facing \"claim\" step. See",
+        "collect_raydium_lp_fees_handler's doc comment for the full mechanism."
+      ],
+      "discriminator": [
+        206,
+        250,
+        133,
+        15,
+        178,
+        110,
+        198,
+        248
+      ],
+      "accounts": [
+        {
+          "name": "keeper",
+          "signer": true
+        },
+        {
+          "name": "lp_vault",
+          "writable": true
+        },
+        {
+          "name": "vault_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "lp_vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_token_a_account",
+          "writable": true
+        },
+        {
+          "name": "vault_token_b_account",
+          "writable": true
+        },
+        {
+          "name": "nft_account"
+        },
+        {
+          "name": "pool_state",
+          "writable": true
+        },
+        {
+          "name": "protocol_position",
+          "docs": [
+            "the protocol position's accumulators; a CPI cannot escalate a read-only",
+            "account to writable."
+          ],
+          "writable": true
+        },
+        {
+          "name": "personal_position",
+          "writable": true
+        },
+        {
+          "name": "tick_array_lower",
+          "writable": true
+        },
+        {
+          "name": "tick_array_upper",
+          "writable": true
+        },
+        {
+          "name": "token_vault_0",
+          "writable": true
+        },
+        {
+          "name": "token_vault_1",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "raydium_program",
+          "address": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH"
+        },
+        {
+          "name": "tick_array_bitmap_extension",
+          "docs": [
+            "See DepositRaydiumLp's identical field — increase_liquidity has the same",
+            "remaining_accounts[0] requirement as open_position."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108,
+                  95,
+                  116,
+                  105,
+                  99,
+                  107,
+                  95,
+                  97,
+                  114,
+                  114,
+                  97,
+                  121,
+                  95,
+                  98,
+                  105,
+                  116,
+                  109,
+                  97,
+                  112,
+                  95,
+                  101,
+                  120,
+                  116,
+                  101,
+                  110,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool_state"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                184,
+                152,
+                151,
+                52,
+                252,
+                179,
+                140,
+                145,
+                104,
+                216,
+                83,
+                199,
+                83,
+                182,
+                184,
+                164,
+                54,
+                16,
+                205,
+                211,
+                37,
+                175,
+                187,
+                199,
+                47,
+                212,
+                21,
+                54,
+                219,
+                205,
+                194,
+                88
+              ]
+            }
+          }
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "compound",
       "discriminator": [
         165,
@@ -4987,6 +5297,19 @@
       ]
     },
     {
+      "name": "LpFeesCollected",
+      "discriminator": [
+        208,
+        126,
+        62,
+        199,
+        117,
+        158,
+        108,
+        232
+      ]
+    },
+    {
       "name": "LpLiquidityRedeployed",
       "discriminator": [
         184,
@@ -5401,6 +5724,26 @@
       }
     },
     {
+      "name": "LpFeesCollected",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "lp_vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "fees_a",
+            "type": "u64"
+          },
+          {
+            "name": "fees_b",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
       "name": "LpLiquidityRedeployed",
       "type": {
         "kind": "struct",
@@ -5626,6 +5969,24 @@
           {
             "name": "name",
             "type": "string"
+          },
+          {
+            "name": "lifetime_fees_a",
+            "docs": [
+              "Lifetime raw token amounts collected from Orca/Raydium swap fees and",
+              "immediately re-deployed back into the position (auto-compound, same model",
+              "the safe vaults already use for lending yield — no separate per-user claim,",
+              "share value just reflects it). Added 2026-08-27 alongside collect_*_lp_fees;",
+              "only ever increases, survives exits/reopens, so it answers \"how much has",
+              "this position actually earned\" the same way Vault.lifetime_gains does for",
+              "the safe vaults. Carved out of the existing padding below — no realloc",
+              "needed, LpVault::LEN is unchanged."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "lifetime_fees_b",
+            "type": "u64"
           }
         ]
       }
