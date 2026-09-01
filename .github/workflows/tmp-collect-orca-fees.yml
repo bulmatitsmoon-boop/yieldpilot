@@ -14,10 +14,12 @@ jobs:
           node-version: "20"
       - name: Install deps
         run: npm install @solana/web3.js@1 --no-audit --no-fund
-      - name: Write keeper keypair
-        run: echo "$KEEPER_KEYPAIR_JSON" > /tmp/keeper.json
+      - name: Write admin/deploy keypair (this vault's keeper field == the admin wallet)
+        run: |
+          pip3 install --quiet base58
+          python3 scripts/decode_deploy_key.py /tmp/keeper.json
         env:
-          KEEPER_KEYPAIR_JSON: ${{ secrets.KEEPER_KEYPAIR_JSON }}
+          SOLANA_DEPLOY_KEY: ${{ secrets.SOLANA_DEPLOY_KEY }}
       - name: Collect Orca LP fees
         run: node scripts/tmp-collect-orca-fees-once.js
         env:
