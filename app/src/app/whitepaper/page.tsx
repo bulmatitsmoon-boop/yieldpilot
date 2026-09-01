@@ -275,7 +275,6 @@ export default function Whitepaper() {
               ["Phase 1", "Admin / keeper wallet separation", "Complete"],
               ["Phase 1", "Mainnet launch with $YPILOT token gating", "Pending"],
               ["Phase 2", "Third-party smart contract audit", "Planned, pending demonstrated demand"],
-              ["Phase 2", "Referral system — earn a share of referred yield fees", "Planned"],
               ["Phase 2", "Orca / Raydium LP integration", "Planned — opt-in only, carries impermanent loss risk"],
               ["Phase 3", "Cross-chain deposits via Wormhole", "Research"],
               ["Phase 3", "Auto-bridge to highest cross-chain yield", "Research"],
