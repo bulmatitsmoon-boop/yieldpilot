@@ -150,7 +150,7 @@ const RAYDIUM_CLMM_PROGRAM_ID = new PublicKey(
 // MarginFi is intentionally not integrated — see apyFetcher.ts for why
 // (their SDK cannot decode their own current mainnet state).
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────���────────────────────────────────────
 // Types mirroring the on-chain Vault account
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -641,7 +641,7 @@ export class SolanaClient {
     );
   }
 
-  // ── Kamino SOL ────────────────────────────────────────────────────────────
+  // ── Kamino SOL ───────────────────────────────────────────���────────────────
 
   async deployToKaminoSol(
     vaultAddress: string,
@@ -1596,6 +1596,70 @@ export class SolanaClient {
     return { openSig, redeploySig: null, liquidity: "0" };
   }
 
+  /**
+   * Sweep accrued Orca swap fees into the vault's own idle token accounts and record
+   * them in lifetime_fees_a/b (see lp_vault.rs's collect_orca_lp_fees_handler — added
+   * 2026-09-01, the fee half of the auto-compound model: your share value goes up
+   * over time, no separate per-user claim). Does NOT redeploy the collected tokens
+   * back into the position as added liquidity — that is a separate, deliberately
+   * uncoupled step (repositionLpVault's redeploy half), so a failed/skipped redeploy
+   * never blocks fees from being collected and recorded.
+   *
+   * Raydium is NOT wired here yet — unlike Orca, it's unverified whether Raydium's
+   * decrease_liquidity(0) hits the same zero-liquidity rejection Orca's did (see
+   * collect_orca_lp_fees_handler's fix history), and this project's own hard lesson
+   * this session is to prove that against a real transaction before shipping it, not
+   * guess. Raydium vaults are skipped with a log line, not silently no-op'd.
+   */
+  async collectLpFees(lpVaultAddress: string): Promise<string | null> {
+    const lpVaultPubkey = new PublicKey(lpVaultAddress);
+    const vault = await this.fetchLpVault(lpVaultAddress);
+    const isRaydium = "raydium" in (vault.protocol as any);
+
+    if (isRaydium) {
+      logger.debug("  collectLpFees: Raydium not wired yet — skipping", { lpVaultAddress });
+      return null;
+    }
+
+    const [vaultAuthorityPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("lp_vault_authority"), lpVaultPubkey.toBuffer()],
+      this.program.programId
+    );
+
+    const poolInfo = await this.connection.getAccountInfo(vault.pool);
+    if (!poolInfo) throw new Error(`Pool account not found: ${vault.pool.toBase58()}`);
+
+    const { tickSpacing } = await this.readPoolTickCurrent(vault);
+    const { tokenVaultA, tokenVaultB } = this.readWhirlpoolVaults(poolInfo.data);
+    const { tickArrayLower, tickArrayUpper } = getPositionTickArrays(
+      vault.pool, vault.tickLowerIndex, vault.tickUpperIndex, tickSpacing, WHIRLPOOL_PROGRAM_ID
+    );
+
+    return this.sendWithRetry(
+      () =>
+        this.program.methods
+          .collectOrcaLpFees()
+          .accountsPartial({
+            keeper: this.keeper.publicKey,
+            lpVault: lpVaultPubkey,
+            vaultAuthority: vaultAuthorityPda,
+            vaultTokenAAccount: vault.vaultTokenAAccount,
+            vaultTokenBAccount: vault.vaultTokenBAccount,
+            whirlpool: vault.pool,
+            position: vault.position,
+            positionTokenAccount: vault.positionTokenAccount,
+            tokenVaultA,
+            tokenVaultB,
+            tickArrayLower,
+            tickArrayUpper,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            whirlpoolProgram: WHIRLPOOL_PROGRAM_ID,
+          })
+          .rpc(),
+      `collectOrcaLpFees(${lpVaultAddress.slice(0, 8)}...)`
+    );
+  }
+
   async exitLpPosition(lpVaultAddress: string): Promise<string | null> {
     const lpVaultPubkey = new PublicKey(lpVaultAddress);
     const vault = await this.fetchLpVault(lpVaultAddress);
@@ -1702,4 +1766,5 @@ export class SolanaClient {
 function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
+
 
