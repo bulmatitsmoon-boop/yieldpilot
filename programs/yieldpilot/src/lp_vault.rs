@@ -2174,7 +2174,7 @@ pub mod raydium_lp {
     ///
     /// Reuses RedeployRaydiumLpLiquidity's account set as-is — decrease_liquidity needs
     /// exactly the same accounts increase_liquidity does.
-    pub fn collect_raydium_lp_fees_handler(ctx: Context<RedeployRaydiumLpLiquidity>) -> Result<()> {
+    pub fn collect_raydium_lp_fees_handler<'info>(ctx: Context<'_, '_, '_, 'info, RedeployRaydiumLpLiquidity<'info>>) -> Result<()> {
         let lp_vault_key = ctx.accounts.lp_vault.key();
         let authority_bump = ctx.accounts.lp_vault.authority_bump;
         let seeds: &[&[u8]] = &[b"lp_vault_authority", lp_vault_key.as_ref(), &[authority_bump]];
