@@ -1,0 +1,28 @@
+name: TMP - Collect Orca LP Fees Once
+on:
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install deps
+        run: npm install @solana/web3.js@1 --no-audit --no-fund
+      - name: Write keeper keypair
+        run: echo "$KEEPER_KEYPAIR_JSON" > /tmp/keeper.json
+        env:
+          KEEPER_KEYPAIR_JSON: ${{ secrets.KEEPER_KEYPAIR_JSON }}
+      - name: Collect Orca LP fees
+        run: node scripts/tmp-collect-orca-fees-once.js
+        env:
+          RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
+          KEEPER_KEYPAIR_PATH: /tmp/keeper.json
+      - name: Clean up keypair
+        if: always()
+        run: rm -f /tmp/keeper.json
