@@ -6,6 +6,7 @@ import { fmtTvl } from "@/components/ui";
 interface Props {
   totalDeposited: number; // real, in USD-equivalent
   blendedApy: number | null; // real; null => no live rate available, render "—"
+  lpFeesEarnedUsd?: number; // real, all-time LP trading fees collected; omitted/0 if no LP vaults configured
 }
 
 // Deterministic pseudo-random placement so dots don't jump around on re-render,
@@ -17,7 +18,7 @@ function dotPosition(i: number, radius: number) {
   return { x: 140 + r * Math.cos(rad), y: 140 + r * Math.sin(rad) };
 }
 
-export function FleetRadar({ totalDeposited, blendedApy }: Props) {
+export function FleetRadar({ totalDeposited, blendedApy, lpFeesEarnedUsd }: Props) {
   const { activePositions, recentActivity, totalGainedUsd, lifetimeGainedUsd, loading } = useFleetStats();
 
   return (
@@ -89,6 +90,14 @@ export function FleetRadar({ totalDeposited, blendedApy }: Props) {
               // ever goes up and survives full withdrawals — it answers "how much has
               // this ever earned", not "how much is earning right now".
               { value: lifetimeGainedUsd === null ? "—" : fmtTvl(lifetimeGainedUsd), label: "All-time gained" },
+              // Real, all-time LP trading fees collected via collect_orca_lp_fees /
+              // collect_raydium_lp_fees — proof the LP vaults are actually earning
+              // fees, not just holding a position exposed to impermanent loss.
+              // Undefined (not shown) when no LP vaults are configured at all;
+              // 0 once configured but nothing collected yet.
+              ...(lpFeesEarnedUsd === undefined ? [] : [
+                { value: fmtTvl(lpFeesEarnedUsd), label: "LP fees earned" },
+              ]),
             ].map(({ value, label }) => (
               <div key={label} style={{ background: "var(--ink-800)", border: "1px solid var(--line)", borderRadius: 10, padding: "16px 18px" }}>
                 <div className="mono-num" style={{ fontSize: 22, fontWeight: 500, color: "var(--text-hi)" }}>{value}</div>
@@ -131,4 +140,5 @@ export function FleetRadar({ totalDeposited, blendedApy }: Props) {
     </div>
   );
 }
+
 
