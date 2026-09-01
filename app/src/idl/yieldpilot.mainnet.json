@@ -4434,6 +4434,39 @@
       ]
     },
     {
+      "name": "set_lp_keeper",
+      "docs": [
+        "Admin-only: point an LP vault's `keeper` field at a different wallet. See",
+        "SetLpKeeper's doc comment for why this needed adding after the fact."
+      ],
+      "discriminator": [
+        195,
+        255,
+        74,
+        201,
+        136,
+        30,
+        81,
+        123
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "lp_vault",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "new_keeper",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
       "name": "set_paused",
       "discriminator": [
         91,
