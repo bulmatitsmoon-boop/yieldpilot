@@ -59,7 +59,13 @@ const DEFAULT_SLIPPAGE_BPS = 100; // 1%, matching /lp
 // initialize_orca_lp_vault_handler / initialize_raydium_lp_vault_handler in lp_vault.rs.
 const LP_SHARES_DECIMALS = 9;
 
-interface WithdrawQuoteDisplay { tokenMinA: anchor.BN; tokenMinB: anchor.BN; }
+// idleA/idleB are DISPLAY-ONLY (the vault's idle balance — where collected-but-not-
+// yet-redeployed LP fees sit — added on top of the deployed-position quote for the
+// "you'll receive" text). NEVER add them into tokenMinA/tokenMinB: those two are
+// forwarded as-is into the on-chain CPI's slippage floor, which only ever covers the
+// deployed position — inflating them makes the real (smaller) payout fail
+// TokenMinSubceeded. Confirmed live 2026-09-01. See getWithdrawQuote's own comment.
+interface WithdrawQuoteDisplay { tokenMinA: anchor.BN; tokenMinB: anchor.BN; idleA?: anchor.BN; idleB?: anchor.BN; }
 
 // Real symbols for the two mints every configured LP vault actually uses, so the UI can
 // say "SOL" / "USDC" instead of the vague "Token A" / "Token B" that comes straight out of
@@ -277,7 +283,13 @@ export default function PortfolioPage() {
           ? await getRaydiumWithdrawQuote(lpInfo.address, rawShares, DEFAULT_SLIPPAGE_BPS)
           : await getWithdrawQuote(lpInfo.address, rawShares, DEFAULT_SLIPPAGE_BPS);
         if (cancelled) return;
-        setWithdrawQuote({ tokenMinA: new anchor.BN(q.tokenMinA.toString()), tokenMinB: new anchor.BN(q.tokenMinB.toString()) });
+        const qAny = q as any;
+        setWithdrawQuote({
+          tokenMinA: new anchor.BN(q.tokenMinA.toString()),
+          tokenMinB: new anchor.BN(q.tokenMinB.toString()),
+          idleA: qAny.idleA !== undefined ? new anchor.BN(qAny.idleA.toString()) : undefined,
+          idleB: qAny.idleB !== undefined ? new anchor.BN(qAny.idleB.toString()) : undefined,
+        });
       } catch {
         if (!cancelled) setWithdrawQuote(null);
       } finally {
@@ -621,7 +633,7 @@ export default function PortfolioPage() {
                     withdrawQuoteLoading
                       ? "Calculating payout…"
                       : withdrawQuote
-                        ? `You'll receive at least ~${formatBaseUnitsToDecimal(withdrawQuote.tokenMinA.toString(), lpInfo.tokenADecimals)} ${symbolForMint(lpInfo.tokenAMint)} + ~${formatBaseUnitsToDecimal(withdrawQuote.tokenMinB.toString(), lpInfo.tokenBDecimals)} ${symbolForMint(lpInfo.tokenBMint)}`
+                        ? `You'll receive at least ~${formatBaseUnitsToDecimal(withdrawQuote.tokenMinA.add(withdrawQuote.idleA ?? new anchor.BN(0)).toString(), lpInfo.tokenADecimals)} ${symbolForMint(lpInfo.tokenAMint)} + ~${formatBaseUnitsToDecimal(withdrawQuote.tokenMinB.add(withdrawQuote.idleB ?? new anchor.BN(0)).toString(), lpInfo.tokenBDecimals)} ${symbolForMint(lpInfo.tokenBMint)}`
                         : "Couldn't get a live quote — try a different amount."
                   )}
                 </div>
