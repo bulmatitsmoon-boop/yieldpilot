@@ -1,0 +1,30 @@
+name: TMP - Set LP Keeper Once
+on:
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install deps
+        run: npm install @solana/web3.js@1 --no-audit --no-fund
+      - name: Write admin/deploy keypair
+        run: |
+          pip3 install --quiet base58
+          python3 scripts/decode_deploy_key.py /tmp/admin.json
+        env:
+          SOLANA_DEPLOY_KEY: ${{ secrets.SOLANA_DEPLOY_KEY }}
+      - name: Set LP keeper
+        run: node scripts/tmp-set-lp-keeper-once.js
+        env:
+          RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
+          ADMIN_KEYPAIR_PATH: /tmp/admin.json
+      - name: Clean up keypair
+        if: always()
+        run: rm -f /tmp/admin.json
