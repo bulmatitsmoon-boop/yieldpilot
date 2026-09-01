@@ -193,7 +193,7 @@ function getTickArrayPda(whirlpool: PublicKey, tickIndex: number, tickSpacing: n
   return address;
 }
 
-// ── Raydium CLMM pool decoding ──────────────────────────────────────────────
+// ── Raydium CLMM pool decoding ──────────────��───────────────────────────────
 // Manual byte-offset decode, same rationale as decodeWhirlpool above (avoid
 // pulling in @raydium-io/raydium-sdk-v2's full PoolInfoLayout just to read
 // one account). Offsets extracted directly from that package's own compiled
@@ -736,6 +736,19 @@ export function useLpVault() {
         const tokenMinA = new anchor.BN(quote.tokenMinA.toString());
         const tokenMinB = new anchor.BN(quote.tokenMinB.toString());
 
+        // A withdraw needs somewhere to RECEIVE tokenA/tokenB — on this wallet's very
+        // first withdraw (no prior deposit/swap ever created these ATAs), they don't
+        // exist yet and the on-chain transfer fails with AccountNotInitialized. No
+        // wrapping needed here (we're receiving, not sending native SOL in), so pass 0
+        // as the required amount — ensureAtaAndWrapIfNativeIxs's idempotent create
+        // instruction still runs, its wrap-top-up path just never fires.
+        const zero = new anchor.BN(0);
+        const preIxs = [
+          ...(await ensureAtaAndWrapIfNativeIxs(connection, publicKey, tokenAMint, zero)),
+          ...(await ensureAtaAndWrapIfNativeIxs(connection, publicKey, tokenBMint, zero)),
+          createAssociatedTokenAccountIdempotentInstruction(publicKey, userSharesAccount, publicKey, sharesMint),
+        ];
+
         const ix = await program.methods
           .withdrawOrcaLp(shares, tokenMinA, tokenMinB)
           .accountsPartial({
@@ -761,7 +774,7 @@ export function useLpVault() {
           })
           .instruction();
 
-        return sendLpV0(connection, { publicKey, signTransaction: signTransaction! }, [ix]);
+        return sendLpV0(connection, { publicKey, signTransaction: signTransaction! }, [...preIxs, ix]);
       });
     },
     [publicKey, signTransaction, wrapTx, fetchLpDepositContext, connection]
