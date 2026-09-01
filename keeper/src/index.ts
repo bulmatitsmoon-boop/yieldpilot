@@ -61,7 +61,7 @@ const stats: KeeperStats = {
   lastLpCheck: null,
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────��────────────────
 // Core keeper jobs
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -171,6 +171,21 @@ async function runLpVaultCheck(client: SolanaClient) {
     if (state.paused) {
       logger.info("  Paused — skipping");
       continue;
+    }
+
+    // Fee collection is independent of the reposition decision below — it should
+    // run every cycle regardless of whether the position needs to move. A failure
+    // here (e.g. this vault's on-chain `keeper` field isn't actually this bot's
+    // wallet — true for the first hand-deployed Orca vault, whose keeper is the
+    // admin wallet, not this key) is logged and does not block the reposition
+    // check that follows.
+    if (state.positionActive) {
+      try {
+        const sig = await client.collectLpFees(address);
+        if (sig) logger.info(`  ✓ Fees collected`, { signature: sig });
+      } catch (err: any) {
+        logger.warn(`  Fee collection skipped: ${err.message}`);
+      }
     }
 
     let tickCurrent: number;
@@ -327,7 +342,7 @@ async function main() {
     }
   });
 
-  // ── Run immediately on startup ────────────────────────────────────────────
+  // ── Run immediately on startup ───────────────────────────────────────────���
   logger.info("Running initial checks...");
   try {
     await runApyPollAndRebalance(client);
@@ -363,3 +378,4 @@ main().catch(err => {
   logger.error("Fatal error", { error: err.message });
   process.exit(1);
 });
+
