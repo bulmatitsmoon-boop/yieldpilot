@@ -27,7 +27,7 @@ const WHIRLPOOL_PROGRAM = new PublicKey('whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uc
   const keeperPath = process.env.KEEPER_KEYPAIR_PATH;
   const secretKey = Uint8Array.from(JSON.parse(fs.readFileSync(keeperPath, 'utf8')));
   const keeper = Keypair.fromSecretKey(secretKey);
-  console.log('keeper pubkey:', keeper.publicKey.toBase58());
+  console.log('signer pubkey:', keeper.publicKey.toBase58());
 
   const conn = new Connection(rpcUrl, 'confirmed');
 
