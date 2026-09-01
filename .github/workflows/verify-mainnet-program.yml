@@ -17,17 +17,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install solana-verify
-        run: cargo install solana-verify
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin
+          key: ${{ runner.os }}-cargo-solana-verify-v1
 
-      - name: Verify against repo (submits to OtterSec for independent Docker rebuild + comparison)
+      - name: Install solana-verify
         run: |
-          solana-verify verify-from-repo \
-            --remote \
-            -u https://api.mainnet-beta.solana.com \
-            --program-id 3tAEmHXZ51YVLe9ts8b9cMcgQPgaSamLxLtxR31VpREi \
-            https://github.com/bulmatitsmoon-boop/yieldpilot \
-            --commit-hash ${{ github.event.inputs.commit_hash }} \
-            --library-name yieldpilot \
-            --mount-path programs/yieldpilot \
-            -- --features mainnet,no-idl
+          if ! command -v solana-verify &> /dev/null; then
+            cargo install solana-verify
+          fi
+
+      - name: Print solana-verify help (so we know the real current flags)
+        run: |
+          solana-verify verify-from-repo --help
+          echo '---remote submit-job help---'
+          solana-verify remote submit-job --help || true
+          echo '---remote help---'
+          solana-verify remote --help || true
