@@ -241,6 +241,33 @@ pub mod orca_lp {
 
     // ── Account contexts ──────────────────────────────────────────────────
 
+    /// Protocol-agnostic despite living in this module (LpVault.keeper is shared by
+    /// both Orca and Raydium vaults) — placed here rather than a new top-level
+    /// section purely to match the existing pattern of every LP instruction living
+    /// inside one of the two protocol modules.
+    ///
+    /// WHY THIS EXISTS: LpVault never had a keeper setter (unlike the main Vault
+    /// type's set_keeper), so a vault's `keeper` field was fixed forever at
+    /// whatever init_*_lp_vault was called with. The first hand-created Orca vault
+    /// (2026-08-27) was initialized with keeper == admin for convenience during
+    /// testing — meaning the actual keeper bot's wallet (see keeper-cron.yml) gets
+    /// Unauthorized on every collect_orca_lp_fees / redeploy_orca_lp_liquidity call
+    /// against it, confirmed live 2026-09-01. This lets an existing vault be pointed
+    /// at the real keeper wallet after the fact instead of only at init time.
+    #[derive(Accounts)]
+    pub struct SetLpKeeper<'info> {
+        #[account(constraint = admin.key() == lp_vault.admin @ LpVaultError::Unauthorized)]
+        pub admin: Signer<'info>,
+
+        #[account(mut)]
+        pub lp_vault: Box<Account<'info, LpVault>>,
+    }
+
+    pub fn set_lp_keeper_handler(ctx: Context<SetLpKeeper>, new_keeper: Pubkey) -> Result<()> {
+        ctx.accounts.lp_vault.keeper = new_keeper;
+        Ok(())
+    }
+
     #[derive(Accounts)]
     #[instruction(params: InitLpVaultParams)]
     pub struct InitializeOrcaLpVault<'info> {
