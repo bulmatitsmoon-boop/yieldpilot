@@ -1,0 +1,38 @@
+name: Verify Mainnet Program Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_hash:
+        description: 'Exact commit that was actually deployed to mainnet'
+        required: true
+        default: '71e9e2af8360d5dbbd5795a76ba0ac78c75d69ca'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.86.0"
+
+      - name: Install solana-verify
+        run: cargo install solana-verify
+
+      - name: Verify against repo (submits to OtterSec for independent Docker rebuild + comparison)
+        run: |
+          solana-verify verify-from-repo \
+            --remote \
+            -u https://api.mainnet-beta.solana.com \
+            --program-id 3tAEmHXZ51YVLe9ts8b9cMcgQPgaSamLxLtxR31VpREi \
+            https://github.com/bulmatitsmoon-boop/yieldpilot \
+            --commit-hash ${{ github.event.inputs.commit_hash }} \
+            --library-name yieldpilot \
+            --mount-path programs/yieldpilot \
+            -- --features mainnet,no-idl
