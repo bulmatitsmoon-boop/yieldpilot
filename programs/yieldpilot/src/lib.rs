@@ -1834,6 +1834,13 @@ pub mod yieldpilot {
         redeploy_orca_lp_liquidity_handler(ctx, liquidity_amount, token_max_a, token_max_b)
     }
 
+    /// Harvest accrued Orca swap fees and immediately redeploy them as added
+    /// liquidity — keeper-only, no user-facing "claim" step. See
+    /// collect_orca_lp_fees_handler's doc comment for the full mechanism.
+    pub fn collect_orca_lp_fees(ctx: Context<RedeployOrcaLpLiquidity>) -> Result<()> {
+        collect_orca_lp_fees_handler(ctx)
+    }
+
     // ── LP vault (Raydium CLMM) — mirrors the Orca instructions above using
     // Raydium's own accounts/CPI (see lp_vault.rs's raydium_lp submodule and
     // adapters/raydium.rs for the protocol-specific differences). ──────────
@@ -1891,6 +1898,13 @@ pub mod yieldpilot {
         token_max_b: u64,
     ) -> Result<()> {
         redeploy_raydium_lp_liquidity_handler(ctx, liquidity_amount, token_max_a, token_max_b)
+    }
+
+    /// Harvest accrued Raydium swap fees + reward emissions and immediately redeploy
+    /// them as added liquidity — keeper-only, no user-facing "claim" step. See
+    /// collect_raydium_lp_fees_handler's doc comment for the full mechanism.
+    pub fn collect_raydium_lp_fees<'info>(ctx: Context<'_, '_, '_, 'info, RedeployRaydiumLpLiquidity<'info>>) -> Result<()> {
+        collect_raydium_lp_fees_handler(ctx)
     }
 
 }
