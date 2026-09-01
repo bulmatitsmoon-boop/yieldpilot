@@ -20,12 +20,20 @@ exec solana-test-validator \
   --clone So11111111111111111111111111111111111111112 \
   --clone EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v \
   --account 5gXt4YTqgDyzfL4zMErMRGB47gi1N6VAywowAsCAGEac /root/localval/usdc_ata.json \
-  --clone 4W47R82p72U1Nc2NvisATodthbCi4BFnT9cgDK8npfZF \
-  --clone HME5BJtcqSa2Y1sLPXrftqZ9HRwKV4bGhnw41qw5Leka \
-  --clone ChxrcGgr1UNLhgE6bge26EQRwDzbv9Q6co5ea12no6JP \
-  --clone 2s4eJvC4t2oscWNFDw4sZShL3SfB3Zifmr6R8Qayp7mU \
-  --clone DXi5Z4FeJKHm4kcZPdmfoWSkJG7sj5s3wrvnpxy3DAny \
-  --clone 65cUCgkA4THMitgKTyatqDnKHPSytxkt5GGJ1VMVNarC \
-  --clone 8Rs3qKaVGBndwNdeDqHcayatonVzdBrdYoq27CKyjuE7 \
+  # Tick arrays covering the position range + swap-routing span around the
+  # LIVE mainnet tick at the time this list was last refreshed (2026-09-01,
+  # tick_current -22844). MUST be refreshed again whenever this script starts
+  # failing with a Whirlpool CPI error immediately after a deposit/swap (e.g.
+  # "account not owned by the executing program") — that means the pool has
+  # moved far enough that these addresses no longer cover the range the
+  # harness's live-tick-derived TICK_LOWER/TICK_UPPER computes. Regenerate by
+  # deriving tick_array PDAs for arrayStart(tickCurrent) +/- {0,1,2}*352 off
+  # the pool's current on-chain tick_current, then verify each one actually
+  # exists on mainnet before swapping in — do not guess.
+  --clone 7T6JQngtMoLfPoxT6ZpbzY1uGiWkGPgwLC2vR1sTjPsn \
+  --clone 7ayWKntkc7zDBSUHQPjBKexQRzGf9XUgCiSZN1xj6Bey \
+  --clone Dsb9ogdvNLTtefz48ZBb6XUewrsHGmwQ82W8RMiQc5E1 \
+  --clone 32wMhfqGgeaftnPacPR6pqBPL3agbd7to1oUsqo6y14F \
+  --clone 8NPFeBD52yqJWnsmBNma9qXXGEjXa6WatYcLMXjzSeyK \
   --ledger "$LEDGER" \
   --reset --quiet
