@@ -288,7 +288,7 @@ pub enum HolderTier { Gold, Silver, Bronze, None }
 pub mod yieldpilot {
     use super::*;
 
-    // ── Vault lifecycle ───────────────────────────────────────────────────────
+    // ── Vault lifecycle ────────────────────────────────────────────────────���──
 
     pub fn initialize_vault(ctx: Context<InitializeVault>, params: InitVaultParams) -> Result<()> {
         require!(params.name.len() <= 32, VaultError::NameTooLong);
@@ -1839,6 +1839,12 @@ pub mod yieldpilot {
     /// collect_orca_lp_fees_handler's doc comment for the full mechanism.
     pub fn collect_orca_lp_fees(ctx: Context<RedeployOrcaLpLiquidity>) -> Result<()> {
         collect_orca_lp_fees_handler(ctx)
+    }
+
+    /// Admin-only: point an LP vault's `keeper` field at a different wallet. See
+    /// SetLpKeeper's doc comment for why this needed adding after the fact.
+    pub fn set_lp_keeper(ctx: Context<SetLpKeeper>, new_keeper: Pubkey) -> Result<()> {
+        set_lp_keeper_handler(ctx, new_keeper)
     }
 
     // ── LP vault (Raydium CLMM) — mirrors the Orca instructions above using
