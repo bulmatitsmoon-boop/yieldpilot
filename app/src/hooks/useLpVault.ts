@@ -727,15 +727,42 @@ export function useLpVault() {
 
       // Dynamic import, browser-only — see the top-of-file build note.
       const { decreaseLiquidityQuote } = await import("@orca-so/whirlpools-core");
-      return decreaseLiquidityQuote(
+      const quote = decreaseLiquidityQuote(
         liquidityDelta,
         slippageToleranceBps,
         whirlpoolInfo.sqrtPrice,
         tickLowerIndex,
         tickUpperIndex
       );
+
+      // decreaseLiquidityQuote only covers the DEPLOYED position. The actual withdraw
+      // instruction also pays out a pro-rata slice of the vault's IDLE token balance —
+      // shares represent a claim on the whole vault, not just the deployed position
+      // (see withdraw_orca_lp_handler's own idle_a/idle_b comment). Collected-but-not-
+      // yet-redeployed fees (collect_orca_lp_fees) sit in idle balance, so without this
+      // the quote silently undercounts what the user actually receives — confirmed live
+      // 2026-09-01, a real dust-position quote came back missing ~$1 of just-collected
+      // fees. Uses the PRE-withdraw share count, matching the handler exactly.
+      const [vaultABalance, vaultBBalance] = await Promise.all([
+        connection.getTokenAccountBalance(raw.vaultTokenAAccount as PublicKey).catch(() => null),
+        connection.getTokenAccountBalance(raw.vaultTokenBAccount as PublicKey).catch(() => null),
+      ]);
+      const idleA = vaultABalance
+        ? (BigInt(vaultABalance.value.amount) * BigInt(shares.toString())) / totalShares
+        : 0n;
+      const idleB = vaultBBalance
+        ? (BigInt(vaultBBalance.value.amount) * BigInt(shares.toString())) / totalShares
+        : 0n;
+
+      return {
+        ...quote,
+        tokenEstA: quote.tokenEstA + idleA,
+        tokenEstB: quote.tokenEstB + idleB,
+        tokenMinA: quote.tokenMinA + idleA,
+        tokenMinB: quote.tokenMinB + idleB,
+      };
     },
-    [fetchLpDepositContext]
+    [fetchLpDepositContext, connection]
   );
 
   /**
