@@ -41,6 +41,15 @@ jobs:
         working-directory: keeper
         run: npm ci
 
+      # WAS `npx ts-node src/run_once.ts` — ts-node re-transpiles the entire keeper source
+      # tree from scratch on EVERY single cron tick (every ~30 min, forever), paying that
+      # cost repeatedly for code that only actually changes on a push. A one-time `tsc`
+      # build + running the plain compiled JS is the same output, done once per run instead
+      # of the transpile-on-every-invocation tax ts-node adds on top of that.
+      - name: Build keeper
+        working-directory: keeper
+        run: npm run build
+
       - name: Write keeper keypair
         working-directory: keeper
         run: echo "$KEEPER_KEYPAIR_JSON" > keeper.json
@@ -48,8 +57,9 @@ jobs:
           KEEPER_KEYPAIR_JSON: ${{ secrets.KEEPER_KEYPAIR_JSON }}
 
       - name: Run single keeper cycle
+        id: run_cycle
         working-directory: keeper
-        run: npx ts-node src/run_once.ts
+        run: node dist/run_once.js
         env:
           RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
           KEEPER_KEYPAIR_PATH: ./keeper.json
@@ -79,8 +89,15 @@ jobs:
       # depositWatcher.ts) so consecutive runs never re-announce the same deposit,
       # and never miss one either. Same auto-commit pattern build.yml already uses
       # for IDL syncing — no new secret/Redis dependency needed.
+      #
+      # WAS `if: always()` — committed whatever the state files looked like even after
+      # a FAILED cycle (a thrown exception mid-run, an RPC outage, etc.), which can
+      # persist a half-written or inconsistent state file as if it were a normal
+      # checkpoint. Gated on the run step's own outcome now: a failed cycle's state
+      # changes (if any were even written) are simply left uncommitted for the next
+      # run to reconcile naturally, rather than baked in as truth.
       - name: Commit deposit-watch + epoch-entry state
-        if: always()
+        if: steps.run_cycle.outcome == 'success'
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "chore: update keeper state [skip ci]"
