@@ -49,8 +49,15 @@ jobs:
       - name: Build and export verify PDA transaction
         env:
           MAINNET_RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
+          # solana-verify shells out to a plain `git clone` internally, which fails
+          # silently-ish on a PRIVATE repo with no credentials (confirmed live
+          # 2026-09-02: worked from a local machine with a cached git credential
+          # helper, failed on a clean CI runner with none). The default
+          # GITHUB_TOKEN (auto-scoped to this repo, auto-expires) embedded in the
+          # clone URL fixes this without needing the long-lived PAT.
+          REPO_URL: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
         run: |
-          solana-verify export-pda-tx https://github.com/${{ github.repository }} \
+          solana-verify export-pda-tx "${REPO_URL}" \
             --program-id 3tAEmHXZ51YVLe9ts8b9cMcgQPgaSamLxLtxR31VpREi \
             --uploader 8i7kydJHwi3Cdp46Xugyux2vWJmTScYDvnJrBiBihBnP \
             --commit-hash ${{ github.event.inputs.commit_hash }} \
