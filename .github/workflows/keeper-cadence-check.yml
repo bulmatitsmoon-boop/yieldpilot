@@ -1,14 +1,24 @@
 name: Keeper Cadence Check
 
 # Self-hosted watchdog: measures how often the keeper ACTUALLY runs and alerts Telegram on
-# drift. Runs on GitHub, needs no laptop or app open. Quiet when healthy.
+# drift OR total silence. Runs on GitHub, needs no laptop or app open. Quiet when healthy.
 #
-# Scheduled once a day on a low-contention minute. A daily check is enough to catch a
-# sustained cadence problem without adding meaningful Actions-minutes (this is a private
-# repo capped at 2000 min/month — the keeper itself is the main consumer).
+# WAS once a day — that meant a total keeper outage (e.g. the cron-job.org pinger dying)
+# could go undetected for up to ~24h, on top of the script itself never having checked for
+# "nothing has run recently" in the first place (fixed 2026-09-02 — see the .mjs script's
+# own comments for that half of the story). Bumped to hourly here as the other half of the
+# fix: a watchdog that only checks once a day defeats the point of alerting fast.
+#
+# STILL RELIES on GitHub's native `schedule:` trigger, which this repo's own keeper-cron.yml
+# documents as unreliable under load (best-effort, can silently skip ticks) — exactly the
+# failure mode this workflow exists to catch in the KEEPER. The honest fix is the same one
+# keeper-cron.yml already uses: an external pinger (cron-job.org, free) hitting THIS
+# workflow's `workflow_dispatch` REST endpoint on its own schedule, so the watchdog's own
+# trigger doesn't depend on the thing it's least sure about. Not yet set up — needs a
+# cron-job.org account action, which isn't something this session can do on its own.
 on:
   schedule:
-    - cron: "23 13 * * *"
+    - cron: "17 * * * *"
   workflow_dispatch: {}
 
 permissions:
@@ -24,7 +34,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - name: Measure keeper cadence, alert on drift
+      - name: Measure keeper cadence, alert on drift or total silence
         env:
           GH_TOKEN: ${{ github.token }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
