@@ -21,7 +21,13 @@ const KEEPER_WORKFLOW = "keeper-cron.yml";
 // Thresholds. Alert when the typical gap is well past hourly, or any single gap is very long.
 const AVG_ALERT_MIN = 90;
 const MAX_ALERT_MIN = 180;
-const SAMPLE = 12; // last N landed runs
+const SAMPLE = 24; // last N landed runs — doubled alongside the hourly schedule bump below
+
+// SEPARATE threshold for total-outage detection (see below) — this is deliberately its
+// own constant, not reused from MAX_ALERT_MIN, because it answers a different question
+// ("has anything run recently at all?") from the historical-gap stats, which only ever
+// look at gaps AMONG runs that already exist in history.
+const SILENCE_ALERT_MIN = 90;
 
 async function gh(path) {
   const r = await fetch(`https://api.github.com${path}`, {
@@ -49,8 +55,44 @@ const times = (runs.workflow_runs || [])
   .map((r) => new Date(r.created_at).getTime())
   .sort((a, b) => a - b);
 
+// ── Total-outage check — runs BEFORE the "not enough history" bailout below, and
+// independently of it, on purpose. ─────────────────────────────────────────────
+//
+// THE BUG THIS FIXES: if the external cron-job.org pinger dies entirely, this
+// workflow's own /runs query keeps returning the SAME stale historical runs
+// forever — their gaps among each other are still ~30m (from back when the
+// keeper was healthy), so the old gap-only check below stayed silent through a
+// total outage. It could only ever alert on DEGRADED cadence, never on a full
+// stop, because it never compared anything to wall-clock "now". Confirmed live
+// 2026-09-02: this was the exact blind spot.
+//
+// Fix: independently check how long it's been since the MOST RECENT run,
+// against actual current time — this catches "nothing has run in N minutes"
+// regardless of what history looks like, including a fresh repo with zero
+// prior runs (an empty `times` array still has a well-defined "infinite" gap
+// here, which correctly alerts rather than silently exiting like the old
+// `times.length < 3` bailout used to for a brand-new or fully-stalled keeper).
+const now = Date.now();
+const lastRunAt = times.length > 0 ? times[times.length - 1] : null;
+const silenceMin = lastRunAt === null ? Infinity : Math.round((now - lastRunAt) / 60000);
+
+if (silenceMin > SILENCE_ALERT_MIN) {
+  const desc = lastRunAt === null
+    ? "no keeper runs found at all"
+    : `last run was ${silenceMin}m ago (at ${new Date(lastRunAt).toISOString()})`;
+  await telegram(
+    `🚨 <b>Keeper appears STOPPED</b>\n` +
+      `${desc} — that's past the ${SILENCE_ALERT_MIN}m silence threshold.\n` +
+      `This usually means the cron-job.org pinger died, not just a slow gap — check ` +
+      `https://github.com/${REPO}/actions/workflows/${KEEPER_WORKFLOW} directly.`
+  );
+  console.log(`SILENCE ALERT sent: ${desc}`);
+  process.exit(0);
+}
+console.log(`Last run ${silenceMin === Infinity ? "never" : silenceMin + "m ago"} — within the ${SILENCE_ALERT_MIN}m silence threshold.`);
+
 if (times.length < 3) {
-  console.log(`Only ${times.length} runs found — not enough to measure cadence yet.`);
+  console.log(`Only ${times.length} runs found — not enough to measure cadence drift yet (silence check above still applies).`);
   process.exit(0);
 }
 
