@@ -1,12 +1,11 @@
 name: Verify Mainnet Program Build
-
 on:
   workflow_dispatch:
     inputs:
       commit_hash:
         description: 'Exact commit that was actually deployed to mainnet'
         required: true
-        default: '71e9e2af8360d5dbbd5795a76ba0ac78c75d69ca'
+        default: '4502f6e3766467f412065c927c0f77995075204e'
 
 permissions:
   contents: read
@@ -14,6 +13,7 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-22.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -32,10 +32,48 @@ jobs:
             cargo install solana-verify
           fi
 
-      - name: Print solana-verify help (so we know the real current flags)
+      - name: Install Node deps for the signing step
+        run: npm install @solana/web3.js@1 bs58@5 --no-audit --no-fund
+
+      - name: Write deploy authority keypair from base58 secret
+        env:
+          SOLANA_DEPLOY_KEY: ${{ secrets.SOLANA_DEPLOY_KEY }}
         run: |
-          solana-verify verify-from-repo --help
-          echo '---remote submit-job help---'
-          solana-verify remote submit-job --help || true
-          echo '---remote help---'
-          solana-verify remote --help || true
+          pip3 install --quiet base58
+          python3 scripts/decode_deploy_key.py /tmp/deploy-authority.json
+
+      # Deterministic docker build + hash comparison + generate the (unsigned) verify
+      # PDA init transaction, all in one step so the blockhash inside it stays fresh
+      # right up until we sign and submit it a few seconds later — no staleness gap
+      # from a human needing to click "Run workflow" at an arbitrary later time.
+      - name: Build and export verify PDA transaction
+        env:
+          MAINNET_RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
+        run: |
+          solana-verify export-pda-tx https://github.com/${{ github.repository }} \
+            --program-id 3tAEmHXZ51YVLe9ts8b9cMcgQPgaSamLxLtxR31VpREi \
+            --uploader 8i7kydJHwi3Cdp46Xugyux2vWJmTScYDvnJrBiBihBnP \
+            --commit-hash ${{ github.event.inputs.commit_hash }} \
+            --library-name yieldpilot --mount-path programs/yieldpilot \
+            -u "${MAINNET_RPC_URL}" \
+            -- --features mainnet,no-idl \
+            | tail -1 > /tmp/verify_tx_base58.txt
+          echo "Transaction length: $(wc -c < /tmp/verify_tx_base58.txt)"
+
+      - name: Sign and submit the verify PDA transaction
+        env:
+          RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
+          ADMIN_KEYPAIR_PATH: /tmp/deploy-authority.json
+        run: |
+          export VERIFY_TX_BASE58=$(cat /tmp/verify_tx_base58.txt)
+          node scripts/tmp-submit-verify-pda-tx.js
+
+      - name: Queue the remote OtterSec verification worker
+        run: |
+          solana-verify remote submit-job \
+            --program-id 3tAEmHXZ51YVLe9ts8b9cMcgQPgaSamLxLtxR31VpREi \
+            --uploader 8i7kydJHwi3Cdp46Xugyux2vWJmTScYDvnJrBiBihBnP || true
+
+      - name: Clean up keypair
+        if: always()
+        run: rm -f /tmp/deploy-authority.json /tmp/verify_tx_base58.txt
