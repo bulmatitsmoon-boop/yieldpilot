@@ -94,27 +94,29 @@ async function runApyPollAndRebalance(client: SolanaClient) {
 }
 
 async function runCompound(client: SolanaClient) {
-  logger.info("── Compound check ──");
+  logger.info("Compound check (on-chain heartbeat disabled, see comment)");
+  // WAS calling client.compound(address) here on a real interval. Removed entirely
+  // 2026-09-02, not just re-labeled (an earlier pass only softened the log/Telegram
+  // wording -- this stops the actual on-chain call).
+  //
+  // compound() is not a stub worth paying for: it does nothing but advance
+  // last_compound_ts and emit an event. Confirmed by reading every reference to
+  // last_compound_ts in lib.rs directly, not assumed -- the ONLY things that read or
+  // write it are compound()'s own init and its own rate-limit check; nothing else
+  // on-chain consumes it, and no frontend file references it either (checked, not
+  // guessed). There is genuinely nothing to compound on any current protocol:
+  // Marinade/Jito LST exchange rates and Kamino/Solend receipt-token values
+  // appreciate on their own, and that yield is realized into total_deposits on
+  // recall (settle_recall) -- not by this instruction.
+  //
+  // Net effect of the old behavior: a real transaction fee, roughly every hour,
+  // forever, for a state write nothing reads. Removing the call is strictly better
+  // than continuing to pay it. The on-chain instruction itself is left in place
+  // (harmless, just unused) rather than requiring a program upgrade to delete it.
   const vaults = await client.fetchAllVaults();
   for (const { address, state } of vaults) {
     const { compound, reason } = shouldCompound(state);
-    logger.info(`Vault ${address.slice(0, 8)}...: ${reason}`);
-    if (compound) {
-      // compound() is a heartbeat, not a real compounding action — it only advances
-      // last_compound_ts (which feeds the dashboard's "last compounded Xm ago" label)
-      // and emits an event. There is nothing to compound: LST/kToken exchange rates
-      // appreciate on their own, and that yield is realized into total_deposits on
-      // recall (settle_recall), not here. Sending "🔄 Compounded" every hour told
-      // users their yield was compounded when nothing happened — misleading, and it
-      // was costing a real fee for a no-op on top of that. Keep calling it (the
-      // dashboard timer still needs last_compound_ts to move), just stop claiming a
-      // result nothing about this instruction actually produces.
-      logger.info("  Sending compound heartbeat transaction...");
-      const sig = await client.compound(address);
-      if (sig) {
-        logger.info("  ✓ Compound heartbeat sent (no-op by design — yield realizes on recall)", { signature: sig });
-      }
-    }
+    logger.debug(`Vault ${address.slice(0, 8)}...: ${reason} (compound call disabled)`, { wouldHaveCompounded: compound });
   }
 }
 
