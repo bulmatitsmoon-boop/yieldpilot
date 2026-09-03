@@ -241,13 +241,14 @@ pub mod lp_vault;
 pub use lp_vault::*;
 pub use lp_vault::orca_lp::*;
 pub use lp_vault::raydium_lp::*;
+pub use lp_vault::lending_lp::*;
 
 // Program ID differs by network — devnet and mainnet are separate deployments
 // with separate addresses (the devnet address was never usable on mainnet;
 // see project memory for why). PDA derivations implicitly use this ID, so it
 // must match whichever address the binary is actually deployed to.
 #[cfg(not(feature = "mainnet"))]
-declare_id!("8c7Boyk91MWkn5jabf5CnYD8DrG6p4hYm9eDdAAWXEKH");
+declare_id!("F6u2k8fnFxs55eVQscZjKjxCob7FNqQvT1zLTgxJEqUf");
 #[cfg(feature = "mainnet")]
 declare_id!("3tAEmHXZ51YVLe9ts8b9cMcgQPgaSamLxLtxR31VpREi");
 
@@ -1911,6 +1912,16 @@ pub mod yieldpilot {
     /// collect_raydium_lp_fees_handler's doc comment for the full mechanism.
     pub fn collect_raydium_lp_fees<'info>(ctx: Context<'_, '_, '_, 'info, RedeployRaydiumLpLiquidity<'info>>) -> Result<()> {
         collect_raydium_lp_fees_handler(ctx)
+    }
+
+    // -- LP idle-capital lending backstop (Phase 1, USDC leg only) -- see
+    // lp_vault.rs's lending_lp module docs.
+    pub fn deploy_lp_idle_b_to_solend(ctx: Context<DeployLpIdleBToSolend>, amount: u64) -> Result<()> {
+        deploy_lp_idle_b_to_solend_handler(ctx, amount)
+    }
+
+    pub fn recall_lp_idle_b_from_solend(ctx: Context<RecallLpIdleBFromSolend>, collateral_amount: u64) -> Result<()> {
+        recall_lp_idle_b_from_solend_handler(ctx, collateral_amount)
     }
 
 }
