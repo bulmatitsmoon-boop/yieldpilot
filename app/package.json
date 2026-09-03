@@ -9,7 +9,8 @@
     "lint": "next lint",
     "type-check": "tsc --noEmit",
     "verify:lp-math": "node scripts/verify-lp-math.mjs",
-    "verify:split-deposit": "node scripts/verify-split-deposit.mjs"
+    "verify:split-deposit": "node scripts/verify-split-deposit.mjs",
+    "postinstall": "node scripts/patch-bigint-buffer.js"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.31.0",
