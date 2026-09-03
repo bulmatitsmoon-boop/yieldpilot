@@ -29,7 +29,7 @@ export function RoutingVisual({ bestName, bestApy, runnerUpName }: Props) {
         {/* Runner-up path (dashed, dim) */}
         {runnerUpName && (
           <path
-            d="M 60 70 C 180 70, 220 118, 340 118"
+            d="M 60 70 C 180 70, 220 112, 340 112"
             fill="none"
             stroke="var(--line)"
             strokeWidth="1.5"
@@ -69,12 +69,20 @@ export function RoutingVisual({ bestName, bestApy, runnerUpName }: Props) {
           {bestName}
         </text>
 
-        {/* Runner-up node */}
+        {/* Runner-up node. Labeled "0%" explicitly — the dashed line + visible dot alone
+            read as "some smaller share routes here," a leftover metaphor from the old
+            80/20 split. Routing is winner-take-all now: this protocol gets funded only
+            if it overtakes the current best by more than the drift threshold. Mirrors
+            the "100%" the winner shows in the allocation bar below, so the two together
+            read as a real 100/0 split, not 80/20. */}
         {runnerUpName && (
           <>
-            <circle cx="340" cy="118" r="4" fill="var(--signal-dim)" opacity="0.6" />
-            <text x="340" y="133" textAnchor="middle" fontSize="10" fill="var(--text-mid)" fontFamily="var(--font-mono)">
+            <circle cx="340" cy="112" r="4" fill="var(--signal-dim)" opacity="0.6" />
+            <text x="340" y="126" textAnchor="middle" fontSize="10" fill="var(--text-mid)" fontFamily="var(--font-mono)">
               {runnerUpName}
+            </text>
+            <text x="340" y="138" textAnchor="middle" fontSize="9" fill="var(--text-low)" fontFamily="var(--font-mono)">
+              0% · monitored
             </text>
           </>
         )}
