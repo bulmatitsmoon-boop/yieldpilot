@@ -32,12 +32,10 @@ jobs:
         env:
           MAINNET_RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
         run: |
+          solana config set --keypair /tmp/deploy-authority.json --url "$MAINNET_RPC_URL"
           solana program set-upgrade-authority 3tAEmHXZ51YVLe9ts8b9cMcgQPgaSamLxLtxR31VpREi \
             --upgrade-authority /tmp/deploy-authority.json \
-            --new-upgrade-authority "${{ github.event.inputs.new_authority }}" \
-            --fee-payer /tmp/deploy-authority.json \
-            --keypair /tmp/deploy-authority.json \
-            --url "$MAINNET_RPC_URL"
+            --new-upgrade-authority "${{ github.event.inputs.new_authority }}"
 
       - name: Clean up keypair
         if: always()
