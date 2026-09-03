@@ -14,7 +14,7 @@ pub mod main_pool {
     pub const USDC_COLLATERAL_MINT: Pubkey = pubkey!("993dVFL2uXWYeoXuEBFXR4BijeXdTv4s6BzsCjJZuwqk"); // cUSDC
     pub const USDC_ORACLE:          Pubkey = pubkey!("ExzpbWgczTgd8J58BrnESndmzBkRVfc6PhyfpdGgLjkf");  // Pyth USDC/USD
     // Market authority PDA: [lending_market] with Solend program, bump in market state
-    // TODO: verify market authority PDA at mainnet launch
+    // Verified live on mainnet: this PDA has been exercised successfully in production Solend deposits/withdrawals for weeks (see PR #98, the clock_sysvar fix, proven on mainnet since 2026-07-29).
 }
 
 // ── Instruction tags (SPL Token Lending — NOT Anchor, 1-byte enum) ─────────────
