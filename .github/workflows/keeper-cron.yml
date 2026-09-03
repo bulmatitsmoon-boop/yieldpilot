@@ -10,18 +10,23 @@ name: Keeper Cron
 # detect or retry from inside the workflow itself.
 #
 # Fix (2026-08-03): an external pinger (cron-job.org, free) calls this workflow's
-# `workflow_dispatch` REST endpoint every 30 minutes instead. That endpoint is the ONLY
-# trigger now. Re-adding a `schedule:` block alongside it would just cause DOUBLE the
-# invocations (one flaky native tick + one reliable external ping, independently), burning
-# extra Actions-minutes against the 2000/month private-repo cap for zero reliability benefit —
-# the external ping alone already provides the real cadence.
+# `workflow_dispatch` REST endpoint every 30 minutes. That's still the PRIMARY cadence —
+# a native `schedule:` firing every 30m alongside it would double every invocation for
+# zero benefit, exactly as the reasoning above always said.
 #
-# If the external pinger is ever removed/lost, this workflow reverts to only running when
-# someone manually clicks "Run workflow" — there is no automatic fallback. Check
-# keeper-cadence-check.yml's Telegram alerts (or the Actions run history directly) if the
-# keeper ever seems to have gone quiet.
+# ADDED 2026-09-03: a single low-frequency native `schedule:` tick, purely as a dead-
+# pinger backstop — not a cadence driver. If cron-job.org is the keeper's ONLY trigger
+# and it dies silently, the keeper stops entirely with no automatic recovery (this was a
+# real, named gap, not hypothetical). At 3 hours this barely overlaps a healthy 30m
+# pinger (one native tick lands sometime within each 3h window a normal pinger already
+# covered ~6 times over) and costs a small, bounded number of extra Actions-minutes
+# against the 2000/month private-repo cap — the tradeoff is worth it specifically because
+# the alternative is a total, silent stop with no fallback until keeper-cadence-check
+# alerts (up to an hour later) AND someone acts on it.
 on:
   workflow_dispatch: {}
+  schedule:
+    - cron: "7 */3 * * *"
 permissions:
   contents: write
 jobs:
