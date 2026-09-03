@@ -127,6 +127,32 @@ jobs:
           pip3 install --quiet base58
           python3 scripts/decode_deploy_key.py /tmp/deploy-authority.json
 
+      # Same 10240-byte minimum-extend workaround the mainnet deploy step already has
+      # (see its own comment below for the full story) -- devnet never had this, and a
+      # comment-only program change tripped it live 2026-09-03 (a 2616-byte gap, well
+      # under the 10240 floor). Devnet failures cost nothing but a wasted CI cycle, but
+      # there's no reason to leave the same known bug unfixed on this path too.
+      - name: Extend devnet program account if needed (works around Solana's 10240-byte minimum extend)
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.network == 'devnet')
+        env:
+          DEVNET_RPC_URL: ${{ secrets.DEVNET_RPC_URL }}
+        run: |
+          solana config set --keypair /tmp/deploy-authority.json --url "${DEVNET_RPC_URL}"
+          CURRENT_LEN=$(solana program show 8c7Boyk91MWkn5jabf5CnYD8DrG6p4hYm9eDdAAWXEKH | awk -F'[ (]' '/Data Length:/{print $3}')
+          if [ -z "$CURRENT_LEN" ]; then
+            echo "Could not determine current program length -- failing loudly instead of silently skipping the extend."
+            exit 1
+          fi
+          NEW_LEN=$(stat -c%s target/deploy/yieldpilot.so)
+          echo "current on-chain capacity: $CURRENT_LEN bytes, new binary: $NEW_LEN bytes"
+          if [ "$NEW_LEN" -gt "$CURRENT_LEN" ]; then
+            EXTEND_BY=$(( NEW_LEN - CURRENT_LEN > 10240 ? NEW_LEN - CURRENT_LEN : 10240 ))
+            echo "extending program account by $EXTEND_BY bytes first"
+            solana program extend 8c7Boyk91MWkn5jabf5CnYD8DrG6p4hYm9eDdAAWXEKH "$EXTEND_BY" --keypair /tmp/deploy-authority.json --url "${DEVNET_RPC_URL}"
+          else
+            echo "binary fits in current capacity, no extend needed"
+          fi
+
       - name: Deploy to devnet
         if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.network == 'devnet')
         env:
