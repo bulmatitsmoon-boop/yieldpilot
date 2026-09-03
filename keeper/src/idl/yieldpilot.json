@@ -1,5 +1,5 @@
 {
-  "address": "8c7Boyk91MWkn5jabf5CnYD8DrG6p4hYm9eDdAAWXEKH",
+  "address": "F6u2k8fnFxs55eVQscZjKjxCob7FNqQvT1zLTgxJEqUf",
   "metadata": {
     "name": "yieldpilot",
     "version": "0.1.0",
@@ -547,6 +547,168 @@
         }
       ],
       "args": []
+    },
+    {
+      "name": "deploy_lp_idle_b_to_solend",
+      "discriminator": [
+        86,
+        24,
+        136,
+        127,
+        142,
+        202,
+        18,
+        169
+      ],
+      "accounts": [
+        {
+          "name": "keeper",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "lp_vault",
+          "writable": true
+        },
+        {
+          "name": "vault_authority",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "lp_vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_token_b_account",
+          "writable": true
+        },
+        {
+          "name": "lending_receipt_b",
+          "docs": [
+            "The vault's own cUSDC receipt account -- a PDA this program controls,",
+            "created on first use. Never keeper-supplied."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  95,
+                  108,
+                  101,
+                  110,
+                  100,
+                  105,
+                  110,
+                  103,
+                  95,
+                  114,
+                  101,
+                  99,
+                  101,
+                  105,
+                  112,
+                  116,
+                  95,
+                  98
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "lp_vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "reserve",
+          "writable": true
+        },
+        {
+          "name": "reserve_liquidity_supply",
+          "writable": true
+        },
+        {
+          "name": "reserve_collateral_mint",
+          "writable": true
+        },
+        {
+          "name": "lending_market"
+        },
+        {
+          "name": "lending_market_authority"
+        },
+        {
+          "name": "pyth_oracle"
+        },
+        {
+          "name": "switchboard_oracle"
+        },
+        {
+          "name": "clock_sysvar",
+          "address": "SysvarC1ock11111111111111111111111111111111"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
+        },
+        {
+          "name": "tx_instructions_sysvar",
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        },
+        {
+          "name": "solend_program",
+          "address": "So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
     },
     {
       "name": "deploy_to_kamino",
@@ -3882,6 +4044,153 @@
       ]
     },
     {
+      "name": "recall_lp_idle_b_from_solend",
+      "discriminator": [
+        154,
+        44,
+        102,
+        1,
+        125,
+        25,
+        248,
+        65
+      ],
+      "accounts": [
+        {
+          "name": "keeper",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "lp_vault",
+          "writable": true
+        },
+        {
+          "name": "vault_authority",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "lp_vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "lending_receipt_b",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  95,
+                  108,
+                  101,
+                  110,
+                  100,
+                  105,
+                  110,
+                  103,
+                  95,
+                  114,
+                  101,
+                  99,
+                  101,
+                  105,
+                  112,
+                  116,
+                  95,
+                  98
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "lp_vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_token_b_account",
+          "writable": true
+        },
+        {
+          "name": "reserve",
+          "writable": true
+        },
+        {
+          "name": "reserve_collateral_mint",
+          "writable": true
+        },
+        {
+          "name": "reserve_liquidity_supply",
+          "writable": true
+        },
+        {
+          "name": "lending_market",
+          "writable": true
+        },
+        {
+          "name": "lending_market_authority"
+        },
+        {
+          "name": "pyth_oracle"
+        },
+        {
+          "name": "switchboard_oracle"
+        },
+        {
+          "name": "clock_sysvar",
+          "address": "SysvarC1ock11111111111111111111111111111111"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "tx_instructions_sysvar",
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        },
+        {
+          "name": "solend_program",
+          "address": "So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo"
+        }
+      ],
+      "args": [
+        {
+          "name": "collateral_amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "reconcile",
       "docs": [
         "Snap total_deposits back to what the vault ACTUALLY holds: idle + deployed principal.",
@@ -5343,6 +5652,32 @@
       ]
     },
     {
+      "name": "LpIdleDeployed",
+      "discriminator": [
+        240,
+        227,
+        232,
+        79,
+        197,
+        19,
+        84,
+        200
+      ]
+    },
+    {
+      "name": "LpIdleRecalled",
+      "discriminator": [
+        50,
+        41,
+        84,
+        134,
+        101,
+        154,
+        4,
+        17
+      ]
+    },
+    {
       "name": "LpLiquidityRedeployed",
       "discriminator": [
         184,
@@ -5777,6 +6112,42 @@
       }
     },
     {
+      "name": "LpIdleDeployed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "lp_vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LpIdleRecalled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "lp_vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "collateral_amount",
+            "type": "u64"
+          },
+          {
+            "name": "received",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
       "name": "LpLiquidityRedeployed",
       "type": {
         "kind": "struct",
@@ -6019,6 +6390,20 @@
           },
           {
             "name": "lifetime_fees_b",
+            "type": "u64"
+          },
+          {
+            "name": "lending_deployed_b",
+            "docs": [
+              "Idle-capital lending backstop (added 2026-09-03, see project memory",
+              "project_lp_idle_capital_lending_backstop): raw token amount of the B",
+              "leg (USDC) currently deposited in Solend earning lending yield instead",
+              "of sitting idle. The matching cToken receipt account is a PDA, never",
+              "stored here -- derived from [b\"lp_lending_receipt_b\", lp_vault] --",
+              "so this costs only 8 bytes, not 8+32. A leg is 0 when nothing is",
+              "deployed. Carved from the same padding lifetime_fees_a/b used; no",
+              "realloc needed, LpVault::LEN unchanged."
+            ],
             "type": "u64"
           }
         ]
