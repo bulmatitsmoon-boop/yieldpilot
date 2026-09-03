@@ -302,7 +302,14 @@ async function main() {
 
   const balance = await client.getKeeperBalance();
   logger.info(`Keeper wallet: ${client.keeper.publicKey.toBase58()} (${balance.toFixed(4)} SOL)`);
-  if (balance < 0.02) {
+  // WAS 0.02. The keeper attaches no priority fee anywhere (no setComputeUnitPrice
+  // call in this file), so every transaction only pays the base ~5,000 lamport
+  // (0.000005 SOL) network fee -- 0.02 SOL is ~4,000 transactions' worth, and most
+  // cycles send zero (nothing to rebalance, nothing to redeploy). 0.005 SOL is still
+  // ~1,000 transactions of real runway -- lowered 2026-09-03 at Lloyd's request,
+  // after confirming the old threshold was an arbitrary round number, not something
+  // derived from actual fee costs.
+  if (balance < 0.005) {
     logger.error("Keeper wallet has insufficient SOL for transactions.");
     process.exit(1);
   }
