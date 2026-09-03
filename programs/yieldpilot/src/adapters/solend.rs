@@ -12,7 +12,7 @@ pub mod main_pool {
     pub const USDC_RESERVE:         Pubkey = pubkey!("BgxfHJDzm44T7XG68MYKx7YisTjZu73tVovyZSjJMpmw");
     pub const USDC_LIQUIDITY_SUPPLY:Pubkey = pubkey!("8SheGtsopRUDzdiD6v6BR9a6bqZ9QwywYQY99Fp5meNf");
     pub const USDC_COLLATERAL_MINT: Pubkey = pubkey!("993dVFL2uXWYeoXuEBFXR4BijeXdTv4s6BzsCjJZuwqk"); // cUSDC
-    pub const USDC_ORACLE:          Pubkey = pubkey!("ExzpbWgczTgd8J58BrnESndmzBkRVfc6PhyfpdGgLjkf");  // Pyth USDC/USD
+    pub const USDC_ORACLE:          Pubkey = pubkey!("Dpw1EAVrSB1ibxiDQyTAW6Zip3J4Btk2x4SgApQCeFbX");  // Pyth USDC/USD
     // Market authority PDA: [lending_market] with Solend program, bump in market state
     // Verified live on mainnet: this PDA has been exercised successfully in production Solend deposits/withdrawals for weeks (see PR #98, the clock_sysvar fix, proven on mainnet since 2026-07-29).
 }

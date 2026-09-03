@@ -107,6 +107,15 @@ pub struct LpVault {
     /// needed, LpVault::LEN is unchanged.
     pub lifetime_fees_a:          u64,
     pub lifetime_fees_b:          u64,
+    /// Idle-capital lending backstop (added 2026-09-03, see project memory
+    /// project_lp_idle_capital_lending_backstop): raw token amount of the B
+    /// leg (USDC) currently deposited in Solend earning lending yield instead
+    /// of sitting idle. The matching cToken receipt account is a PDA, never
+    /// stored here -- derived from [b"lp_lending_receipt_b", lp_vault] --
+    /// so this costs only 8 bytes, not 8+32. A leg is 0 when nothing is
+    /// deployed. Carved from the same padding lifetime_fees_a/b used; no
+    /// realloc needed, LpVault::LEN unchanged.
+    pub lending_deployed_b:       u64,
 }
 
 impl LpVault {
@@ -120,7 +129,8 @@ impl LpVault {
         + 2         // bumps
         + 4 + 32    // name
         + 8 * 2     // lifetime_fees_a, lifetime_fees_b
-        + 48;       // padding for future fields (was 64; 16 spent on the two fields above)
+        + 8         // lending_deployed_b
+        + 40;       // padding for future fields (was 48; 8 spent on lending_deployed_b)
 }
 
 /// Per-user LP position ledger — mirrors UserPosition's cost-basis-tracking
@@ -234,6 +244,224 @@ fn calculate_withdraw_liquidity(shares: u64, total_liquidity: u128, total_shares
 #[event] pub struct LpPositionReopened { pub lp_vault: Pubkey, pub tick_lower_index: i32, pub tick_upper_index: i32 }
 #[event] pub struct LpLiquidityRedeployed { pub lp_vault: Pubkey, pub liquidity_amount: u128 }
 #[event] pub struct LpFeesCollected    { pub lp_vault: Pubkey, pub fees_a: u64, pub fees_b: u64 }
+
+pub mod lending_lp {
+    //! Idle-capital lending backstop for the LP vault (Phase 1, USDC leg only).
+    //! See project memory project_lp_idle_capital_lending_backstop for the
+    //! full design and project_lp_fee_collection_missing for why this needed
+    //! Raydium's fee-collection path proven first (repositioning depends on it).
+    //!
+    //! Scope, deliberately minimal for a first cut:
+    //! - Only the B leg (USDC) routes to lending, via the same Solend adapter
+    //!   the main Vault already runs in production. The A leg (SOL) needs
+    //!   Marinade's native-SOL unwrap/rewrap dance (see deploy_to_marinade in
+    //!   lib.rs) -- real extra complexity, deliberately deferred to a follow-up
+    //!   rather than rushed in alongside this.
+    //! - No protocol registry, no multi-protocol choice: always Solend's main
+    //!   USDC pool. The keeper decides how much to deploy/recall each cycle;
+    //!   this instruction pair is the mechanical plumbing, not the policy.
+    //! - The cToken receipt account is a PDA the program itself owns (seeds
+    //!   below), never a keeper-supplied address -- so there's no equivalent
+    //!   of the "vault_receipt_account redirection" risk the main Vault's
+    //!   adapters guard against with an explicit constraint; it cannot be
+    //!   anything other than this exact PDA.
+    use anchor_lang::prelude::*;
+    use anchor_lang::solana_program::sysvar::instructions::ID as INSTRUCTIONS_SYSVAR_ID;
+    use anchor_spl::token::{Mint, Token, TokenAccount};
+    use anchor_spl::associated_token::AssociatedToken;
+
+    use crate::adapters::solend::{
+        SolendDeposit, SolendWithdraw, solend_deposit, solend_withdraw, SOLEND_PROGRAM,
+    };
+    use super::{LpVault, LpVaultError};
+
+    pub const LP_LENDING_RECEIPT_B_SEED: &[u8] = b"lp_lending_receipt_b";
+
+    #[event] pub struct LpIdleDeployed { pub lp_vault: Pubkey, pub amount: u64 }
+    #[event] pub struct LpIdleRecalled { pub lp_vault: Pubkey, pub collateral_amount: u64, pub received: u64 }
+
+    #[derive(Accounts)]
+    pub struct DeployLpIdleBToSolend<'info> {
+        #[account(mut)] pub keeper: Signer<'info>,
+        #[account(mut)]
+        pub lp_vault: Box<Account<'info, LpVault>>,
+        /// CHECK: PDA
+        #[account(mut, seeds = [b"lp_vault_authority", lp_vault.key().as_ref()], bump = lp_vault.authority_bump)]
+        pub vault_authority: UncheckedAccount<'info>,
+        #[account(mut, constraint = vault_token_b_account.key() == lp_vault.vault_token_b_account)]
+        pub vault_token_b_account: Box<Account<'info, TokenAccount>>,
+        /// The vault's own cUSDC receipt account -- a PDA this program controls,
+        /// created on first use. Never keeper-supplied.
+        #[account(
+            init_if_needed, payer = keeper,
+            seeds = [LP_LENDING_RECEIPT_B_SEED, lp_vault.key().as_ref()], bump,
+            token::mint = reserve_collateral_mint, token::authority = vault_authority,
+        )]
+        pub lending_receipt_b: Box<Account<'info, TokenAccount>>,
+        /// CHECK: Solend validates
+        #[account(mut)] pub reserve: UncheckedAccount<'info>,
+        /// CHECK: Solend validates
+        #[account(mut)] pub reserve_liquidity_supply: UncheckedAccount<'info>,
+        #[account(mut)] pub reserve_collateral_mint: Box<Account<'info, Mint>>,
+        /// CHECK: Solend validates
+        pub lending_market: UncheckedAccount<'info>,
+        /// CHECK: Solend validates
+        pub lending_market_authority: UncheckedAccount<'info>,
+        /// CHECK: Pyth oracle
+        pub pyth_oracle: UncheckedAccount<'info>,
+        /// CHECK: Switchboard oracle -- System Program ID when reserve has none configured
+        pub switchboard_oracle: UncheckedAccount<'info>,
+        /// CHECK: clock
+        #[account(address = anchor_lang::solana_program::sysvar::clock::ID)]
+        pub clock_sysvar: UncheckedAccount<'info>,
+        pub token_program: Program<'info, Token>,
+        pub associated_token_program: Program<'info, AssociatedToken>,
+        pub system_program: Program<'info, System>,
+        pub rent: Sysvar<'info, Rent>,
+        /// CHECK: address-constrained to the real sysvar
+        #[account(address = INSTRUCTIONS_SYSVAR_ID)]
+        pub tx_instructions_sysvar: UncheckedAccount<'info>,
+        /// CHECK: Solend program
+        #[account(address = SOLEND_PROGRAM)]
+        pub solend_program: UncheckedAccount<'info>,
+    }
+
+    pub fn deploy_lp_idle_b_to_solend_handler(
+        ctx: Context<DeployLpIdleBToSolend>,
+        amount: u64,
+    ) -> Result<()> {
+        require!(amount > 0, LpVaultError::ZeroAmount);
+        let lv = &mut ctx.accounts.lp_vault;
+        require!(!lv.paused, LpVaultError::LpVaultPaused);
+        require!(
+            ctx.accounts.vault_token_b_account.amount >= amount,
+            LpVaultError::InsufficientIdleBalance
+        );
+
+        let lp_vault_key = lv.key();
+        let seeds: &[&[u8]] = &[b"lp_vault_authority", lp_vault_key.as_ref(), &[lv.authority_bump]];
+
+        solend_deposit(
+            CpiContext::new_with_signer(
+                ctx.accounts.solend_program.to_account_info(),
+                SolendDeposit {
+                    vault_authority:          ctx.accounts.vault_authority.to_account_info(),
+                    vault_token_account:      (*ctx.accounts.vault_token_b_account).clone(),
+                    vault_collateral_account: (*ctx.accounts.lending_receipt_b).clone(),
+                    reserve:                  ctx.accounts.reserve.to_account_info(),
+                    reserve_liquidity_supply: ctx.accounts.reserve_liquidity_supply.to_account_info(),
+                    reserve_collateral_mint:  (*ctx.accounts.reserve_collateral_mint).clone(),
+                    lending_market:           ctx.accounts.lending_market.to_account_info(),
+                    lending_market_authority: ctx.accounts.lending_market_authority.to_account_info(),
+                    pyth_oracle:              ctx.accounts.pyth_oracle.to_account_info(),
+                    switchboard_oracle:       ctx.accounts.switchboard_oracle.to_account_info(),
+                    clock_sysvar:             ctx.accounts.clock_sysvar.to_account_info(),
+                    token_program:            ctx.accounts.token_program.clone(),
+                    solend_program:           ctx.accounts.solend_program.to_account_info(),
+                },
+                &[seeds],
+            ),
+            amount,
+            seeds,
+        )?;
+
+        lv.lending_deployed_b = lv.lending_deployed_b
+            .checked_add(amount).ok_or(LpVaultError::MathOverflow)?;
+        emit!(LpIdleDeployed { lp_vault: lv.key(), amount });
+        Ok(())
+    }
+
+    #[derive(Accounts)]
+    pub struct RecallLpIdleBFromSolend<'info> {
+        #[account(mut)] pub keeper: Signer<'info>,
+        #[account(mut)]
+        pub lp_vault: Box<Account<'info, LpVault>>,
+        /// CHECK: PDA
+        #[account(mut, seeds = [b"lp_vault_authority", lp_vault.key().as_ref()], bump = lp_vault.authority_bump)]
+        pub vault_authority: UncheckedAccount<'info>,
+        #[account(
+            mut,
+            seeds = [LP_LENDING_RECEIPT_B_SEED, lp_vault.key().as_ref()], bump,
+        )]
+        pub lending_receipt_b: Box<Account<'info, TokenAccount>>,
+        #[account(mut, constraint = vault_token_b_account.key() == lp_vault.vault_token_b_account)]
+        pub vault_token_b_account: Box<Account<'info, TokenAccount>>,
+        /// CHECK: Solend validates
+        #[account(mut)] pub reserve: UncheckedAccount<'info>,
+        #[account(mut)] pub reserve_collateral_mint: Box<Account<'info, Mint>>,
+        /// CHECK: Solend validates
+        #[account(mut)] pub reserve_liquidity_supply: UncheckedAccount<'info>,
+        /// CHECK: Solend validates
+        #[account(mut)]
+        pub lending_market: UncheckedAccount<'info>,
+        /// CHECK: Solend validates
+        pub lending_market_authority: UncheckedAccount<'info>,
+        /// CHECK: Pyth oracle
+        pub pyth_oracle: UncheckedAccount<'info>,
+        /// CHECK: Switchboard oracle -- System Program ID when reserve has none configured
+        pub switchboard_oracle: UncheckedAccount<'info>,
+        /// CHECK: clock
+        #[account(address = anchor_lang::solana_program::sysvar::clock::ID)]
+        pub clock_sysvar: UncheckedAccount<'info>,
+        pub token_program: Program<'info, Token>,
+        /// CHECK: address-constrained to the real sysvar
+        #[account(address = INSTRUCTIONS_SYSVAR_ID)]
+        pub tx_instructions_sysvar: UncheckedAccount<'info>,
+        /// CHECK: Solend program
+        #[account(address = SOLEND_PROGRAM)]
+        pub solend_program: UncheckedAccount<'info>,
+    }
+
+    pub fn recall_lp_idle_b_from_solend_handler(
+        ctx: Context<RecallLpIdleBFromSolend>,
+        collateral_amount: u64,
+    ) -> Result<()> {
+        require!(collateral_amount > 0, LpVaultError::ZeroAmount);
+        let lv = &mut ctx.accounts.lp_vault;
+
+        let lp_vault_key = lv.key();
+        let seeds: &[&[u8]] = &[b"lp_vault_authority", lp_vault_key.as_ref(), &[lv.authority_bump]];
+
+        let underlying_before = ctx.accounts.vault_token_b_account.amount;
+
+        solend_withdraw(
+            CpiContext::new_with_signer(
+                ctx.accounts.solend_program.to_account_info(),
+                SolendWithdraw {
+                    vault_authority:          ctx.accounts.vault_authority.to_account_info(),
+                    vault_collateral_account: (*ctx.accounts.lending_receipt_b).clone(),
+                    vault_token_account:      (*ctx.accounts.vault_token_b_account).clone(),
+                    reserve:                  ctx.accounts.reserve.to_account_info(),
+                    reserve_collateral_mint:  (*ctx.accounts.reserve_collateral_mint).clone(),
+                    reserve_liquidity_supply: ctx.accounts.reserve_liquidity_supply.to_account_info(),
+                    lending_market:           ctx.accounts.lending_market.to_account_info(),
+                    lending_market_authority: ctx.accounts.lending_market_authority.to_account_info(),
+                    pyth_oracle:              ctx.accounts.pyth_oracle.to_account_info(),
+                    switchboard_oracle:       ctx.accounts.switchboard_oracle.to_account_info(),
+                    clock_sysvar:             ctx.accounts.clock_sysvar.to_account_info(),
+                    token_program:            ctx.accounts.token_program.clone(),
+                    solend_program:           ctx.accounts.solend_program.to_account_info(),
+                },
+                &[seeds],
+            ),
+            collateral_amount,
+            seeds,
+        )?;
+
+        ctx.accounts.vault_token_b_account.reload()?;
+        let received = ctx.accounts.vault_token_b_account.amount.saturating_sub(underlying_before);
+
+        // Track only what was actually principal, not any yield realized on
+        // exit -- mirrors settle_recall's shape in lib.rs without needing its
+        // full generality (single protocol, no phantom-balance bookkeeping
+        // yet; that's real future work once this is proven live).
+        lv.lending_deployed_b = lv.lending_deployed_b.saturating_sub(
+            std::cmp::min(lv.lending_deployed_b, received)
+        );
+        emit!(LpIdleRecalled { lp_vault: lv.key(), collateral_amount, received });
+        Ok(())
+    }
+}
 
 pub mod orca_lp {
     //! Orca Whirlpool-specific LP vault instructions.
