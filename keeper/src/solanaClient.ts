@@ -40,7 +40,7 @@ const KAMINO_USDC_LIQUIDITY_SUPPLY = new PublicKey("Bgq7trRgVMeq33yt235zM2onQ4bR
 const KAMINO_USDC_COLLATERAL_MINT = new PublicKey("B8V6WVjPxW1UGwVDfxH2d2r8SyT4cqn7dQRK6XneVa7D"); // verified from reserve.collateral.mintPubkey
 const KAMINO_USDC_COLLATERAL_SUPPLY = new PublicKey("3DzjXRfxRm6iejfyyMynR4tScddaanrePJ1NJU2XnPPL"); // verified from reserve.collateral.supplyVault
 
-// SOL (wSOL) reserve on Kamino main market — TODO: verify addresses at mainnet launch
+// SOL (wSOL) reserve on Kamino main market — all addresses below verified live on mainnet (see per-line notes)
 const WSOL_MINT = new PublicKey("So11111111111111111111111111111111111111112");
 const KAMINO_SOL_RESERVE = new PublicKey("d4A2prbA2whesmvHaL88BH6Ewn5N4bTSU2Ze8P6Bc4Q"); // verified: owner=KLend
 const KAMINO_SOL_LIQUIDITY_SUPPLY = new PublicKey("GafNuUXj9rxGLn4y79dPu6MHSuPWeJR6UtTWuexpGh3U"); // verified: 347k SOL balance
@@ -76,7 +76,7 @@ const MARINADE_MSOL_MINT_AUTH = new PublicKey("3JLPCS1qM2zRw3Dp6V4hZnYHd4toMNPkN
 const MARINADE_TREASURY_MSOL = new PublicKey("B1aLzaNMeFVAyQ6f3XbbUyKcH2YPHu2fqiEagmiF23VR");
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Jito mainnet constants — TODO: verify program and pool addresses
+// Jito mainnet constants — verified live on mainnet (see per-line notes)
 // ─────────────────────────────────────────────────────────────────────────────
 const JITOSOL_MINT = new PublicKey("J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn");
 // Jito uses their own fork of SPL Stake Pool — verified from mainnet transaction
