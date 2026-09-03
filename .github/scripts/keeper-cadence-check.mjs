@@ -51,9 +51,34 @@ async function telegram(text) {
 }
 
 const runs = await gh(`/repos/${REPO}/actions/workflows/${KEEPER_WORKFLOW}/runs?per_page=${SAMPLE + 1}`);
-const times = (runs.workflow_runs || [])
-  .map((r) => new Date(r.created_at).getTime())
-  .sort((a, b) => a - b);
+const runList = (runs.workflow_runs || [])
+  .map((r) => ({ time: new Date(r.created_at).getTime(), conclusion: r.conclusion }))
+  .sort((a, b) => a.time - b.time);
+const times = runList.map((r) => r.time);
+
+// ── Consecutive-failure check — catches the OTHER blind spot: a keeper that runs
+// exactly on schedule but fails every single time. Confirmed live 2026-09-03: a
+// bad deploy broke every run for ~12 hours (24 straight failures) while landing
+// right on its normal 30m cadence the whole time — neither the silence check above
+// nor the gap-drift check below would EVER have caught this, because both only
+// look at WHEN runs happened, never whether they actually succeeded. Nobody knew
+// until the user started getting GitHub's own failure emails. This check reads
+// conclusions, not timestamps, so it's independent of both the others.
+const FAILURE_STREAK_ALERT = 3; // consecutive failures, most-recent-first
+const recentConclusions = runList.slice(-FAILURE_STREAK_ALERT).map((r) => r.conclusion);
+const allRecentFailed = recentConclusions.length === FAILURE_STREAK_ALERT && recentConclusions.every((c) => c === "failure");
+
+if (allRecentFailed) {
+  await telegram(
+    `🔥 <b>Keeper running but FAILING</b>\n` +
+      `The last ${FAILURE_STREAK_ALERT} keeper runs all failed, landing on schedule the whole time — ` +
+      `this is a broken deploy, not a dead pinger.\n` +
+      `Check https://github.com/${REPO}/actions/workflows/${KEEPER_WORKFLOW} for the actual error.`
+  );
+  console.log(`FAILURE STREAK ALERT sent: last ${FAILURE_STREAK_ALERT} runs all failed.`);
+  process.exit(0);
+}
+console.log(`Recent conclusions (most recent last): ${recentConclusions.join(", ") || "none"} — not a full failure streak.`);
 
 // ── Total-outage check — runs BEFORE the "not enough history" bailout below, and
 // independently of it, on purpose. ─────────────────────────────────────────────
