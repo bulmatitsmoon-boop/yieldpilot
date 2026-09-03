@@ -1,6 +1,6 @@
 ﻿import { ImageResponse } from "next/og";
 
-export const runtime = "edge";
+export const runtime = "nodejs"; // was "edge" -- Next 16 pushed this route past Vercel's 1MB edge-function size limit (NOW_SANDBOX_WORKER_MAX_MIDDLEWARE_SIZE, confirmed live 2026-09-03). This route has no edge-specific requirement (pure JSX image rendering, no edge-only APIs), so nodejs removes the cap entirely with no functional change.
 
 export async function GET() {
   return new ImageResponse(
