@@ -75,12 +75,25 @@ jobs:
           export VERIFY_TX_BASE58=$(cat /tmp/verify_tx_base58.txt)
           node scripts/tmp-submit-verify-pda-tx.js
 
+      # Confirmed live 2026-09-03: calling this immediately after the init tx confirms
+      # can fail with "The PDA associated with the given signer was not found" --
+      # OtterSec's own backend hadn't indexed the just-created account within the same
+      # second. The init transaction itself is genuinely done and durable at that
+      # point (confirmed on-chain independently); this is purely a read-side
+      # propagation race on their end. A short wait + a few retries clears it without
+      # needing a whole separate manual re-run.
       - name: Queue the remote OtterSec verification worker
         run: |
-          solana-verify remote submit-job \
-            --program-id 3tAEmHXZ51YVLe9ts8b9cMcgQPgaSamLxLtxR31VpREi \
-            --uploader 8i7kydJHwi3Cdp46Xugyux2vWJmTScYDvnJrBiBihBnP || true
-
+          for i in 1 2 3 4 5; do
+            sleep 10
+            if solana-verify remote submit-job \
+              --program-id 3tAEmHXZ51YVLe9ts8b9cMcgQPgaSamLxLtxR31VpREi \
+              --uploader 8i7kydJHwi3Cdp46Xugyux2vWJmTScYDvnJrBiBihBnP; then
+              echo "Queued successfully on attempt $i"
+              break
+            fi
+            echo "Attempt $i failed, retrying..."
+          done
       - name: Clean up keypair
         if: always()
         run: rm -f /tmp/deploy-authority.json /tmp/verify_tx_base58.txt
