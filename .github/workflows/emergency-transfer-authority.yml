@@ -35,7 +35,8 @@ jobs:
           solana config set --keypair /tmp/deploy-authority.json --url "$MAINNET_RPC_URL"
           solana program set-upgrade-authority 3tAEmHXZ51YVLe9ts8b9cMcgQPgaSamLxLtxR31VpREi \
             --upgrade-authority /tmp/deploy-authority.json \
-            --new-upgrade-authority "${{ github.event.inputs.new_authority }}"
+            --new-upgrade-authority "${{ github.event.inputs.new_authority }}" \
+            --skip-new-upgrade-authority-signer-check
 
       - name: Clean up keypair
         if: always()
