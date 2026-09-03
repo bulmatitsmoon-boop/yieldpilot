@@ -1,0 +1,42 @@
+name: EMERGENCY - Transfer Program Upgrade Authority
+on:
+  workflow_dispatch:
+    inputs:
+      new_authority:
+        description: 'New upgrade authority public key'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  transfer:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install solana CLI
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/v2.1.0/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+
+      - name: Write deploy authority keypair from base58 secret
+        env:
+          SOLANA_DEPLOY_KEY: ${{ secrets.SOLANA_DEPLOY_KEY }}
+        run: |
+          pip3 install --quiet base58
+          python3 scripts/decode_deploy_key.py /tmp/deploy-authority.json
+
+      - name: Transfer upgrade authority
+        env:
+          MAINNET_RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
+        run: |
+          solana program set-upgrade-authority 3tAEmHXZ51YVLe9ts8b9cMcgQPgaSamLxLtxR31VpREi \
+            --upgrade-authority /tmp/deploy-authority.json \
+            --new-upgrade-authority "${{ github.event.inputs.new_authority }}" \
+            --url "$MAINNET_RPC_URL"
+
+      - name: Clean up keypair
+        if: always()
+        run: rm -f /tmp/deploy-authority.json
