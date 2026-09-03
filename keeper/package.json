@@ -11,7 +11,8 @@
     "init-vault": "ts-node src/scripts/init-vault.ts",
     "verify:lp-rebalancer": "node scripts/verify-lp-rebalancer.mjs",
     "init-orca-lp-vault": "ts-node src/scripts/init-orca-lp-vault.ts",
-    "init-raydium-lp-vault": "ts-node src/scripts/init-raydium-lp-vault.ts"
+    "init-raydium-lp-vault": "ts-node src/scripts/init-raydium-lp-vault.ts",
+    "postinstall": "node ../scripts/patch-bigint-buffer.js"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.31.0",
@@ -28,5 +29,9 @@
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.0.0"
+  },
+  "overrides": {
+    "@solana/web3.js": "^1.91.1",
+    "uuid": "^11.1.1"
   }
 }
