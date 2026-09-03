@@ -37,6 +37,15 @@ async function gh(path) {
   return r.json();
 }
 
+// THROWS on a genuine send failure (this file's ONLY job is alerting, unlike
+// notifyTelegram() in the keeper itself, which deliberately never lets a Telegram
+// outage abort real on-chain work — different function, different tradeoff).
+// A thrown error here fails this GitHub Actions run, which fires GitHub's own
+// built-in email notification to repo watchers -- the exact channel that actually
+// caught the 2026-09-03 keeper incident. That gives every alert a real, already-
+// working, zero-setup backup delivery path the moment Telegram itself is down,
+// without needing a second bot/channel/account. Missing config (env vars simply
+// unset) is NOT a failure -- only an attempted send that the API rejects is.
 async function telegram(text) {
   if (!TG_TOKEN || !TG_CHAT) {
     console.log("Telegram not configured — skipping alert. Message was:\n" + text);
@@ -47,7 +56,10 @@ async function telegram(text) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ chat_id: TG_CHAT, text, parse_mode: "HTML", disable_web_page_preview: true }),
   });
-  if (!r.ok) console.log("Telegram send failed:", r.status, await r.text().catch(() => ""));
+  if (!r.ok) {
+    const body = await r.text().catch(() => "");
+    throw new Error(`Telegram send failed (${r.status}): ${body.slice(0, 300)} — original alert:\n${text}`);
+  }
 }
 
 const runs = await gh(`/repos/${REPO}/actions/workflows/${KEEPER_WORKFLOW}/runs?per_page=${SAMPLE + 1}`);
