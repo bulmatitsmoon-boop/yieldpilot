@@ -48,7 +48,17 @@ jobs:
       # of the transpile-on-every-invocation tax ts-node adds on top of that.
       - name: Build keeper
         working-directory: keeper
-        run: npm run build
+        run: |
+          npm run build
+          # `tsc` only compiles .ts -> .js; it does NOT copy non-TS assets. IDL_PATH is
+          # resolved via `path.resolve(__dirname, ...)` in solanaClient.ts, which points
+          # at dist/ once running compiled code (it pointed at src/ under ts-node, which
+          # is why this didn't show up until the ts-node -> build switch). Without this
+          # copy, every run failed ENOENT on dist/idl/yieldpilot.mainnet.json — confirmed
+          # live 2026-09-03: this broke the keeper for ~12 hours across ~24 runs before
+          # being caught, entirely from this one missing copy step.
+          mkdir -p dist/idl
+          cp src/idl/*.json dist/idl/
 
       - name: Write keeper keypair
         working-directory: keeper
