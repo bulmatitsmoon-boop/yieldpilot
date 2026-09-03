@@ -62,6 +62,7 @@ jobs:
             --uploader 8i7kydJHwi3Cdp46Xugyux2vWJmTScYDvnJrBiBihBnP \
             --commit-hash ${{ github.event.inputs.commit_hash }} \
             --library-name yieldpilot --mount-path programs/yieldpilot \
+            --workspace-path . \
             -u "${MAINNET_RPC_URL}" \
             -- --features mainnet,no-idl \
             | tail -1 > /tmp/verify_tx_base58.txt
