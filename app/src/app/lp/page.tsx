@@ -16,8 +16,14 @@
  * mint account itself, never assumed) — see useLpVault.ts. LP shares use a
  * fixed 9 decimals (the shares mint is always created with mint::decimals=9
  * in initialize_orca_lp_vault_handler).
+ *
+ * UI pass (2026-09): restyled into a guided, tabbed flow (Deposit / Withdraw)
+ * instead of both actions stacked on the page at once, with status shown as
+ * badges rather than raw text lines. No change to data flow, hook usage, or
+ * any handler logic below — visual/structure only.
  */
 import { useState } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { notFound } from "next/navigation";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
@@ -48,6 +54,81 @@ interface WithdrawQuoteDisplay {
   tokenEstB?: anchor.BN;
   tokenMinA: anchor.BN;
   tokenMinB: anchor.BN;
+}
+
+// ---- small presentational helpers (styling only, no logic) ----
+
+function Badge({ tone, children }: { tone: "ok" | "warn" | "neutral"; children: ReactNode }) {
+  const colors: Record<string, { bg: string; fg: string }> = {
+    ok: { bg: "rgba(46, 204, 113, 0.12)", fg: "var(--signal, #2ecc71)" },
+    warn: { bg: "rgba(255, 176, 32, 0.12)", fg: "var(--warn, #ffb020)" },
+    neutral: { bg: "var(--ink-800)", fg: "var(--text-mid)" },
+  };
+  const c = colors[tone];
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 6,
+      padding: "3px 10px", borderRadius: 999, fontSize: 12, fontWeight: 600,
+      background: c.bg, color: c.fg, fontFamily: "var(--font-mono)",
+    }}>
+      {children}
+    </span>
+  );
+}
+
+function FieldLabel({ children, hint }: { children: ReactNode; hint?: string }) {
+  return (
+    <div style={{ marginBottom: 6 }}>
+      <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "var(--text-hi)" }}>{children}</label>
+      {hint && <div style={{ fontSize: 12, color: "var(--text-low, #666)", marginTop: 2 }}>{hint}</div>}
+    </div>
+  );
+}
+
+function inputStyle(): CSSProperties {
+  return {
+    flex: 1, padding: "11px 14px", borderRadius: 8, border: "1px solid var(--line)",
+    background: "var(--ink-800)", color: "var(--text-hi)", fontSize: 14,
+  };
+}
+
+function primaryButtonStyle(enabled: boolean): CSSProperties {
+  return {
+    width: "100%", padding: "13px", borderRadius: 8, border: "none",
+    background: enabled ? "var(--signal)" : "var(--ink-700)",
+    color: enabled ? "var(--ink-900)" : "var(--text-low)",
+    fontWeight: 700, fontSize: 14, cursor: enabled ? "pointer" : "not-allowed",
+    transition: "opacity 0.15s ease",
+  };
+}
+
+function secondaryButtonStyle(enabled: boolean): CSSProperties {
+  return {
+    padding: "11px 18px", borderRadius: 8, border: "1px solid var(--line)",
+    background: "var(--ink-700)", color: "var(--text-hi)", fontSize: 13, fontWeight: 600,
+    cursor: enabled ? "pointer" : "not-allowed", opacity: enabled ? 1 : 0.5, whiteSpace: "nowrap",
+  };
+}
+
+function QuotePanel({ rows }: { rows: { label: string; value: string }[] }) {
+  return (
+    <div style={{
+      marginTop: 16, padding: 16, borderRadius: 10, background: "var(--ink-800)",
+      border: "1px solid var(--line)",
+    }}>
+      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-low, #666)", marginBottom: 10 }}>
+        Quote
+      </div>
+      <div style={{ display: "grid", rowGap: 8 }}>
+        {rows.map((r, i) => (
+          <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontFamily: "var(--font-mono)" }}>
+            <span style={{ color: "var(--text-mid)" }}>{r.label}</span>
+            <span style={{ color: "var(--text-hi)", fontWeight: 600 }}>{r.value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export default function LpVaultPage() {
@@ -84,6 +165,9 @@ export default function LpVaultPage() {
   const [withdrawQuote, setWithdrawQuote] = useState<WithdrawQuoteDisplay | null>(null);
   const [withdrawQuoting, setWithdrawQuoting] = useState(false);
   const [withdrawQuoteError, setWithdrawQuoteError] = useState<string | null>(null);
+
+  // Presentational only — which action tab is showing. Doesn't affect any handler.
+  const [activeTab, setActiveTab] = useState<"deposit" | "withdraw">("deposit");
 
   async function handleLoadVault() {
     setLoadError(null);
@@ -183,173 +267,212 @@ export default function LpVaultPage() {
     notFound();
   }
 
+  const busy = txStatus === "signing" || txStatus === "confirming";
+
   return (
     <div style={{ maxWidth: 640, margin: "0 auto", padding: "48px 24px 120px" }}>
       {adminPreview && (
-        <div style={{ border: "0.5px solid var(--line, #444)", borderRadius: 8, padding: "8px 12px", marginBottom: 16, fontSize: 13, color: "var(--text-mid, #888)" }}>
-          Admin preview - LP is not public yet. Only your wallet sees this.
+        <div style={{
+          border: "1px solid var(--line, #444)", borderRadius: 8, padding: "10px 14px", marginBottom: 20,
+          fontSize: 13, color: "var(--text-mid, #888)", display: "flex", alignItems: "center", gap: 8,
+        }}>
+          <span style={{ fontSize: 15 }}>👁</span>
+          Admin preview — LP is not public yet. Only your wallet sees this.
         </div>
       )}
-      <div style={{
-        marginBottom: 8, fontSize: 11, fontWeight: 600, letterSpacing: "0.08em",
-        textTransform: "uppercase", color: "var(--warn)", fontFamily: "var(--font-mono)",
-      }}>
-        Phase 2 — Preview / Not Live
+
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+        <div style={{
+          fontSize: 11, fontWeight: 700, letterSpacing: "0.08em",
+          textTransform: "uppercase", color: "var(--warn)", fontFamily: "var(--font-mono)",
+        }}>
+          Phase 2 — Preview / Not Live
+        </div>
       </div>
-      <h1 style={{ fontFamily: "var(--font-display)", fontSize: 28, fontWeight: 700, marginBottom: 12, color: "var(--text-hi)" }}>
-        LP Vault{vaultInfo ? ` (${vaultInfo.protocol === "raydium" ? "Raydium CLMM" : "Orca Whirlpools"})` : ""}
+
+      <h1 style={{ fontFamily: "var(--font-display)", fontSize: 30, fontWeight: 700, marginBottom: 12, color: "var(--text-hi)" }}>
+        LP Vault{vaultInfo ? ` — ${vaultInfo.protocol === "raydium" ? "Raydium CLMM" : "Orca Whirlpools"}` : ""}
       </h1>
-      <p style={{ color: "var(--text-mid)", fontSize: 14, lineHeight: 1.7, marginBottom: 32 }}>
+      <p style={{ color: "var(--text-mid)", fontSize: 14, lineHeight: 1.7, marginBottom: 32, maxWidth: 520 }}>
         Opt-in, dual-asset liquidity provision. Carries real impermanent loss
         risk on top of any yield earned — separate from YieldPilot&apos;s core
         single-asset auto-routing vaults. Not deployed yet.
       </p>
 
       {!connected ? (
-        <button onClick={() => setVisible(true)} style={{
-          background: "var(--signal)", color: "var(--ink-900)", border: "none",
-          padding: "12px 26px", borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: "pointer",
+        <div style={{
+          border: "1px solid var(--line)", borderRadius: 12, padding: 32, textAlign: "center",
         }}>
-          Connect Wallet
-        </button>
+          <div style={{ fontSize: 14, color: "var(--text-mid)", marginBottom: 18 }}>
+            Connect a wallet to load and manage an LP vault.
+          </div>
+          <button onClick={() => setVisible(true)} style={{
+            background: "var(--signal)", color: "var(--ink-900)", border: "none",
+            padding: "12px 26px", borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: "pointer",
+          }}>
+            Connect Wallet
+          </button>
+        </div>
       ) : (
         <>
-          <div style={{ marginBottom: 24 }}>
-            <label style={{ display: "block", fontSize: 13, color: "var(--text-mid)", marginBottom: 6 }}>
-              LP Vault address
-            </label>
+          {/* Step 1 — load the vault */}
+          <div style={{ border: "1px solid var(--line)", borderRadius: 12, padding: 20, marginBottom: 20 }}>
+            <FieldLabel hint="Paste the address of the LP vault you want to interact with.">
+              1 &nbsp;·&nbsp; LP vault address
+            </FieldLabel>
             <div style={{ display: "flex", gap: 8 }}>
               <input
                 value={lpVaultAddress}
                 onChange={e => setLpVaultAddress(e.target.value)}
                 placeholder="Paste LP vault address"
-                style={{
-                  flex: 1, padding: "10px 14px", borderRadius: 8, border: "1px solid var(--line)",
-                  background: "var(--ink-800)", color: "var(--text-hi)", fontSize: 13, fontFamily: "var(--font-mono)",
-                }}
+                style={{ ...inputStyle(), fontFamily: "var(--font-mono)" }}
               />
-              <button onClick={handleLoadVault} disabled={!lpVaultAddress.trim() || loadingVault} style={{
-                padding: "10px 18px", borderRadius: 8, border: "1px solid var(--line)",
-                background: "var(--ink-700)", color: "var(--text-hi)", fontSize: 13,
-                cursor: !lpVaultAddress.trim() || loadingVault ? "not-allowed" : "pointer",
-                opacity: !lpVaultAddress.trim() || loadingVault ? 0.5 : 1,
-              }}>
-                {loadingVault ? "Loading…" : "Load"}
+              <button onClick={handleLoadVault} disabled={!lpVaultAddress.trim() || loadingVault} style={secondaryButtonStyle(!!lpVaultAddress.trim() && !loadingVault)}>
+                {loadingVault ? "Loading…" : "Load Vault"}
               </button>
             </div>
             {loadError && <div style={{ color: "var(--loss)", fontSize: 12, marginTop: 8 }}>{loadError}</div>}
           </div>
 
           {vaultInfo && (
-            <div style={{ border: "1px solid var(--line)", borderRadius: 12, padding: 20, marginBottom: 24 }}>
-              <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 12, color: "var(--text-hi)" }}>{vaultInfo.name}</div>
-              <div style={{ fontSize: 13, color: "var(--text-mid)", lineHeight: 1.9 }}>
-                <div>Position active: {vaultInfo.positionActive ? "yes" : "no (mid-reposition)"}</div>
-                <div>Total shares: {vaultInfo.totalShares}</div>
-                <div>Paused: {vaultInfo.paused ? "yes" : "no"}</div>
+            <div style={{ border: "1px solid var(--line)", borderRadius: 12, padding: 20, marginBottom: 20 }}>
+              {/* Vault status summary */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+                <div style={{ fontWeight: 700, fontSize: 17, color: "var(--text-hi)" }}>{vaultInfo.name}</div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <Badge tone={vaultInfo.paused ? "warn" : "ok"}>{vaultInfo.paused ? "Paused" : "Active"}</Badge>
+                  <Badge tone={vaultInfo.positionActive ? "ok" : "warn"}>
+                    {vaultInfo.positionActive ? "In position" : "Mid-reposition"}
+                  </Badge>
+                </div>
+              </div>
+              <div style={{
+                display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20,
+                fontSize: 13, color: "var(--text-mid)",
+              }}>
+                <div>
+                  <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-low, #666)", marginBottom: 4 }}>Total shares</div>
+                  <div style={{ fontFamily: "var(--font-mono)", color: "var(--text-hi)", fontWeight: 600 }}>{vaultInfo.totalShares}</div>
+                </div>
               </div>
 
-              <label style={{ display: "block", fontSize: 13, color: "var(--text-mid)", marginTop: 20, marginBottom: 6 }}>
-                Token A amount ({vaultInfo.tokenADecimals} decimals)
-              </label>
-              <div style={{ display: "flex", gap: 8 }}>
-                <input
-                  value={amountA}
-                  onChange={e => { setAmountA(e.target.value); setQuote(null); }}
-                  placeholder="e.g. 12.5"
-                  style={{ flex: 1, padding: "10px 14px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--ink-800)", color: "var(--text-hi)", fontSize: 13 }}
-                />
-                <button onClick={handleGetQuote} disabled={!amountA || quoting} style={{
-                  padding: "10px 18px", borderRadius: 8, border: "1px solid var(--line)",
-                  background: "var(--ink-700)", color: "var(--text-hi)", fontSize: 13,
-                  cursor: !amountA || quoting ? "not-allowed" : "pointer",
-                  opacity: !amountA || quoting ? 0.5 : 1,
-                }}>
-                  {quoting ? "Quoting…" : "Get Quote"}
-                </button>
+              {/* Tabs */}
+              <div style={{ display: "flex", borderBottom: "1px solid var(--line)", marginBottom: 20 }}>
+                {(["deposit", "withdraw"] as const).map(tab => (
+                  <button
+                    key={tab}
+                    onClick={() => setActiveTab(tab)}
+                    style={{
+                      flex: 1, padding: "10px 0", background: "none", border: "none", cursor: "pointer",
+                      fontSize: 14, fontWeight: 700, textTransform: "capitalize",
+                      color: activeTab === tab ? "var(--text-hi)" : "var(--text-low, #666)",
+                      borderBottom: activeTab === tab ? "2px solid var(--signal)" : "2px solid transparent",
+                      marginBottom: -1, transition: "color 0.15s ease",
+                    }}
+                  >
+                    {tab}
+                  </button>
+                ))}
               </div>
-              {quoteError && <div style={{ color: "var(--loss)", fontSize: 12, marginTop: 8 }}>{quoteError}</div>}
 
-              {quote && (
-                <div style={{ marginTop: 16, padding: 14, borderRadius: 8, background: "var(--ink-800)", fontSize: 12, color: "var(--text-mid)", fontFamily: "var(--font-mono)" }}>
-                  <div>
-                    Token A{quote.tokenEstA ? " (est / max)" : " (max)"}: {quote.tokenEstA ? `${formatBaseUnitsToDecimal(quote.tokenEstA, vaultInfo.tokenADecimals)} / ` : ""}{formatBaseUnitsToDecimal(quote.tokenMaxA, vaultInfo.tokenADecimals)}
+              {activeTab === "deposit" && (
+                <div>
+                  <FieldLabel hint={`Enter how much of token A you want to deposit (${vaultInfo.tokenADecimals} decimals). The vault pairs it automatically.`}>
+                    2 &nbsp;·&nbsp; Amount to deposit
+                  </FieldLabel>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <input
+                      value={amountA}
+                      onChange={e => { setAmountA(e.target.value); setQuote(null); }}
+                      placeholder="e.g. 12.5"
+                      style={inputStyle()}
+                    />
+                    <button onClick={handleGetQuote} disabled={!amountA || quoting} style={secondaryButtonStyle(!!amountA && !quoting)}>
+                      {quoting ? "Quoting…" : "Get Quote"}
+                    </button>
                   </div>
-                  <div>
-                    Token B{quote.tokenEstB ? " (est / max)" : " (max)"}: {quote.tokenEstB ? `${formatBaseUnitsToDecimal(quote.tokenEstB, vaultInfo.tokenBDecimals)} / ` : ""}{formatBaseUnitsToDecimal(quote.tokenMaxB, vaultInfo.tokenBDecimals)}
+                  {quoteError && <div style={{ color: "var(--loss)", fontSize: 12, marginTop: 8 }}>{quoteError}</div>}
+
+                  {quote && (
+                    <QuotePanel rows={[
+                      {
+                        label: quote.tokenEstA ? "Token A (est / max)" : "Token A (max)",
+                        value: quote.tokenEstA
+                          ? `${formatBaseUnitsToDecimal(quote.tokenEstA, vaultInfo.tokenADecimals)} / ${formatBaseUnitsToDecimal(quote.tokenMaxA, vaultInfo.tokenADecimals)}`
+                          : formatBaseUnitsToDecimal(quote.tokenMaxA, vaultInfo.tokenADecimals),
+                      },
+                      {
+                        label: quote.tokenEstB ? "Token B (est / max)" : "Token B (max)",
+                        value: quote.tokenEstB
+                          ? `${formatBaseUnitsToDecimal(quote.tokenEstB, vaultInfo.tokenBDecimals)} / ${formatBaseUnitsToDecimal(quote.tokenMaxB, vaultInfo.tokenBDecimals)}`
+                          : formatBaseUnitsToDecimal(quote.tokenMaxB, vaultInfo.tokenBDecimals),
+                      },
+                      { label: "Liquidity delta", value: quote.liquidityDelta.toString() },
+                    ]} />
+                  )}
+
+                  <label style={{ display: "flex", alignItems: "flex-start", gap: 8, marginTop: 18, fontSize: 13, color: "var(--text-mid)", cursor: "pointer", lineHeight: 1.5 }}>
+                    <input type="checkbox" checked={acknowledgeIL} onChange={e => setAcknowledgeIL(e.target.checked)} style={{ marginTop: 2 }} />
+                    <span>I understand LP positions carry impermanent loss risk and my deposit&apos;s value in either token can be less than what I put in, even if the pool earned fees.</span>
+                  </label>
+
+                  <div style={{ marginTop: 18 }}>
+                    <button onClick={handleDeposit} disabled={!acknowledgeIL || !quote} style={primaryButtonStyle(!!acknowledgeIL && !!quote)}>
+                      {busy ? "Confirming…" : "Deposit"}
+                    </button>
                   </div>
-                  <div>Liquidity delta: {quote.liquidityDelta.toString()}</div>
+                  {txError && <div style={{ color: "var(--loss)", fontSize: 12, marginTop: 8 }}>{txError}</div>}
+                  {txStatus === "success" && (
+                    <div style={{ marginTop: 8 }}><Badge tone="ok">✓ Confirmed</Badge></div>
+                  )}
                 </div>
               )}
 
-              <label style={{ display: "flex", alignItems: "flex-start", gap: 8, marginTop: 16, fontSize: 13, color: "var(--text-mid)", cursor: "pointer" }}>
-                <input type="checkbox" checked={acknowledgeIL} onChange={e => setAcknowledgeIL(e.target.checked)} style={{ marginTop: 2 }} />
-                <span>I understand LP positions carry impermanent loss risk and my deposit&apos;s value in either token can be less than what I put in, even if the pool earned fees.</span>
-              </label>
-
-              <button
-                onClick={handleDeposit}
-                disabled={!acknowledgeIL || !quote}
-                style={{
-                  marginTop: 16, width: "100%", padding: "12px", borderRadius: 8, border: "none",
-                  background: acknowledgeIL && quote ? "var(--signal)" : "var(--ink-700)",
-                  color: acknowledgeIL && quote ? "var(--ink-900)" : "var(--text-low)",
-                  fontWeight: 700, fontSize: 14, cursor: acknowledgeIL && quote ? "pointer" : "not-allowed",
-                }}
-              >
-                {txStatus === "signing" || txStatus === "confirming" ? "Confirming…" : "Deposit"}
-              </button>
-              {txError && <div style={{ color: "var(--loss)", fontSize: 12, marginTop: 8 }}>{txError}</div>}
-              {txStatus === "success" && <div style={{ color: "var(--signal)", fontSize: 12, marginTop: 8 }}>✓ Confirmed</div>}
-
-              <div style={{ marginTop: 32, paddingTop: 24, borderTop: "1px solid var(--line)" }}>
-                <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12, color: "var(--text-hi)" }}>Withdraw</div>
-                <label style={{ display: "block", fontSize: 13, color: "var(--text-mid)", marginBottom: 6 }}>
-                  Shares to withdraw ({LP_SHARES_DECIMALS} decimals)
-                </label>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <input
-                    value={withdrawShares}
-                    onChange={e => { setWithdrawShares(e.target.value); setWithdrawQuote(null); }}
-                    placeholder="e.g. 1.5"
-                    style={{ flex: 1, padding: "10px 14px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--ink-800)", color: "var(--text-hi)", fontSize: 13 }}
-                  />
-                  <button onClick={handleGetWithdrawQuote} disabled={!withdrawShares || withdrawQuoting} style={{
-                    padding: "10px 18px", borderRadius: 8, border: "1px solid var(--line)",
-                    background: "var(--ink-700)", color: "var(--text-hi)", fontSize: 13,
-                    cursor: !withdrawShares || withdrawQuoting ? "not-allowed" : "pointer",
-                    opacity: !withdrawShares || withdrawQuoting ? 0.5 : 1,
-                  }}>
-                    {withdrawQuoting ? "Quoting…" : "Get Quote"}
-                  </button>
-                </div>
-                {withdrawQuoteError && <div style={{ color: "var(--loss)", fontSize: 12, marginTop: 8 }}>{withdrawQuoteError}</div>}
-
-                {withdrawQuote && (
-                  <div style={{ marginTop: 16, padding: 14, borderRadius: 8, background: "var(--ink-800)", fontSize: 12, color: "var(--text-mid)", fontFamily: "var(--font-mono)" }}>
-                    <div>
-                      Token A{withdrawQuote.tokenEstA ? " (est / min)" : " (min)"}: {withdrawQuote.tokenEstA ? `${formatBaseUnitsToDecimal(withdrawQuote.tokenEstA, vaultInfo.tokenADecimals)} / ` : ""}{formatBaseUnitsToDecimal(withdrawQuote.tokenMinA, vaultInfo.tokenADecimals)}
-                    </div>
-                    <div>
-                      Token B{withdrawQuote.tokenEstB ? " (est / min)" : " (min)"}: {withdrawQuote.tokenEstB ? `${formatBaseUnitsToDecimal(withdrawQuote.tokenEstB, vaultInfo.tokenBDecimals)} / ` : ""}{formatBaseUnitsToDecimal(withdrawQuote.tokenMinB, vaultInfo.tokenBDecimals)}
-                    </div>
+              {activeTab === "withdraw" && (
+                <div>
+                  <FieldLabel hint={`Enter how many LP shares to redeem (${LP_SHARES_DECIMALS} decimals).`}>
+                    2 &nbsp;·&nbsp; Shares to withdraw
+                  </FieldLabel>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <input
+                      value={withdrawShares}
+                      onChange={e => { setWithdrawShares(e.target.value); setWithdrawQuote(null); }}
+                      placeholder="e.g. 1.5"
+                      style={inputStyle()}
+                    />
+                    <button onClick={handleGetWithdrawQuote} disabled={!withdrawShares || withdrawQuoting} style={secondaryButtonStyle(!!withdrawShares && !withdrawQuoting)}>
+                      {withdrawQuoting ? "Quoting…" : "Get Quote"}
+                    </button>
                   </div>
-                )}
+                  {withdrawQuoteError && <div style={{ color: "var(--loss)", fontSize: 12, marginTop: 8 }}>{withdrawQuoteError}</div>}
 
-                <button
-                  onClick={handleWithdraw}
-                  disabled={!withdrawQuote}
-                  style={{
-                    marginTop: 16, width: "100%", padding: "12px", borderRadius: 8, border: "none",
-                    background: withdrawQuote ? "var(--signal)" : "var(--ink-700)",
-                    color: withdrawQuote ? "var(--ink-900)" : "var(--text-low)",
-                    fontWeight: 700, fontSize: 14, cursor: withdrawQuote ? "pointer" : "not-allowed",
-                  }}
-                >
-                  {txStatus === "signing" || txStatus === "confirming" ? "Confirming…" : "Withdraw"}
-                </button>
-                {txStatus === "success" && <div style={{ color: "var(--signal)", fontSize: 12, marginTop: 8 }}>✓ Confirmed</div>}
-              </div>
+                  {withdrawQuote && (
+                    <QuotePanel rows={[
+                      {
+                        label: withdrawQuote.tokenEstA ? "Token A (est / min)" : "Token A (min)",
+                        value: withdrawQuote.tokenEstA
+                          ? `${formatBaseUnitsToDecimal(withdrawQuote.tokenEstA, vaultInfo.tokenADecimals)} / ${formatBaseUnitsToDecimal(withdrawQuote.tokenMinA, vaultInfo.tokenADecimals)}`
+                          : formatBaseUnitsToDecimal(withdrawQuote.tokenMinA, vaultInfo.tokenADecimals),
+                      },
+                      {
+                        label: withdrawQuote.tokenEstB ? "Token B (est / min)" : "Token B (min)",
+                        value: withdrawQuote.tokenEstB
+                          ? `${formatBaseUnitsToDecimal(withdrawQuote.tokenEstB, vaultInfo.tokenBDecimals)} / ${formatBaseUnitsToDecimal(withdrawQuote.tokenMinB, vaultInfo.tokenBDecimals)}`
+                          : formatBaseUnitsToDecimal(withdrawQuote.tokenMinB, vaultInfo.tokenBDecimals),
+                      },
+                    ]} />
+                  )}
+
+                  <div style={{ marginTop: 18 }}>
+                    <button onClick={handleWithdraw} disabled={!withdrawQuote} style={primaryButtonStyle(!!withdrawQuote)}>
+                      {busy ? "Confirming…" : "Withdraw"}
+                    </button>
+                  </div>
+                  {txStatus === "success" && (
+                    <div style={{ marginTop: 8 }}><Badge tone="ok">✓ Confirmed</Badge></div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </>
