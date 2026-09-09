@@ -20,7 +20,7 @@ const VAULTS = {
   const connection = new Connection(RPC, { commitment: "confirmed" });
   const wallet = new anchor.Wallet(feePayer);
   const provider = new anchor.AnchorProvider(connection, wallet, { commitment: "confirmed" });
-  const idl = JSON.parse(fs.readFileSync("idl/yieldpilot.mainnet.json", "utf8"));
+  const idl = JSON.parse(fs.readFileSync("src/idl/yieldpilot.mainnet.json", "utf8"));
   const program = new anchor.Program(idl, provider);
 
   for (const [name, vault] of Object.entries(VAULTS)) {
