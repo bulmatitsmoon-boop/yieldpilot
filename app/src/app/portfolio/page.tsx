@@ -16,8 +16,14 @@
  *    swap one asset into a pair.
  *  - The "IL risk" acknowledgement is required before the LP leg can run, exactly as on the
  *    standalone /lp page.
+ *
+ * UI pass (2026-09): matched to the /lp page's visual language (design tokens instead of
+ * hardcoded hex fallbacks, labeled steps, status badges, consistent card/input/button
+ * styling). No change to data flow, hook usage, effects, or any handler logic below —
+ * visual/structure only.
  */
 import { useEffect, useMemo, useState } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { notFound } from "next/navigation";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
@@ -77,6 +83,37 @@ function symbolForMint(mint: string): string {
   if (mint === SOL_MINT) return "SOL";
   if (mint === USDC_MINT) return "USDC";
   return `${mint.slice(0, 4)}…${mint.slice(-4)}`;
+}
+
+// ---- small presentational helpers (styling only, no logic — matches /lp page) ----
+
+function Badge({ tone, children }: { tone: "ok" | "warn" | "neutral"; children: ReactNode }) {
+  const colors: Record<string, { bg: string; fg: string }> = {
+    ok: { bg: "rgba(46, 204, 113, 0.12)", fg: "var(--signal, #2ecc71)" },
+    warn: { bg: "rgba(216, 90, 48, 0.12)", fg: "var(--warn, #d85a30)" },
+    neutral: { bg: "var(--ink-800)", fg: "var(--text-mid)" },
+  };
+  const c = colors[tone];
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 6,
+      padding: "2px 9px", borderRadius: 999, fontSize: 11, fontWeight: 600,
+      background: c.bg, color: c.fg, fontFamily: "var(--font-mono)",
+    }}>
+      {children}
+    </span>
+  );
+}
+
+function SectionLabel({ children, hint }: { children: ReactNode; hint?: string }) {
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-low, #666)" }}>
+        {children}
+      </div>
+      {hint && <div style={{ fontSize: 12, color: "var(--text-mid)", marginTop: 3 }}>{hint}</div>}
+    </div>
+  );
 }
 
 export default function PortfolioPage() {
@@ -386,46 +423,67 @@ export default function PortfolioPage() {
   if (!connected) {
     return (
       <main style={{ maxWidth: 640, margin: "0 auto", padding: "3rem 1.5rem" }}>
-        <h1 style={{ fontSize: 22, fontWeight: 500, marginBottom: 12 }}>Split deposit</h1>
-        <p style={{ color: "var(--text-mid, #888)", marginBottom: 20 }}>
+        <div style={{
+          fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase",
+          color: "var(--warn)", fontFamily: "var(--font-mono)", marginBottom: 10,
+        }}>
+          Phase 2 — Preview / Not Live
+        </div>
+        <h1 style={{ fontFamily: "var(--font-display)", fontSize: 28, fontWeight: 700, marginBottom: 12, color: "var(--text-hi)" }}>
+          Split deposit
+        </h1>
+        <p style={{ color: "var(--text-mid)", fontSize: 14, lineHeight: 1.7, marginBottom: 24 }}>
           Fund the safe vault and the LP vault from one screen.
         </p>
-        <button onClick={() => setVisible(true)} style={btn}>Connect wallet</button>
+        <button onClick={() => setVisible(true)} style={primaryBtn(true)}>Connect wallet</button>
       </main>
     );
   }
+
+  const totalValueUsd = totals.totalValueUsd + lpHoldings.reduce((s, h) => s + h.valueUsd, 0);
 
   return (
     <main style={{ maxWidth: 640, margin: "0 auto", padding: "2.5rem 1.5rem" }}>
       {adminPreview && (
         <div style={{
-          border: "0.5px solid var(--line, #444)", borderRadius: 8, padding: "8px 12px",
-          marginBottom: 16, fontSize: 13, color: "var(--text-mid, #888)",
+          border: "1px solid var(--line)", borderRadius: 8, padding: "10px 14px", marginBottom: 20,
+          fontSize: 13, color: "var(--text-mid)", display: "flex", alignItems: "center", gap: 8,
         }}>
+          <span style={{ fontSize: 15 }}>👁</span>
           Admin preview — LP is not public yet. Only your wallet sees this.
         </div>
       )}
+
+      <div style={{
+        fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase",
+        color: "var(--warn)", fontFamily: "var(--font-mono)", marginBottom: 10,
+      }}>
+        Phase 2 — Preview / Not Live
+      </div>
+
       {/* ── Combined portfolio: everything you hold across both vaults ── */}
-      <h1 style={{ fontSize: 22, fontWeight: 500, marginBottom: 16 }}>Your portfolio</h1>
-      <div style={{ background: "var(--ink-800, #1a1a1a)", borderRadius: 12, padding: "1.25rem 1.5rem", marginBottom: 24 }}>
-        <div style={{ fontSize: 13, color: "var(--text-mid, #888)" }}>Total value</div>
-        <div style={{ fontSize: 30, fontWeight: 500, marginBottom: 4 }}>
-          ${(totals.totalValueUsd + lpHoldings.reduce((s, h) => s + h.valueUsd, 0)).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+      <h1 style={{ fontFamily: "var(--font-display)", fontSize: 26, fontWeight: 700, marginBottom: 16, color: "var(--text-hi)" }}>
+        Your portfolio
+      </h1>
+      <div style={{ border: "1px solid var(--line)", borderRadius: 12, padding: "1.25rem 1.5rem", marginBottom: 24 }}>
+        <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-low, #666)" }}>Total value</div>
+        <div style={{ fontSize: 32, fontWeight: 700, marginBottom: 4, color: "var(--text-hi)" }}>
+          ${totalValueUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}
         </div>
         {totals.totalEarnedUsd > 0 && (
-          <div style={{ fontSize: 13, color: "#22b37e" }}>
+          <div style={{ fontSize: 13, color: "var(--signal, #2ecc71)", fontWeight: 600 }}>
             +${totals.totalEarnedUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })} earned
           </div>
         )}
 
         {hasSafe && (
-          <div style={{ borderTop: "0.5px solid var(--line, #2a2a2a)", marginTop: 14, paddingTop: 12 }}>
+          <div style={{ borderTop: "1px solid var(--line)", marginTop: 14, paddingTop: 12 }}>
             {totals.rows.filter((r) => r.valueUsd > 0).map((r) => (
               <div key={r.name} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "4px 0" }}>
-                <span style={{ color: "var(--text-mid, #888)" }}>{r.name.replace("YieldPilot ", "")} · safe</span>
-                <span>
+                <span style={{ color: "var(--text-mid)" }}>{r.name.replace("YieldPilot ", "")} · safe</span>
+                <span style={{ color: "var(--text-hi)", fontFamily: "var(--font-mono)" }}>
                   ${r.valueUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                  {r.earnedUsd > 0 && <span style={{ color: "#22b37e", marginLeft: 8 }}>+${r.earnedUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>}
+                  {r.earnedUsd > 0 && <span style={{ color: "var(--signal, #2ecc71)", marginLeft: 8 }}>+${r.earnedUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>}
                 </span>
               </div>
             ))}
@@ -433,89 +491,96 @@ export default function PortfolioPage() {
         )}
 
         {lpHoldings.length > 0 && (
-          <div style={{ borderTop: "0.5px solid var(--line, #2a2a2a)", marginTop: 8, paddingTop: 12 }}>
+          <div style={{ borderTop: "1px solid var(--line)", marginTop: 8, paddingTop: 12 }}>
             {lpHoldings.map((h) => (
-              <div key={h.info.address} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "4px 0" }}>
-                <span style={{ color: "var(--text-mid, #888)" }}>
-                  {h.info.name} · LP <span style={{ background: "rgba(216,90,48,0.12)", color: "#d85a30", fontSize: 11, padding: "1px 6px", borderRadius: 12, marginLeft: 4 }}>IL risk</span>
+              <div key={h.info.address} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, padding: "4px 0" }}>
+                <span style={{ color: "var(--text-mid)", display: "flex", alignItems: "center", gap: 6 }}>
+                  {h.info.name} · LP <Badge tone="warn">IL risk</Badge>
                 </span>
-                <span>${h.valueUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                <span style={{ color: "var(--text-hi)", fontFamily: "var(--font-mono)" }}>${h.valueUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
               </div>
             ))}
           </div>
         )}
 
         {!hasSafe && lpHoldings.length === 0 && (
-          <div style={{ fontSize: 13, color: "var(--text-mid, #888)", marginTop: 4 }}>
+          <div style={{ fontSize: 13, color: "var(--text-mid)", marginTop: 4 }}>
             No positions yet — fund a vault below to start.
           </div>
         )}
       </div>
 
-      <h2 style={{ fontSize: 18, fontWeight: 500, marginBottom: 4 }}>Add to your position</h2>
-      <p style={{ color: "var(--text-mid, #888)", marginBottom: 24, fontSize: 14 }}>
+      <h2 style={{ fontFamily: "var(--font-display)", fontSize: 19, fontWeight: 700, marginBottom: 4, color: "var(--text-hi)" }}>
+        Add to your position
+      </h2>
+      <p style={{ color: "var(--text-mid)", marginBottom: 24, fontSize: 14, lineHeight: 1.6 }}>
         The dial previews how a deposit splits. Each vault is funded separately — the LP vault
         needs both tokens, so bring the pair.
       </p>
 
       {/* ── planning dial ── */}
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 6 }}>
-        <span>Plan amount</span>
-        <input
-          type="number"
-          value={planUsd}
-          onChange={(e) => setPlanUsd(Number(e.target.value) || 0)}
-          style={{ width: 110, textAlign: "right" }}
-        />
-      </div>
-      <input
-        type="range"
-        min={0}
-        max={100}
-        step={5}
-        value={safePct}
-        onChange={(e) => setSafePct(Number(e.target.value))}
-        style={{ width: "100%" }}
-      />
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, margin: "6px 2px 20px" }}>
-        <span><b>{safePct}%</b> safe</span>
-        <span>quick <b>{lpPct}%</b></span>
-      </div>
-
-      <div style={{ display: "flex", gap: 12, marginBottom: 24 }}>
-        <div style={statCard}>
-          <div style={statLabel}>Blended APY</div>
-          <div style={statValue}>{blended.toFixed(1)}%</div>
+      <div style={{ border: "1px solid var(--line)", borderRadius: 12, padding: 20, marginBottom: 20 }}>
+        <SectionLabel hint="Preview only — each leg below still confirms its own real amount.">
+          Planning dial
+        </SectionLabel>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, marginBottom: 10 }}>
+          <span style={{ color: "var(--text-mid)" }}>Plan amount</span>
+          <input
+            type="number"
+            value={planUsd}
+            onChange={(e) => setPlanUsd(Number(e.target.value) || 0)}
+            style={{ ...inputStyle(), width: 120, textAlign: "right" }}
+          />
         </div>
-        <div style={statCard}>
-          <div style={statLabel}>Est. yearly</div>
-          <div style={statValue}>${yearly.toLocaleString()}</div>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          step={5}
+          value={safePct}
+          onChange={(e) => setSafePct(Number(e.target.value))}
+          style={{ width: "100%", accentColor: "var(--signal)" }}
+        />
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, margin: "8px 2px 18px", color: "var(--text-mid)" }}>
+          <span><b style={{ color: "var(--text-hi)" }}>{safePct}%</b> safe</span>
+          <span><b style={{ color: "var(--text-hi)" }}>{lpPct}%</b> LP</span>
+        </div>
+
+        <div style={{ display: "flex", gap: 12 }}>
+          <div style={statCardStyle}>
+            <div style={statLabelStyle}>Blended APY</div>
+            <div style={statValueStyle}>{blended.toFixed(1)}%</div>
+          </div>
+          <div style={statCardStyle}>
+            <div style={statLabelStyle}>Est. yearly</div>
+            <div style={statValueStyle}>${yearly.toLocaleString()}</div>
+          </div>
         </div>
       </div>
 
       {/* ── safe leg ── */}
-      <section style={card}>
-        <div style={{ fontWeight: 500, marginBottom: 8 }}>Safe vault</div>
-        <div style={{ fontSize: 13, color: "var(--text-mid, #888)", marginBottom: 10 }}>
+      <div style={{ border: "1px solid var(--line)", borderRadius: 12, padding: 20, marginBottom: 20 }}>
+        <SectionLabel>Safe vault</SectionLabel>
+        <div style={{ fontSize: 13, color: "var(--text-mid)", marginBottom: 12 }}>
           {safeVault ? safeVault.name : "No vault configured"} · lending &amp; staking
         </div>
         <input
           placeholder="Amount"
           value={safeAmount}
           onChange={(e) => setSafeAmount(e.target.value)}
-          style={{ width: "100%" }}
+          style={{ ...inputStyle(), width: "100%" }}
         />
-      </section>
+      </div>
 
       {/* ── LP leg ── */}
-      <section style={card}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-          <span style={{ fontWeight: 500 }}>LP vault</span>
-          <span style={ilBadge}>IL risk</span>
+      <div style={{ border: "1px solid var(--line)", borderRadius: 12, padding: 20, marginBottom: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+          <SectionLabel>LP vault</SectionLabel>
+          <Badge tone="warn">IL risk</Badge>
         </div>
         {!lpInfo ? (
           lpOptionsLoading ? (
-            <div style={{ fontSize: 13, color: "var(--text-mid, #888)" }}>Loading available LP vaults…</div>
+            <div style={{ fontSize: 13, color: "var(--text-mid)" }}>Loading available LP vaults…</div>
           ) : lpOptions.length > 0 ? (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {lpOptions.map((opt) => {
@@ -526,10 +591,10 @@ export default function PortfolioPage() {
                   <button
                     key={opt.address}
                     onClick={() => selectLp(opt)}
-                    style={{ ...btn, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4, minWidth: 140 }}
+                    style={{ ...secondaryBtn(true), display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4, minWidth: 140 }}
                   >
                     <span>{opt.name} · {opt.protocol}</span>
-                    <span style={{ fontSize: 16, fontWeight: 600, color: rate?.stale ? "var(--text-mid, #888)" : "#22b37e" }}>
+                    <span style={{ fontSize: 16, fontWeight: 700, color: rate?.stale ? "var(--text-mid)" : "var(--signal, #2ecc71)" }}>
                       {rate && !rate.stale ? `${rate.apyPercent.toFixed(1)}%` : "—"}
                     </span>
                   </button>
@@ -545,37 +610,38 @@ export default function PortfolioPage() {
                 placeholder="LP vault address"
                 value={manualLpAddr}
                 onChange={(e) => setManualLpAddr(e.target.value)}
-                style={{ flex: 1 }}
+                style={{ ...inputStyle(), flex: 1, fontFamily: "var(--font-mono)" }}
               />
-              <button onClick={loadManualLp} style={btn}>Load</button>
+              <button onClick={loadManualLp} style={secondaryBtn(true)}>Load</button>
             </div>
           )
         ) : (
           <>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-              <span style={{ fontSize: 13, color: "var(--text-mid, #888)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <span style={{ fontSize: 13, color: "var(--text-mid)" }}>
                 {lpInfo.name} · {lpInfo.protocol} · needs both {symbolForMint(lpInfo.tokenAMint)} and {symbolForMint(lpInfo.tokenBMint)}
               </span>
               {lpOptions.length > 1 && (
                 <button
                   onClick={() => { setLpInfo(null); setLpAmountA(""); setAckIl(false); }}
-                  style={{ ...btn, padding: "2px 10px", fontSize: 12 }}
+                  style={{ ...secondaryBtn(true), padding: "3px 10px", fontSize: 12 }}
                 >
                   Change
                 </button>
               )}
             </div>
 
-            <div style={{ display: "flex", gap: 4, marginBottom: 14, background: "var(--ink-900, #0a0a0a)", borderRadius: 8, padding: 3 }}>
+            <div style={{ display: "flex", borderBottom: "1px solid var(--line)", marginBottom: 18 }}>
               {(["deposit", "withdraw"] as const).map((t) => (
                 <button
                   key={t}
                   onClick={() => setLpTab(t)}
                   style={{
-                    flex: 1, padding: "6px 0", borderRadius: 6, border: "none", cursor: "pointer",
-                    fontSize: 13, fontWeight: 500, textTransform: "capitalize",
-                    background: lpTab === t ? "var(--ink-700, #2a2a2a)" : "transparent",
-                    color: lpTab === t ? "var(--text-hi, #E8EDF2)" : "var(--text-mid, #888)",
+                    flex: 1, padding: "10px 0", background: "none", border: "none", cursor: "pointer",
+                    fontSize: 14, fontWeight: 700, textTransform: "capitalize",
+                    color: lpTab === t ? "var(--text-hi)" : "var(--text-low, #666)",
+                    borderBottom: lpTab === t ? "2px solid var(--signal)" : "2px solid transparent",
+                    marginBottom: -1, transition: "color 0.15s ease",
                   }}
                 >
                   {t}
@@ -589,9 +655,9 @@ export default function PortfolioPage() {
                   placeholder={`${symbolForMint(lpInfo.tokenAMint)} amount`}
                   value={lpAmountA}
                   onChange={(e) => setLpAmountA(e.target.value)}
-                  style={{ width: "100%", marginBottom: 6 }}
+                  style={{ ...inputStyle(), width: "100%", marginBottom: 8 }}
                 />
-                <div style={{ fontSize: 13, color: "var(--text-mid, #888)", marginBottom: 10, minHeight: 18 }}>
+                <div style={{ fontSize: 13, color: "var(--text-mid)", marginBottom: 14, minHeight: 18 }}>
                   {lpAmountA && Number(lpAmountA) > 0 && (
                     lpQuoteLoading
                       ? "Calculating required " + symbolForMint(lpInfo.tokenBMint) + "…"
@@ -600,35 +666,37 @@ export default function PortfolioPage() {
                         : "Couldn't get a live quote — try a different amount."
                   )}
                 </div>
-                <label style={{ display: "flex", gap: 8, fontSize: 13, alignItems: "flex-start" }}>
-                  <input type="checkbox" checked={ackIl} onChange={(e) => setAckIl(e.target.checked)} />
+                <label style={{ display: "flex", gap: 8, fontSize: 13, color: "var(--text-mid)", alignItems: "flex-start", cursor: "pointer", lineHeight: 1.5 }}>
+                  <input type="checkbox" checked={ackIl} onChange={(e) => setAckIl(e.target.checked)} style={{ marginTop: 2 }} />
                   <span>I understand LP positions carry impermanent-loss risk and my deposit&apos;s value can fall relative to holding.</span>
                 </label>
               </>
             ) : (
               <>
-                <div style={{ fontSize: 13, color: "var(--text-mid, #888)", marginBottom: 8 }}>
+                <div style={{ fontSize: 13, color: "var(--text-mid)", marginBottom: 10 }}>
                   Your position:{" "}
-                  {lpPosition && lpPosition.shares > 0
-                    ? `${formatBaseUnitsToDecimal(lpPosition.shares.toString(), LP_SHARES_DECIMALS)} shares`
-                    : "nothing to withdraw"}
+                  <span style={{ color: "var(--text-hi)", fontFamily: "var(--font-mono)" }}>
+                    {lpPosition && lpPosition.shares > 0
+                      ? `${formatBaseUnitsToDecimal(lpPosition.shares.toString(), LP_SHARES_DECIMALS)} shares`
+                      : "nothing to withdraw"}
+                  </span>
                 </div>
-                <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+                <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
                   <input
                     placeholder="Shares to withdraw"
                     value={withdrawSharesInput}
                     onChange={(e) => setWithdrawSharesInput(e.target.value)}
-                    style={{ flex: 1 }}
+                    style={{ ...inputStyle(), flex: 1 }}
                   />
                   <button
                     onClick={setWithdrawMax}
                     disabled={!lpPosition || lpPosition.shares === 0}
-                    style={{ ...btn, padding: "8px 14px" }}
+                    style={secondaryBtn(!!lpPosition && lpPosition.shares > 0)}
                   >
                     MAX
                   </button>
                 </div>
-                <div style={{ fontSize: 13, color: "var(--text-mid, #888)", marginBottom: 14, minHeight: 18 }}>
+                <div style={{ fontSize: 13, color: "var(--text-mid)", marginBottom: 16, minHeight: 18 }}>
                   {withdrawSharesInput && Number(withdrawSharesInput) > 0 && (
                     withdrawQuoteLoading
                       ? "Calculating payout…"
@@ -640,7 +708,7 @@ export default function PortfolioPage() {
                 <button
                   onClick={withdrawLpLeg}
                   disabled={busy || !withdrawQuote}
-                  style={{ ...btn, width: "100%", height: 40 }}
+                  style={primaryBtn(!busy && !!withdrawQuote)}
                 >
                   {busy ? "Withdrawing…" : "Withdraw"}
                 </button>
@@ -648,7 +716,7 @@ export default function PortfolioPage() {
             )}
           </>
         )}
-      </section>
+      </div>
 
       {/* Exactly what will happen if this button is pressed right now — computed from the
           real state of the two legs, not a generic label. Nothing fires that isn't listed here. */}
@@ -663,50 +731,55 @@ export default function PortfolioPage() {
           parts.push(`${lpAmountA} ${symA}${lpQuoteB ? ` + up to ~${lpQuoteB} ${symB}` : ""} → ${lpInfo!.name}`);
         }
         return (
-          <div style={{ fontSize: 13, color: "var(--text-mid, #888)", marginBottom: 12 }}>
+          <div style={{
+            fontSize: 13, color: "var(--text-mid)", marginBottom: 16, padding: 14,
+            borderRadius: 8, background: "var(--ink-800)", border: "1px solid var(--line)",
+          }}>
             {parts.length > 0
-              ? <>This will send: {parts.map((p, i) => <span key={i}>{i > 0 && " and "}<b style={{ color: "var(--text-hi, #E8EDF2)" }}>{p}</b></span>)}.</>
+              ? <>This will send: {parts.map((p, i) => <span key={i}>{i > 0 && " and "}<b style={{ color: "var(--text-hi)" }}>{p}</b></span>)}.</>
               : "Enter an amount above to see exactly what this will send."}
           </div>
         );
       })()}
 
-      {error && <div style={{ color: "#c0392b", fontSize: 13, marginBottom: 12 }}>{error}</div>}
-      {txStatus && <div style={{ fontSize: 13, marginBottom: 12 }}>{txStatus}</div>}
-      {txError && <div style={{ color: "#c0392b", fontSize: 13, marginBottom: 12 }}>{txError}</div>}
+      {error && <div style={{ color: "var(--loss)", fontSize: 13, marginBottom: 12 }}>{error}</div>}
+      {txStatus && <div style={{ fontSize: 13, marginBottom: 12, color: "var(--text-mid)" }}>{txStatus}</div>}
+      {txError && <div style={{ color: "var(--loss)", fontSize: 13, marginBottom: 12 }}>{txError}</div>}
 
-      <button onClick={depositBoth} disabled={busy} style={{ ...btn, width: "100%", height: 44 }}>
+      <button onClick={depositBoth} disabled={busy} style={{ ...primaryBtn(!busy), width: "100%", height: 46 }}>
         {busy ? "Depositing…" : "Confirm and deposit"}
       </button>
-      <p style={{ textAlign: "center", fontSize: 12, color: "var(--text-mid, #888)", marginTop: 8 }}>
+      <p style={{ textAlign: "center", fontSize: 12, color: "var(--text-low, #666)", marginTop: 10 }}>
         Each leg above is a separate on-chain transaction · funds stay in separate vaults, they are never combined
       </p>
     </main>
   );
 }
 
-const card: React.CSSProperties = {
-  border: "0.5px solid var(--line, #2a2a2a)",
-  borderRadius: 12,
-  padding: "1rem 1.25rem",
-  marginBottom: 16,
-};
-const statCard: React.CSSProperties = { flex: 1, background: "var(--ink-800, #1a1a1a)", borderRadius: 8, padding: "1rem" };
-const statLabel: React.CSSProperties = { fontSize: 13, color: "var(--text-mid, #888)", marginBottom: 4 };
-const statValue: React.CSSProperties = { fontSize: 24, fontWeight: 500 };
-const ilBadge: React.CSSProperties = {
-  marginLeft: "auto",
-  fontSize: 11,
-  background: "rgba(216,90,48,0.12)",
-  color: "#d85a30",
-  padding: "2px 8px",
-  borderRadius: 20,
-};
-const btn: React.CSSProperties = {
-  border: "0.5px solid var(--line, #444)",
-  borderRadius: 8,
-  padding: "8px 16px",
-  background: "transparent",
-  color: "var(--text-hi, #E8EDF2)",
-  cursor: "pointer",
-};
+function inputStyle(): CSSProperties {
+  return {
+    padding: "10px 14px", borderRadius: 8, border: "1px solid var(--line)",
+    background: "var(--ink-800)", color: "var(--text-hi)", fontSize: 14,
+  };
+}
+
+function primaryBtn(enabled: boolean): CSSProperties {
+  return {
+    padding: "12px 26px", borderRadius: 8, border: "none",
+    background: enabled ? "var(--signal)" : "var(--ink-700)",
+    color: enabled ? "var(--ink-900)" : "var(--text-low)",
+    fontWeight: 700, fontSize: 14, cursor: enabled ? "pointer" : "not-allowed",
+  };
+}
+
+function secondaryBtn(enabled: boolean): CSSProperties {
+  return {
+    padding: "8px 16px", borderRadius: 8, border: "1px solid var(--line)",
+    background: "var(--ink-700)", color: "var(--text-hi)", fontSize: 13, fontWeight: 600,
+    cursor: enabled ? "pointer" : "not-allowed", opacity: enabled ? 1 : 0.5,
+  };
+}
+
+const statCardStyle: CSSProperties = { flex: 1, background: "var(--ink-800)", borderRadius: 8, padding: "1rem", border: "1px solid var(--line)" };
+const statLabelStyle: CSSProperties = { fontSize: 12, color: "var(--text-mid)", marginBottom: 4 };
+const statValueStyle: CSSProperties = { fontSize: 22, fontWeight: 700, color: "var(--text-hi)" };
