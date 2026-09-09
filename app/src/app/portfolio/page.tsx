@@ -17,9 +17,13 @@
  *  - The "IL risk" acknowledgement is required before the LP leg can run, exactly as on the
  *    standalone /lp page.
  *
- * UI pass (2026-09): matched to the /lp page's visual language (design tokens instead of
- * hardcoded hex fallbacks, labeled steps, status badges, consistent card/input/button
- * styling). No change to data flow, hook usage, effects, or any handler logic below —
+ * UI pass v2 (2026-09): two-column dashboard layout (overview left, sticky deposit card
+ * right) with a donut + risk chip for the allocation dial, matching a mockup Lloyd
+ * approved. Deliberately did NOT add a unified "one amount field" or a wallet-balance
+ * display from the mockup — the real architecture has two independent leg inputs (safe
+ * amount, LP token-A amount) and no wired USDC-balance hook, and faking either would be
+ * dishonest UI. The "quick amount" chips instead set the existing preview-only `planUsd`
+ * field. No change to data flow, hook usage, effects, or any handler logic below —
  * visual/structure only.
  */
 import { useEffect, useMemo, useState } from "react";
@@ -85,12 +89,13 @@ function symbolForMint(mint: string): string {
   return `${mint.slice(0, 4)}…${mint.slice(-4)}`;
 }
 
-// ---- small presentational helpers (styling only, no logic — matches /lp page) ----
+// ---- small presentational helpers (styling only, no logic) ----
 
-function Badge({ tone, children }: { tone: "ok" | "warn" | "neutral"; children: ReactNode }) {
+function Badge({ tone, children }: { tone: "ok" | "warn" | "neutral" | "loss"; children: ReactNode }) {
   const colors: Record<string, { bg: string; fg: string }> = {
     ok: { bg: "rgba(46, 204, 113, 0.12)", fg: "var(--signal, #2ecc71)" },
     warn: { bg: "rgba(216, 90, 48, 0.12)", fg: "var(--warn, #d85a30)" },
+    loss: { bg: "rgba(192, 57, 43, 0.12)", fg: "var(--loss, #c0392b)" },
     neutral: { bg: "var(--ink-800)", fg: "var(--text-mid)" },
   };
   const c = colors[tone];
@@ -112,6 +117,49 @@ function SectionLabel({ children, hint }: { children: ReactNode; hint?: string }
         {children}
       </div>
       {hint && <div style={{ fontSize: 12, color: "var(--text-mid)", marginTop: 3 }}>{hint}</div>}
+    </div>
+  );
+}
+
+// Risk label derived purely from the LP percentage already computed below — no new state.
+function riskLabel(lpPctValue: number): { text: string; tone: "ok" | "warn" | "loss" } {
+  if (lpPctValue <= 15) return { text: "Conservative", tone: "ok" };
+  if (lpPctValue <= 45) return { text: "Balanced", tone: "warn" };
+  return { text: "Aggressive", tone: "loss" };
+}
+
+// Small allocation donut built from the same safePct/lpPct the slider already drives —
+// pure SVG, no charting library needed for two segments.
+function AllocationDonut({ safePctValue }: { safePctValue: number }) {
+  const r = 15.5;
+  const circumference = 2 * Math.PI * r;
+  const lpPctValue = 100 - safePctValue;
+  const safeLen = (circumference * safePctValue) / 100;
+  const lpLen = (circumference * lpPctValue) / 100;
+  return (
+    <div style={{ position: "relative", width: 88, height: 88, flex: "none" }}>
+      <svg viewBox="0 0 36 36" width="88" height="88">
+        <circle cx="18" cy="18" r={r} fill="none" stroke="var(--ink-800)" strokeWidth="4" />
+        <circle
+          cx="18" cy="18" r={r} fill="none" stroke="var(--signal)" strokeWidth="4"
+          strokeDasharray={`${safeLen} ${circumference}`} strokeDashoffset="0"
+          transform="rotate(-90 18 18)" strokeLinecap="round"
+        />
+        <circle
+          cx="18" cy="18" r={r} fill="none" stroke="var(--warn)" strokeWidth="4"
+          strokeDasharray={`${lpLen} ${circumference}`} strokeDashoffset={-safeLen}
+          transform="rotate(-90 18 18)" strokeLinecap="round"
+        />
+      </svg>
+      <div style={{
+        position: "absolute", inset: 0, display: "flex", flexDirection: "column",
+        alignItems: "center", justifyContent: "center",
+      }}>
+        <span style={{ fontFamily: "var(--font-mono)", fontSize: 15, fontWeight: 700, color: "var(--text-hi)" }}>
+          {safePctValue}/{lpPctValue}
+        </span>
+        <span style={{ fontSize: 9, color: "var(--text-low, #666)", textTransform: "uppercase", letterSpacing: "0.05em" }}>split</span>
+      </div>
     </div>
   );
 }
@@ -423,13 +471,8 @@ export default function PortfolioPage() {
   if (!connected) {
     return (
       <main style={{ maxWidth: 640, margin: "0 auto", padding: "3rem 1.5rem" }}>
-        <div style={{
-          fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase",
-          color: "var(--warn)", fontFamily: "var(--font-mono)", marginBottom: 10,
-        }}>
-          Phase 2 — Preview / Not Live
-        </div>
-        <h1 style={{ fontFamily: "var(--font-display)", fontSize: 28, fontWeight: 700, marginBottom: 12, color: "var(--text-hi)" }}>
+        <Badge tone="warn">Phase 2 · Preview — not public</Badge>
+        <h1 style={{ fontFamily: "var(--font-display)", fontSize: 28, fontWeight: 700, marginTop: 12, marginBottom: 12, color: "var(--text-hi)" }}>
           Split deposit
         </h1>
         <p style={{ color: "var(--text-mid)", fontSize: 14, lineHeight: 1.7, marginBottom: 24 }}>
@@ -441,12 +484,21 @@ export default function PortfolioPage() {
   }
 
   const totalValueUsd = totals.totalValueUsd + lpHoldings.reduce((s, h) => s + h.valueUsd, 0);
+  const totalEarnedUsd = totals.totalEarnedUsd; // LP earnings aren't separately tracked yet — safe-side only, same as before.
+  const hasAnyPosition = hasSafe || lpHoldings.length > 0;
+  const risk = riskLabel(lpPct);
+
+  const willRunSafe = !!(safeVault && safeAmount && Number(safeAmount) > 0);
+  const willRunLp = !!(lpInfo && lpAmountA && Number(lpAmountA) > 0 && ackIl);
+  const depositLabel = willRunSafe || willRunLp
+    ? `Deposit${willRunSafe ? ` ${safeAmount} ${safeVault!.name.toUpperCase().includes("SOL") ? "SOL" : "USDC"}` : ""}${willRunSafe && willRunLp ? " +" : ""}${willRunLp ? ` ${lpAmountA} ${symbolForMint(lpInfo!.tokenAMint)}` : ""}`
+    : "Enter an amount to deposit";
 
   return (
-    <main style={{ maxWidth: 640, margin: "0 auto", padding: "2.5rem 1.5rem" }}>
+    <main style={{ maxWidth: 1180, margin: "0 auto", padding: "2.5rem 1.5rem 5rem" }}>
       {adminPreview && (
         <div style={{
-          border: "1px solid var(--line)", borderRadius: 8, padding: "10px 14px", marginBottom: 20,
+          border: "1px solid var(--line)", borderRadius: 8, padding: "10px 14px", marginBottom: 16,
           fontSize: 13, color: "var(--text-mid)", display: "flex", alignItems: "center", gap: 8,
         }}>
           <span style={{ fontSize: 15 }}>👁</span>
@@ -454,307 +506,381 @@ export default function PortfolioPage() {
         </div>
       )}
 
-      <div style={{
-        fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase",
-        color: "var(--warn)", fontFamily: "var(--font-mono)", marginBottom: 10,
-      }}>
-        Phase 2 — Preview / Not Live
+      <div style={{ marginBottom: 18 }}>
+        <Badge tone="warn">Phase 2 · Preview — not public</Badge>
       </div>
 
-      {/* ── Combined portfolio: everything you hold across both vaults ── */}
-      <h1 style={{ fontFamily: "var(--font-display)", fontSize: 26, fontWeight: 700, marginBottom: 16, color: "var(--text-hi)" }}>
-        Your portfolio
-      </h1>
-      <div style={{ border: "1px solid var(--line)", borderRadius: 12, padding: "1.25rem 1.5rem", marginBottom: 24 }}>
-        <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-low, #666)" }}>Total value</div>
-        <div style={{ fontSize: 32, fontWeight: 700, marginBottom: 4, color: "var(--text-hi)" }}>
-          ${totalValueUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-        </div>
-        {totals.totalEarnedUsd > 0 && (
-          <div style={{ fontSize: 13, color: "var(--signal, #2ecc71)", fontWeight: 600 }}>
-            +${totals.totalEarnedUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })} earned
-          </div>
-        )}
+      <div style={twoColLayout}>
+        {/* ══════════ LEFT: overview ══════════ */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
 
-        {hasSafe && (
-          <div style={{ borderTop: "1px solid var(--line)", marginTop: 14, paddingTop: 12 }}>
-            {totals.rows.filter((r) => r.valueUsd > 0).map((r) => (
-              <div key={r.name} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "4px 0" }}>
-                <span style={{ color: "var(--text-mid)" }}>{r.name.replace("YieldPilot ", "")} · safe</span>
-                <span style={{ color: "var(--text-hi)", fontFamily: "var(--font-mono)" }}>
-                  ${r.valueUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                  {r.earnedUsd > 0 && <span style={{ color: "var(--signal, #2ecc71)", marginLeft: 8 }}>+${r.earnedUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {lpHoldings.length > 0 && (
-          <div style={{ borderTop: "1px solid var(--line)", marginTop: 8, paddingTop: 12 }}>
-            {lpHoldings.map((h) => (
-              <div key={h.info.address} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, padding: "4px 0" }}>
-                <span style={{ color: "var(--text-mid)", display: "flex", alignItems: "center", gap: 6 }}>
-                  {h.info.name} · LP <Badge tone="warn">IL risk</Badge>
-                </span>
-                <span style={{ color: "var(--text-hi)", fontFamily: "var(--font-mono)" }}>${h.valueUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {!hasSafe && lpHoldings.length === 0 && (
-          <div style={{ fontSize: 13, color: "var(--text-mid)", marginTop: 4 }}>
-            No positions yet — fund a vault below to start.
-          </div>
-        )}
-      </div>
-
-      <h2 style={{ fontFamily: "var(--font-display)", fontSize: 19, fontWeight: 700, marginBottom: 4, color: "var(--text-hi)" }}>
-        Add to your position
-      </h2>
-      <p style={{ color: "var(--text-mid)", marginBottom: 24, fontSize: 14, lineHeight: 1.6 }}>
-        The dial previews how a deposit splits. Each vault is funded separately — the LP vault
-        needs both tokens, so bring the pair.
-      </p>
-
-      {/* ── planning dial ── */}
-      <div style={{ border: "1px solid var(--line)", borderRadius: 12, padding: 20, marginBottom: 20 }}>
-        <SectionLabel hint="Preview only — each leg below still confirms its own real amount.">
-          Planning dial
-        </SectionLabel>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, marginBottom: 10 }}>
-          <span style={{ color: "var(--text-mid)" }}>Plan amount</span>
-          <input
-            type="number"
-            value={planUsd}
-            onChange={(e) => setPlanUsd(Number(e.target.value) || 0)}
-            style={{ ...inputStyle(), width: 120, textAlign: "right" }}
-          />
-        </div>
-        <input
-          type="range"
-          min={0}
-          max={100}
-          step={5}
-          value={safePct}
-          onChange={(e) => setSafePct(Number(e.target.value))}
-          style={{ width: "100%", accentColor: "var(--signal)" }}
-        />
-        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, margin: "8px 2px 18px", color: "var(--text-mid)" }}>
-          <span><b style={{ color: "var(--text-hi)" }}>{safePct}%</b> safe</span>
-          <span><b style={{ color: "var(--text-hi)" }}>{lpPct}%</b> LP</span>
-        </div>
-
-        <div style={{ display: "flex", gap: 12 }}>
-          <div style={statCardStyle}>
-            <div style={statLabelStyle}>Blended APY</div>
-            <div style={statValueStyle}>{blended.toFixed(1)}%</div>
-          </div>
-          <div style={statCardStyle}>
-            <div style={statLabelStyle}>Est. yearly</div>
-            <div style={statValueStyle}>${yearly.toLocaleString()}</div>
-          </div>
-        </div>
-      </div>
-
-      {/* ── safe leg ── */}
-      <div style={{ border: "1px solid var(--line)", borderRadius: 12, padding: 20, marginBottom: 20 }}>
-        <SectionLabel>Safe vault</SectionLabel>
-        <div style={{ fontSize: 13, color: "var(--text-mid)", marginBottom: 12 }}>
-          {safeVault ? safeVault.name : "No vault configured"} · lending &amp; staking
-        </div>
-        <input
-          placeholder="Amount"
-          value={safeAmount}
-          onChange={(e) => setSafeAmount(e.target.value)}
-          style={{ ...inputStyle(), width: "100%" }}
-        />
-      </div>
-
-      {/* ── LP leg ── */}
-      <div style={{ border: "1px solid var(--line)", borderRadius: 12, padding: 20, marginBottom: 20 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-          <SectionLabel>LP vault</SectionLabel>
-          <Badge tone="warn">IL risk</Badge>
-        </div>
-        {!lpInfo ? (
-          lpOptionsLoading ? (
-            <div style={{ fontSize: 13, color: "var(--text-mid)" }}>Loading available LP vaults…</div>
-          ) : lpOptions.length > 0 ? (
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {lpOptions.map((opt) => {
-                // Same live fee-APY numbers as the Live Rates page (useApys) — matched by
-                // protocolId containing the protocol name, same pattern lpApy above uses.
-                const rate = apys.find((x) => x.protocolId?.toLowerCase().includes(opt.protocol.toLowerCase()));
-                return (
-                  <button
-                    key={opt.address}
-                    onClick={() => selectLp(opt)}
-                    style={{ ...secondaryBtn(true), display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4, minWidth: 140 }}
-                  >
-                    <span>{opt.name} · {opt.protocol}</span>
-                    <span style={{ fontSize: 16, fontWeight: 700, color: rate?.stale ? "var(--text-mid)" : "var(--signal, #2ecc71)" }}>
-                      {rate && !rate.stale ? `${rate.apyPercent.toFixed(1)}%` : "—"}
-                    </span>
-                  </button>
-                );
-              })}
+          {/* ── portfolio hero ── */}
+          <div style={cardStyle}>
+            <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-low, #666)" }}>
+              Total value
             </div>
-          ) : (
-            // Fallback only: no LP vaults configured yet (NEXT_PUBLIC_LP_VAULT_ADDRESSES
-            // unset/empty), or every configured one failed to load. Manual entry keeps this
-            // page usable in that gap rather than dead-ending — not the normal path.
-            <div style={{ display: "flex", gap: 8 }}>
-              <input
-                placeholder="LP vault address"
-                value={manualLpAddr}
-                onChange={(e) => setManualLpAddr(e.target.value)}
-                style={{ ...inputStyle(), flex: 1, fontFamily: "var(--font-mono)" }}
-              />
-              <button onClick={loadManualLp} style={secondaryBtn(true)}>Load</button>
-            </div>
-          )
-        ) : (
-          <>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-              <span style={{ fontSize: 13, color: "var(--text-mid)" }}>
-                {lpInfo.name} · {lpInfo.protocol} · needs both {symbolForMint(lpInfo.tokenAMint)} and {symbolForMint(lpInfo.tokenBMint)}
-              </span>
-              {lpOptions.length > 1 && (
-                <button
-                  onClick={() => { setLpInfo(null); setLpAmountA(""); setAckIl(false); }}
-                  style={{ ...secondaryBtn(true), padding: "3px 10px", fontSize: 12 }}
-                >
-                  Change
-                </button>
-              )}
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: 34, fontWeight: 700, color: "var(--text-hi)", letterSpacing: "-0.01em" }}>
+              ${totalValueUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}
             </div>
 
-            <div style={{ display: "flex", borderBottom: "1px solid var(--line)", marginBottom: 18 }}>
-              {(["deposit", "withdraw"] as const).map((t) => (
-                <button
-                  key={t}
-                  onClick={() => setLpTab(t)}
-                  style={{
-                    flex: 1, padding: "10px 0", background: "none", border: "none", cursor: "pointer",
-                    fontSize: 14, fontWeight: 700, textTransform: "capitalize",
-                    color: lpTab === t ? "var(--text-hi)" : "var(--text-low, #666)",
-                    borderBottom: lpTab === t ? "2px solid var(--signal)" : "2px solid transparent",
-                    marginBottom: -1, transition: "color 0.15s ease",
-                  }}
-                >
-                  {t}
-                </button>
-              ))}
-            </div>
-
-            {lpTab === "deposit" ? (
+            {!hasAnyPosition ? (
               <>
-                <input
-                  placeholder={`${symbolForMint(lpInfo.tokenAMint)} amount`}
-                  value={lpAmountA}
-                  onChange={(e) => setLpAmountA(e.target.value)}
-                  style={{ ...inputStyle(), width: "100%", marginBottom: 8 }}
-                />
-                <div style={{ fontSize: 13, color: "var(--text-mid)", marginBottom: 14, minHeight: 18 }}>
-                  {lpAmountA && Number(lpAmountA) > 0 && (
-                    lpQuoteLoading
-                      ? "Calculating required " + symbolForMint(lpInfo.tokenBMint) + "…"
-                      : lpQuoteB
-                        ? `You'll also need up to ~${lpQuoteB} ${symbolForMint(lpInfo.tokenBMint)} (pool's current price + 1% slippage buffer)`
-                        : "Couldn't get a live quote — try a different amount."
-                  )}
+                <div style={{ fontSize: 18, fontWeight: 700, color: "var(--text-hi)", marginTop: 14, marginBottom: 6 }}>
+                  Your vault is ready.
                 </div>
-                <label style={{ display: "flex", gap: 8, fontSize: 13, color: "var(--text-mid)", alignItems: "flex-start", cursor: "pointer", lineHeight: 1.5 }}>
-                  <input type="checkbox" checked={ackIl} onChange={(e) => setAckIl(e.target.checked)} style={{ marginTop: 2 }} />
-                  <span>I understand LP positions carry impermanent-loss risk and my deposit&apos;s value can fall relative to holding.</span>
-                </label>
+                <p style={{ color: "var(--text-mid)", fontSize: 14, lineHeight: 1.6, marginBottom: 16, maxWidth: "46ch" }}>
+                  Deposit once — YieldPilot routes to the best Solana rates automatically.
+                </p>
+                <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+                  {[100, 500, 2000].map((v) => (
+                    <button key={v} onClick={() => setPlanUsd(v)} style={secondaryBtn(true)}>
+                      ${v.toLocaleString()}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                  <div style={{ flex: 1, height: 6, borderRadius: 999, background: "var(--ink-800)", overflow: "hidden", display: "flex" }}>
+                    <div style={{ width: `${safePct}%`, background: "var(--signal)" }} />
+                    <div style={{ width: `${lpPct}%`, background: "var(--warn)" }} />
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 14, fontSize: 12, color: "var(--text-mid)" }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                    <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--signal)" }} /> Safe yield · lending &amp; staking
+                  </span>
+                  <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                    <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--warn)" }} /> LP yield · optional, IL risk
+                  </span>
+                </div>
               </>
             ) : (
               <>
-                <div style={{ fontSize: 13, color: "var(--text-mid)", marginBottom: 10 }}>
-                  Your position:{" "}
-                  <span style={{ color: "var(--text-hi)", fontFamily: "var(--font-mono)" }}>
-                    {lpPosition && lpPosition.shares > 0
-                      ? `${formatBaseUnitsToDecimal(lpPosition.shares.toString(), LP_SHARES_DECIMALS)} shares`
-                      : "nothing to withdraw"}
-                  </span>
-                </div>
-                <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-                  <input
-                    placeholder="Shares to withdraw"
-                    value={withdrawSharesInput}
-                    onChange={(e) => setWithdrawSharesInput(e.target.value)}
-                    style={{ ...inputStyle(), flex: 1 }}
-                  />
-                  <button
-                    onClick={setWithdrawMax}
-                    disabled={!lpPosition || lpPosition.shares === 0}
-                    style={secondaryBtn(!!lpPosition && lpPosition.shares > 0)}
-                  >
-                    MAX
-                  </button>
-                </div>
-                <div style={{ fontSize: 13, color: "var(--text-mid)", marginBottom: 16, minHeight: 18 }}>
-                  {withdrawSharesInput && Number(withdrawSharesInput) > 0 && (
-                    withdrawQuoteLoading
-                      ? "Calculating payout…"
-                      : withdrawQuote
-                        ? `You'll receive at least ~${formatBaseUnitsToDecimal(withdrawQuote.tokenMinA.add(withdrawQuote.idleA ?? new anchor.BN(0)).toString(), lpInfo.tokenADecimals)} ${symbolForMint(lpInfo.tokenAMint)} + ~${formatBaseUnitsToDecimal(withdrawQuote.tokenMinB.add(withdrawQuote.idleB ?? new anchor.BN(0)).toString(), lpInfo.tokenBDecimals)} ${symbolForMint(lpInfo.tokenBMint)}`
-                        : "Couldn't get a live quote — try a different amount."
-                  )}
-                </div>
-                <button
-                  onClick={withdrawLpLeg}
-                  disabled={busy || !withdrawQuote}
-                  style={primaryBtn(!busy && !!withdrawQuote)}
-                >
-                  {busy ? "Withdrawing…" : "Withdraw"}
-                </button>
+                {totalEarnedUsd > 0 && (
+                  <div style={{ fontSize: 13, color: "var(--signal, #2ecc71)", fontWeight: 600, marginTop: 4 }}>
+                    +${totalEarnedUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })} earned
+                  </div>
+                )}
+                {hasSafe && (
+                  <div style={{ borderTop: "1px solid var(--line)", marginTop: 16, paddingTop: 12 }}>
+                    {totals.rows.filter((r) => r.valueUsd > 0).map((r) => (
+                      <div key={r.name} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "5px 0" }}>
+                        <span style={{ color: "var(--text-mid)" }}>{r.name.replace("YieldPilot ", "")} · safe</span>
+                        <span style={{ color: "var(--text-hi)", fontFamily: "var(--font-mono)" }}>
+                          ${r.valueUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                          {r.earnedUsd > 0 && <span style={{ color: "var(--signal, #2ecc71)", marginLeft: 8 }}>+${r.earnedUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {lpHoldings.length > 0 && (
+                  <div style={{ borderTop: hasSafe ? "1px solid var(--line)" : undefined, marginTop: hasSafe ? 4 : 16, paddingTop: hasSafe ? 8 : 12 }}>
+                    {lpHoldings.map((h) => (
+                      <div key={h.info.address} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, padding: "5px 0" }}>
+                        <span style={{ color: "var(--text-mid)", display: "flex", alignItems: "center", gap: 6 }}>
+                          {h.info.name} · LP <Badge tone="warn">IL risk</Badge>
+                        </span>
+                        <span style={{ color: "var(--text-hi)", fontFamily: "var(--font-mono)" }}>${h.valueUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </>
             )}
-          </>
-        )}
-      </div>
 
-      {/* Exactly what will happen if this button is pressed right now — computed from the
-          real state of the two legs, not a generic label. Nothing fires that isn't listed here. */}
-      {(() => {
-        const willRunSafe = !!(safeVault && safeAmount && Number(safeAmount) > 0);
-        const willRunLp = !!(lpInfo && lpAmountA && Number(lpAmountA) > 0 && ackIl);
-        const parts: string[] = [];
-        if (willRunSafe) parts.push(`${safeAmount} ${safeVault!.name.toUpperCase().includes("SOL") ? "SOL" : "USDC"} → ${safeVault!.name}`);
-        if (willRunLp) {
-          const symA = symbolForMint(lpInfo!.tokenAMint);
-          const symB = symbolForMint(lpInfo!.tokenBMint);
-          parts.push(`${lpAmountA} ${symA}${lpQuoteB ? ` + up to ~${lpQuoteB} ${symB}` : ""} → ${lpInfo!.name}`);
-        }
-        return (
-          <div style={{
-            fontSize: 13, color: "var(--text-mid)", marginBottom: 16, padding: 14,
-            borderRadius: 8, background: "var(--ink-800)", border: "1px solid var(--line)",
-          }}>
-            {parts.length > 0
-              ? <>This will send: {parts.map((p, i) => <span key={i}>{i > 0 && " and "}<b style={{ color: "var(--text-hi)" }}>{p}</b></span>)}.</>
-              : "Enter an amount above to see exactly what this will send."}
+            <div style={{
+              display: "flex", gap: 16, flexWrap: "wrap", fontSize: 12, color: "var(--text-mid)",
+              marginTop: 18, paddingTop: 14, borderTop: "1px solid var(--line)",
+            }}>
+              <span>Non-custodial</span>
+              <span>·</span>
+              <span>On-chain program</span>
+              <span>·</span>
+              <span>Performance fee only, on profit</span>
+            </div>
           </div>
-        );
-      })()}
 
-      {error && <div style={{ color: "var(--loss)", fontSize: 13, marginBottom: 12 }}>{error}</div>}
-      {txStatus && <div style={{ fontSize: 13, marginBottom: 12, color: "var(--text-mid)" }}>{txStatus}</div>}
-      {txError && <div style={{ color: "var(--loss)", fontSize: 13, marginBottom: 12 }}>{txError}</div>}
+          {/* ── allocation dial ── */}
+          <div style={cardStyle}>
+            <SectionLabel hint="Preview only — each leg below still confirms its own amount.">
+              Allocation
+            </SectionLabel>
 
-      <button onClick={depositBoth} disabled={busy} style={{ ...primaryBtn(!busy), width: "100%", height: 46 }}>
-        {busy ? "Depositing…" : "Confirm and deposit"}
-      </button>
-      <p style={{ textAlign: "center", fontSize: 12, color: "var(--text-low, #666)", marginTop: 10 }}>
-        Each leg above is a separate on-chain transaction · funds stay in separate vaults, they are never combined
-      </p>
+            <div style={{ display: "flex", gap: 20, alignItems: "center", marginBottom: 8 }}>
+              <AllocationDonut safePctValue={safePct} />
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8, fontSize: 13 }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 7, color: "var(--text-hi)", fontWeight: 600 }}>
+                    <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--signal)" }} /> Safe yield
+                  </span>
+                  <span style={{ fontFamily: "var(--font-mono)", color: "var(--text-hi)" }}>{safePct}%</span>
+                </div>
+                <div style={{ color: "var(--text-mid)", fontSize: 12, marginTop: -4 }}>Lending &amp; staking</div>
+                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 7, color: "var(--text-hi)", fontWeight: 600 }}>
+                    <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--warn)" }} /> LP yield
+                  </span>
+                  <span style={{ fontFamily: "var(--font-mono)", color: "var(--text-hi)" }}>{lpPct}%</span>
+                </div>
+                <div style={{ color: "var(--text-mid)", fontSize: 12, marginTop: -4 }}>Liquidity provision · carries IL risk</div>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 6, marginTop: 14 }}>
+              <span style={{ color: "var(--text-mid)" }}>Plan amount</span>
+              <input
+                type="number"
+                value={planUsd}
+                onChange={(e) => setPlanUsd(Number(e.target.value) || 0)}
+                style={{ ...inputStyle(), width: 110, textAlign: "right" }}
+              />
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={5}
+              value={safePct}
+              onChange={(e) => setSafePct(Number(e.target.value))}
+              style={{ width: "100%", accentColor: "var(--signal)" }}
+            />
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text-low, #666)", margin: "2px 2px 12px" }}>
+              <span>All LP</span><span>All Safe</span>
+            </div>
+
+            <Badge tone={risk.tone}>{risk.text}</Badge>
+
+            <div style={{
+              display: "flex", justifyContent: "space-between", alignItems: "baseline",
+              background: "var(--ink-800)", borderRadius: 10, padding: "14px 16px", marginTop: 14,
+            }}>
+              <div style={{ fontSize: 13, color: "var(--text-mid)" }}>
+                Blended APR <b style={{ color: "var(--text-hi)", fontFamily: "var(--font-mono)" }}>{blended.toFixed(1)}%</b>
+              </div>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 20, fontWeight: 700, color: "var(--text-hi)" }}>
+                ${yearly.toLocaleString()}/yr
+              </div>
+            </div>
+
+            <div style={{
+              fontSize: 12.5, color: "var(--text-mid)", background: "rgba(216, 90, 48, 0.08)",
+              borderRadius: 8, padding: "10px 12px", marginTop: 14,
+            }}>
+              LP can lose principal if the pool price moves. Safe vault does not.
+            </div>
+          </div>
+        </div>
+
+        {/* ══════════ RIGHT: action ══════════ */}
+        <div style={{ ...cardStyle, position: "sticky", top: 24, alignSelf: "start" }}>
+          <SectionLabel>Add to position</SectionLabel>
+
+          {/* ── safe leg ── */}
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-hi)", marginBottom: 4 }}>Safe vault</div>
+            <div style={{ fontSize: 12.5, color: "var(--text-mid)", marginBottom: 10 }}>
+              {safeVault ? safeVault.name : "No vault configured"} · lending &amp; staking
+            </div>
+            <input
+              placeholder="Amount"
+              value={safeAmount}
+              onChange={(e) => setSafeAmount(e.target.value)}
+              style={{ ...inputStyle(), width: "100%" }}
+            />
+          </div>
+
+          {/* ── LP leg ── */}
+          <div style={{ marginBottom: 18, paddingTop: 18, borderTop: "1px solid var(--line)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-hi)" }}>LP vault</div>
+              <Badge tone="warn">IL risk</Badge>
+            </div>
+            {!lpInfo ? (
+              lpOptionsLoading ? (
+                <div style={{ fontSize: 13, color: "var(--text-mid)" }}>Loading available LP vaults…</div>
+              ) : lpOptions.length > 0 ? (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {lpOptions.map((opt) => {
+                    // Same live fee-APY numbers as the Live Rates page (useApys) — matched by
+                    // protocolId containing the protocol name, same pattern lpApy above uses.
+                    const rate = apys.find((x) => x.protocolId?.toLowerCase().includes(opt.protocol.toLowerCase()));
+                    return (
+                      <button
+                        key={opt.address}
+                        onClick={() => selectLp(opt)}
+                        style={{ ...secondaryBtn(true), display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4, minWidth: 130 }}
+                      >
+                        <span>{opt.name} · {opt.protocol}</span>
+                        <span style={{ fontSize: 15, fontWeight: 700, color: rate?.stale ? "var(--text-mid)" : "var(--signal, #2ecc71)" }}>
+                          {rate && !rate.stale ? `${rate.apyPercent.toFixed(1)}%` : "—"}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                // Fallback only: no LP vaults configured yet (NEXT_PUBLIC_LP_VAULT_ADDRESSES
+                // unset/empty), or every configured one failed to load. Manual entry keeps this
+                // page usable in that gap rather than dead-ending — not the normal path.
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input
+                    placeholder="LP vault address"
+                    value={manualLpAddr}
+                    onChange={(e) => setManualLpAddr(e.target.value)}
+                    style={{ ...inputStyle(), flex: 1, fontFamily: "var(--font-mono)" }}
+                  />
+                  <button onClick={loadManualLp} style={secondaryBtn(true)}>Load</button>
+                </div>
+              )
+            ) : (
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                  <span style={{ fontSize: 12.5, color: "var(--text-mid)" }}>
+                    {lpInfo.name} · {lpInfo.protocol} · needs both {symbolForMint(lpInfo.tokenAMint)} and {symbolForMint(lpInfo.tokenBMint)}
+                  </span>
+                  {lpOptions.length > 1 && (
+                    <button
+                      onClick={() => { setLpInfo(null); setLpAmountA(""); setAckIl(false); }}
+                      style={{ ...secondaryBtn(true), padding: "3px 10px", fontSize: 12 }}
+                    >
+                      Change
+                    </button>
+                  )}
+                </div>
+
+                <div style={{ display: "flex", borderBottom: "1px solid var(--line)", marginBottom: 16 }}>
+                  {(["deposit", "withdraw"] as const).map((t) => (
+                    <button
+                      key={t}
+                      onClick={() => setLpTab(t)}
+                      style={{
+                        flex: 1, padding: "9px 0", background: "none", border: "none", cursor: "pointer",
+                        fontSize: 13.5, fontWeight: 700, textTransform: "capitalize",
+                        color: lpTab === t ? "var(--text-hi)" : "var(--text-low, #666)",
+                        borderBottom: lpTab === t ? "2px solid var(--signal)" : "2px solid transparent",
+                        marginBottom: -1, transition: "color 0.15s ease",
+                      }}
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+
+                {lpTab === "deposit" ? (
+                  <>
+                    <input
+                      placeholder={`${symbolForMint(lpInfo.tokenAMint)} amount`}
+                      value={lpAmountA}
+                      onChange={(e) => setLpAmountA(e.target.value)}
+                      style={{ ...inputStyle(), width: "100%", marginBottom: 8 }}
+                    />
+                    <div style={{ fontSize: 12.5, color: "var(--text-mid)", marginBottom: 12, minHeight: 18 }}>
+                      {lpAmountA && Number(lpAmountA) > 0 && (
+                        lpQuoteLoading
+                          ? "Calculating required " + symbolForMint(lpInfo.tokenBMint) + "…"
+                          : lpQuoteB
+                            ? `You'll also need up to ~${lpQuoteB} ${symbolForMint(lpInfo.tokenBMint)} (pool's current price + 1% slippage buffer)`
+                            : "Couldn't get a live quote — try a different amount."
+                      )}
+                    </div>
+                    <label style={{ display: "flex", gap: 8, fontSize: 12.5, color: "var(--text-mid)", alignItems: "flex-start", cursor: "pointer", lineHeight: 1.5 }}>
+                      <input type="checkbox" checked={ackIl} onChange={(e) => setAckIl(e.target.checked)} style={{ marginTop: 2 }} />
+                      <span>I understand LP positions carry impermanent-loss risk and my deposit&apos;s value can fall relative to holding.</span>
+                    </label>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 12.5, color: "var(--text-mid)", marginBottom: 10 }}>
+                      Your position:{" "}
+                      <span style={{ color: "var(--text-hi)", fontFamily: "var(--font-mono)" }}>
+                        {lpPosition && lpPosition.shares > 0
+                          ? `${formatBaseUnitsToDecimal(lpPosition.shares.toString(), LP_SHARES_DECIMALS)} shares`
+                          : "nothing to withdraw"}
+                      </span>
+                    </div>
+                    <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                      <input
+                        placeholder="Shares to withdraw"
+                        value={withdrawSharesInput}
+                        onChange={(e) => setWithdrawSharesInput(e.target.value)}
+                        style={{ ...inputStyle(), flex: 1 }}
+                      />
+                      <button
+                        onClick={setWithdrawMax}
+                        disabled={!lpPosition || lpPosition.shares === 0}
+                        style={secondaryBtn(!!lpPosition && lpPosition.shares > 0)}
+                      >
+                        MAX
+                      </button>
+                    </div>
+                    <div style={{ fontSize: 12.5, color: "var(--text-mid)", marginBottom: 16, minHeight: 18 }}>
+                      {withdrawSharesInput && Number(withdrawSharesInput) > 0 && (
+                        withdrawQuoteLoading
+                          ? "Calculating payout…"
+                          : withdrawQuote
+                            ? `You'll receive at least ~${formatBaseUnitsToDecimal(withdrawQuote.tokenMinA.add(withdrawQuote.idleA ?? new anchor.BN(0)).toString(), lpInfo.tokenADecimals)} ${symbolForMint(lpInfo.tokenAMint)} + ~${formatBaseUnitsToDecimal(withdrawQuote.tokenMinB.add(withdrawQuote.idleB ?? new anchor.BN(0)).toString(), lpInfo.tokenBDecimals)} ${symbolForMint(lpInfo.tokenBMint)}`
+                            : "Couldn't get a live quote — try a different amount."
+                      )}
+                    </div>
+                    <button
+                      onClick={withdrawLpLeg}
+                      disabled={busy || !withdrawQuote}
+                      style={primaryBtn(!busy && !!withdrawQuote)}
+                    >
+                      {busy ? "Withdrawing…" : "Withdraw"}
+                    </button>
+                  </>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* ── exactly what will happen ── */}
+          {(willRunSafe || willRunLp) && (
+            <div style={{
+              fontSize: 13, color: "var(--text-mid)", marginBottom: 14, padding: 12,
+              borderRadius: 8, background: "var(--ink-800)", border: "1px solid var(--line)",
+            }}>
+              This will send:{" "}
+              {willRunSafe && <b style={{ color: "var(--text-hi)" }}>{safeAmount} {safeVault!.name.toUpperCase().includes("SOL") ? "SOL" : "USDC"} → {safeVault!.name}</b>}
+              {willRunSafe && willRunLp && " and "}
+              {willRunLp && (
+                <b style={{ color: "var(--text-hi)" }}>
+                  {lpAmountA} {symbolForMint(lpInfo!.tokenAMint)}{lpQuoteB ? ` + up to ~${lpQuoteB} ${symbolForMint(lpInfo!.tokenBMint)}` : ""} → {lpInfo!.name}
+                </b>
+              )}
+              .
+            </div>
+          )}
+
+          {error && <div style={{ color: "var(--loss)", fontSize: 13, marginBottom: 10 }}>{error}</div>}
+          {txStatus && <div style={{ fontSize: 13, marginBottom: 10, color: "var(--text-mid)" }}>{txStatus}</div>}
+          {txError && <div style={{ color: "var(--loss)", fontSize: 13, marginBottom: 10 }}>{txError}</div>}
+
+          <button onClick={depositBoth} disabled={busy} style={{ ...primaryBtn(!busy), width: "100%", height: 46 }}>
+            {busy ? "Depositing…" : depositLabel}
+          </button>
+          <p style={{ textAlign: "center", fontSize: 11.5, color: "var(--text-low, #666)", marginTop: 10 }}>
+            Each leg above is a separate on-chain transaction · funds stay in separate vaults
+          </p>
+        </div>
+      </div>
     </main>
   );
 }
+
+const twoColLayout: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "1.15fr 0.85fr",
+  gap: 24,
+  alignItems: "start",
+};
+
+const cardStyle: CSSProperties = {
+  border: "1px solid var(--line)",
+  borderRadius: 14,
+  padding: 24,
+};
 
 function inputStyle(): CSSProperties {
   return {
@@ -779,7 +905,3 @@ function secondaryBtn(enabled: boolean): CSSProperties {
     cursor: enabled ? "pointer" : "not-allowed", opacity: enabled ? 1 : 0.5,
   };
 }
-
-const statCardStyle: CSSProperties = { flex: 1, background: "var(--ink-800)", borderRadius: 8, padding: "1rem", border: "1px solid var(--line)" };
-const statLabelStyle: CSSProperties = { fontSize: 12, color: "var(--text-mid)", marginBottom: 4 };
-const statValueStyle: CSSProperties = { fontSize: 22, fontWeight: 700, color: "var(--text-hi)" };
