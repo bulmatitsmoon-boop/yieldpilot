@@ -1,15 +1,20 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createWalletClient, createPublicClient, custom, http, type WalletClient, type PublicClient } from "viem";
 import { ROBINHOOD_CHAIN_ID, ROBINHOOD_CHAIN_PARAMS, ROBINHOOD_RPC_URL } from "@/lib/hood/constants";
 
+/// Minimal EIP-1193 shape -- both window.ethereum (injected wallets) and the WalletConnect
+/// provider satisfy this, so the rest of this hook doesn't need to know which one is active.
+export interface Eip1193Provider {
+  request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
+  on?: (event: string, handler: (...args: unknown[]) => void) => void;
+  removeListener?: (event: string, handler: (...args: unknown[]) => void) => void;
+  disconnect?: () => Promise<void>;
+}
+
 declare global {
   interface Window {
-    ethereum?: {
-      request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
-      on?: (event: string, handler: (...args: unknown[]) => void) => void;
-      removeListener?: (event: string, handler: (...args: unknown[]) => void) => void;
-    };
+    ethereum?: Eip1193Provider;
   }
 }
 
@@ -26,72 +31,116 @@ export const hoodPublicClient: PublicClient = createPublicClient({
   transport: http(ROBINHOOD_RPC_URL),
 }) as PublicClient;
 
-/// Connects an injected EVM wallet (MetaMask, etc.), switching/adding Robinhood Chain as needed.
-/// Deliberately a plain window.ethereum integration (no wagmi/RainbowKit) -- keeps this feature
-/// self-contained rather than restructuring the whole app's wallet stack for one new chain.
+export const WALLETCONNECT_PROJECT_ID = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "";
+
+/// Connects an EVM wallet -- either an injected extension (MetaMask, Phantom's EVM provider,
+/// etc.) or, for anyone without a desktop extension, WalletConnect (QR code / mobile deep link,
+/// e.g. Phantom mobile, Rainbow, Trust Wallet). Deliberately built on plain EIP-1193 providers
+/// rather than wagmi/RainbowKit -- keeps this feature self-contained rather than restructuring
+/// the whole app's existing Solana wallet stack for one new chain.
 export function useHoodWallet() {
   const [address, setAddress] = useState<`0x${string}` | null>(null);
   const [walletClient, setWalletClient] = useState<WalletClient | null>(null);
   const [wrongNetwork, setWrongNetwork] = useState(false);
   const [connecting, setConnecting] = useState(false);
+  const [connectionType, setConnectionType] = useState<"injected" | "walletconnect" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const providerRef = useRef<Eip1193Provider | null>(null);
+
+  const bindProvider = useCallback((provider: Eip1193Provider, address0: `0x${string}`, type: "injected" | "walletconnect") => {
+    providerRef.current = provider;
+    setAddress(address0);
+    setWalletClient(createWalletClient({ chain: robinhoodChain, transport: custom(provider) }));
+    setConnectionType(type);
+  }, []);
 
   const refreshChain = useCallback(async () => {
-    if (!window.ethereum) return;
-    const chainIdHex = (await window.ethereum.request({ method: "eth_chainId" })) as string;
+    const provider = providerRef.current;
+    if (!provider) return;
+    const chainIdHex = (await provider.request({ method: "eth_chainId" })) as string;
     setWrongNetwork(parseInt(chainIdHex, 16) !== ROBINHOOD_CHAIN_ID);
   }, []);
 
+  // Auto-reconnect an already-authorized injected wallet (no popup) on page load.
   useEffect(() => {
     if (!window.ethereum) return;
-    window.ethereum.request({ method: "eth_accounts" }).then((accs) => {
+    const injected = window.ethereum;
+    injected.request({ method: "eth_accounts" }).then((accs) => {
       const list = accs as string[];
-      if (list.length > 0) {
-        setAddress(list[0] as `0x${string}`);
-        setWalletClient(createWalletClient({ chain: robinhoodChain, transport: custom(window.ethereum!) }));
-      }
+      if (list.length > 0) bindProvider(injected, list[0] as `0x${string}`, "injected");
     });
-    refreshChain();
 
     const onAccountsChanged = (...args: unknown[]) => {
       const accs = args[0] as string[];
       setAddress(accs.length > 0 ? (accs[0] as `0x${string}`) : null);
     };
     const onChainChanged = () => refreshChain();
-    window.ethereum.on?.("accountsChanged", onAccountsChanged);
-    window.ethereum.on?.("chainChanged", onChainChanged);
+    injected.on?.("accountsChanged", onAccountsChanged);
+    injected.on?.("chainChanged", onChainChanged);
     return () => {
-      window.ethereum?.removeListener?.("accountsChanged", onAccountsChanged);
-      window.ethereum?.removeListener?.("chainChanged", onChainChanged);
+      injected.removeListener?.("accountsChanged", onAccountsChanged);
+      injected.removeListener?.("chainChanged", onChainChanged);
     };
-  }, [refreshChain]);
+  }, [bindProvider, refreshChain]);
+
+  useEffect(() => {
+    if (providerRef.current) refreshChain();
+  }, [address, refreshChain]);
 
   const connect = useCallback(async () => {
     setError(null);
     if (!window.ethereum) {
-      setError("No wallet found -- install MetaMask or another EVM wallet extension.");
+      setError("No wallet extension found -- install MetaMask, or use \"Connect via mobile\" below.");
       return;
     }
     setConnecting(true);
     try {
       const accs = (await window.ethereum.request({ method: "eth_requestAccounts" })) as string[];
-      if (accs.length > 0) {
-        setAddress(accs[0] as `0x${string}`);
-        setWalletClient(createWalletClient({ chain: robinhoodChain, transport: custom(window.ethereum) }));
-      }
-      await refreshChain();
+      if (accs.length > 0) bindProvider(window.ethereum, accs[0] as `0x${string}`, "injected");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to connect wallet.");
     } finally {
       setConnecting(false);
     }
-  }, [refreshChain]);
+  }, [bindProvider]);
+
+  const connectWalletConnect = useCallback(async () => {
+    setError(null);
+    if (!WALLETCONNECT_PROJECT_ID) {
+      setError("Mobile wallet connect isn't configured yet -- check back soon.");
+      return;
+    }
+    setConnecting(true);
+    try {
+      const { EthereumProvider } = await import("@walletconnect/ethereum-provider");
+      const wcProvider = await EthereumProvider.init({
+        projectId: WALLETCONNECT_PROJECT_ID,
+        chains: [ROBINHOOD_CHAIN_ID],
+        rpcMap: { [ROBINHOOD_CHAIN_ID]: ROBINHOOD_RPC_URL },
+        showQrModal: true,
+        metadata: {
+          name: "YieldPilot",
+          description: "YieldPilot on Robinhood Chain",
+          url: typeof window !== "undefined" ? window.location.origin : "https://yieldpilot.app",
+          icons: [],
+        },
+      });
+      await wcProvider.connect();
+      const accs = wcProvider.accounts;
+      if (accs.length > 0) bindProvider(wcProvider as unknown as Eip1193Provider, accs[0] as `0x${string}`, "walletconnect");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to connect via WalletConnect.");
+    } finally {
+      setConnecting(false);
+    }
+  }, [bindProvider]);
 
   const switchToRobinhoodChain = useCallback(async () => {
-    if (!window.ethereum) return;
+    const provider = providerRef.current;
+    if (!provider) return;
     setError(null);
     try {
-      await window.ethereum.request({
+      await provider.request({
         method: "wallet_switchEthereumChain",
         params: [{ chainId: ROBINHOOD_CHAIN_PARAMS.chainId }],
       });
@@ -100,7 +149,7 @@ export function useHoodWallet() {
       const code = (switchError as { code?: number })?.code;
       if (code === 4902) {
         try {
-          await window.ethereum.request({
+          await provider.request({
             method: "wallet_addEthereumChain",
             params: [ROBINHOOD_CHAIN_PARAMS],
           });
@@ -114,10 +163,32 @@ export function useHoodWallet() {
     await refreshChain();
   }, [refreshChain]);
 
-  const disconnect = useCallback(() => {
+  const disconnect = useCallback(async () => {
+    if (connectionType === "walletconnect" && providerRef.current?.disconnect) {
+      try {
+        await providerRef.current.disconnect();
+      } catch {
+        // best-effort session cleanup
+      }
+    }
+    providerRef.current = null;
     setAddress(null);
     setWalletClient(null);
-  }, []);
+    setConnectionType(null);
+  }, [connectionType]);
 
-  return { address, connected: !!address, connecting, wrongNetwork, error, connect, disconnect, switchToRobinhoodChain, walletClient };
+  return {
+    address,
+    connected: !!address,
+    connecting,
+    connectionType,
+    wrongNetwork,
+    error,
+    connect,
+    connectWalletConnect,
+    walletConnectAvailable: !!WALLETCONNECT_PROJECT_ID,
+    disconnect,
+    switchToRobinhoodChain,
+    walletClient,
+  };
 }
