@@ -8,7 +8,7 @@ shared admin keys, no cross-chain control (deliberate decision).
 
 - Our `AllowlistedFactory`: `0xe92d417C82f2c217757E1cAc38d32c8d06250334`
 - Our `DualPoolHook` (Uniswap v4, owned by the wrapper below): `0x22e255a8f28B8c4c5b663e42eac1D38C3da7EAC0`
-- `YieldPilotHoodVault` (`src/wrapper/YieldPilotHoodVault.sol`): `0x4f118199c64e253B59245CB976A0017F08A35A52`
+- `YieldPilotHoodVault` (`reference/YieldPilotHoodVault.sol`): `0x4f118199c64e253B59245CB976A0017F08A35A52`
   - `admin`: the real admin wallet (see repo secrets, never hardcoded here)
   - `treasury`: the real treasury wallet, distinct from admin
   - Non-upgradeable by deliberate decision — a compromised admin key can only call fixed
@@ -17,7 +17,7 @@ shared admin keys, no cross-chain control (deliberate decision).
 - Real Morpho VaultV2 for USDe: `0x92570f0D10CC39ACb80B630611a18bA091687337` (currently idle — no
   real Morpho market exists yet with USDe as the loan asset on this chain)
 
-`src/wrapper/YieldPilotHoodVault.sol` is committed for reference/audit — it needs the full
+`reference/YieldPilotHoodVault.sol` is committed for reference/audit — it needs the full
 Uniswap v4-core + OpenZeppelin dependency tree to actually recompile, which this lightweight repo
 folder does not vendor. Its bytecode is already live at the address above; this file is not
 re-deployed by anything in this folder.
