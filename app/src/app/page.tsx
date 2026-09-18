@@ -8,6 +8,7 @@ import { useApys } from "@/hooks/useApys";
 import { useYieldPilot } from "@/hooks/useYieldPilot";
 import { useSolPrice } from "@/hooks/useSolPrice";
 import { computeLpVaultValueUsd, computeLpVaultLifetimeFeesUsd } from "@/hooks/useLpVault";
+import { useHoodFleetStats } from "@/hooks/useHoodFleetStats";
 import { useConnection } from "@solana/wallet-adapter-react";
 import { useEffect, useState } from "react";
 import { fmt } from "@/components/ui";
@@ -119,7 +120,12 @@ export default function Home() {
     return () => { cancelled = true; };
   }, [connection, solPrice]);
 
-  const totalDepositedUsd = safeDepositedUsd + lpDepositedUsd;
+  // Real Robinhood Chain TVL + fee revenue -- same discipline as the Solana LP figures
+  // above: real on-chain reads (pool reserves, treasury balance), never a placeholder.
+  const { hoodDepositedUsd, hoodFeesUsd } = useHoodFleetStats();
+
+  const totalDepositedUsd = safeDepositedUsd + lpDepositedUsd + hoodDepositedUsd;
+  const totalFeesUsd = lpFeesUsd + hoodFeesUsd;
   // Excludes stale entries: averaging a rate we did not actually fetch would put a
   // fabricated number in the hero. null (not 0) when nothing is live, so FleetRadar
   // can render "—" — 0.0% would read as a real, terrible rate.
@@ -297,7 +303,7 @@ export default function Home() {
         </div>
 
         {/* ── Fleet Radar (real, live data — no fabricated numbers) ──────────── */}
-        <FleetRadar totalDeposited={totalDepositedUsd} blendedApy={blendedApy} lpFeesEarnedUsd={lpFeesUsd} />
+        <FleetRadar totalDeposited={totalDepositedUsd} blendedApy={blendedApy} lpFeesEarnedUsd={totalFeesUsd} />
 
         {/* ── How it works (animated stepper) ─────────────────────────────────── */}
         <div style={{ marginBottom: 96, position: "relative", zIndex: 1 }}>
