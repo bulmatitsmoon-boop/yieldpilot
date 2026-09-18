@@ -1,6 +1,7 @@
 "use client";
 
 import { useFleetStats } from "@/hooks/useFleetStats";
+import { useHoodFleetStats } from "@/hooks/useHoodFleetStats";
 import { fmtTvl } from "@/components/ui";
 
 interface Props {
@@ -19,7 +20,20 @@ function dotPosition(i: number, radius: number) {
 }
 
 export function FleetRadar({ totalDeposited, blendedApy, lpFeesEarnedUsd }: Props) {
-  const { activePositions, recentActivity, totalGainedUsd, lifetimeGainedUsd, loading } = useFleetStats();
+  const { activePositions: solanaActivePositions, recentActivity: solanaActivity, totalGainedUsd, lifetimeGainedUsd, loading: solanaLoading } = useFleetStats();
+  const { hoodActivePositions, hoodActivity, loading: hoodLoading } = useHoodFleetStats();
+
+  const activePositions = solanaActivePositions + hoodActivePositions;
+  const loading = solanaLoading && hoodLoading;
+
+  // Merge both chains' real activity into one feed, most recent first. Each item
+  // carries its own chain + explorer link so the render below can pick the right URL.
+  type UnifiedActivity = { id: string; chain: "solana" | "robinhood"; blockTime: number | null; explorerUrl: string };
+  const solanaCluster = process.env.NEXT_PUBLIC_SOLANA_NETWORK === "mainnet-beta" ? "mainnet-beta" : "devnet";
+  const unifiedActivity: UnifiedActivity[] = [
+    ...solanaActivity.map((a) => ({ id: a.signature, chain: "solana" as const, blockTime: a.blockTime, explorerUrl: `https://solscan.io/tx/${a.signature}?cluster=${solanaCluster}` })),
+    ...hoodActivity.map((a) => ({ id: a.id, chain: "robinhood" as const, blockTime: a.blockTime, explorerUrl: a.explorerUrl })),
+  ].sort((a, b) => (b.blockTime ?? 0) - (a.blockTime ?? 0));
 
   return (
     <div style={{ marginBottom: 96, position: "relative", zIndex: 1 }}>
@@ -110,18 +124,26 @@ export function FleetRadar({ totalDeposited, blendedApy, lpFeesEarnedUsd }: Prop
             <div style={{ fontSize: 10, fontWeight: 600, color: "var(--text-low)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 10, fontFamily: "var(--font-mono)" }}>
               Recent on-chain activity
             </div>
-            {recentActivity.length === 0 ? (
+            {unifiedActivity.length === 0 ? (
               <div style={{ color: "var(--text-low)", fontSize: 13 }}>No activity yet.</div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {recentActivity.slice(0, 4).map((a) => (
+                {unifiedActivity.slice(0, 4).map((a) => (
                   <a
-                    key={a.signature}
-                    href={`https://solscan.io/tx/${a.signature}?cluster=${process.env.NEXT_PUBLIC_SOLANA_NETWORK === "mainnet-beta" ? "mainnet-beta" : "devnet"}`}
+                    key={a.id}
+                    href={a.explorerUrl}
                     target="_blank" rel="noopener noreferrer"
-                    style={{ display: "flex", justifyContent: "space-between", fontSize: 12, textDecoration: "none", color: "var(--text-mid)" }}
+                    style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, fontSize: 12, textDecoration: "none", color: "var(--text-mid)" }}
                   >
-                    <span className="mono-num">{a.signature.slice(0, 12)}…</span>
+                    <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{
+                        fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em",
+                        color: a.chain === "solana" ? "var(--signal)" : "#a78bfa",
+                        background: a.chain === "solana" ? "rgba(63,224,160,0.1)" : "rgba(167,139,250,0.1)",
+                        padding: "1px 5px", borderRadius: 4,
+                      }}>{a.chain === "solana" ? "SOL" : "HOOD"}</span>
+                      <span className="mono-num">{a.id.slice(0, 10)}…</span>
+                    </span>
                     <span>{a.blockTime ? new Date(a.blockTime * 1000).toLocaleTimeString() : "pending"}</span>
                   </a>
                 ))}
