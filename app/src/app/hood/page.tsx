@@ -17,7 +17,18 @@ import { USDE_ADDRESS, USDG_ADDRESS, HOOD_WRAPPER_ADDRESS, ROBINHOOD_EXPLORER_UR
 type TxStatus = "idle" | "approving" | "signing" | "confirming" | "success" | "error";
 
 export default function HoodPage() {
-  const { address, connected, connecting, wrongNetwork, error: walletError, connect, switchToRobinhoodChain, walletClient } = useHoodWallet();
+  const {
+    address,
+    connected,
+    connecting,
+    wrongNetwork,
+    error: walletError,
+    connect,
+    connectWalletConnect,
+    walletConnectAvailable,
+    switchToRobinhoodChain,
+    walletClient,
+  } = useHoodWallet();
   const { pool, loading: poolLoading, refresh: refreshPool } = useHoodPool();
   const { user, refresh: refreshUser } = useHoodUser(address);
 
@@ -104,10 +115,19 @@ export default function HoodPage() {
 
       {!connected ? (
         <Card style={{ padding: 32, textAlign: "center" }}>
-          <p style={{ marginBottom: 16, color: "var(--text-muted)" }}>Connect an EVM wallet (MetaMask, etc.) to deposit or withdraw.</p>
-          <Button onClick={connect} disabled={connecting} size="lg">
-            {connecting ? "Connecting..." : "Connect Wallet"}
-          </Button>
+          <p style={{ marginBottom: 16, color: "var(--text-muted)" }}>Connect an EVM wallet to deposit or withdraw.</p>
+          <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
+            <Button onClick={connect} disabled={connecting} size="lg">
+              {connecting ? "Connecting..." : "Connect Extension"}
+            </Button>
+            <Button onClick={connectWalletConnect} disabled={connecting || !walletConnectAvailable} variant="secondary" size="lg">
+              {connecting ? "Connecting..." : "Connect via Mobile"}
+            </Button>
+          </div>
+          <p style={{ color: "var(--text-dim)", fontSize: 11, marginTop: 12 }}>
+            &quot;Connect Extension&quot; works with MetaMask or any injected EVM wallet (including Phantom&apos;s Ethereum support).
+            &quot;Connect via Mobile&quot; scans a QR code with your phone&apos;s wallet app -- no extension needed.
+          </p>
           {walletError && <p style={{ color: "#f87171", fontSize: 13, marginTop: 12 }}>{walletError}</p>}
         </Card>
       ) : wrongNetwork ? (
