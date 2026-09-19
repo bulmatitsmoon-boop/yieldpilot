@@ -1,17 +1,5 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { parseAbiItem } from "viem";
-import { hoodPublicClient } from "@/hooks/useHoodWallet";
-import {
-  HOOD_WRAPPER_ADDRESS,
-  USDE_ADDRESS,
-  USDG_ADDRESS,
-  HOOD_TREASURY_ADDRESS,
-  ROBINHOOD_EXPLORER_URL,
-  HOOK_ADDRESS,
-  POOL_KEY,
-} from "@/lib/hood/constants";
-import { hoodVaultAbi, hookAbi, erc20Abi } from "@/lib/hood/abi";
 
 export interface HoodActivity {
   id: string; // tx hash
@@ -28,12 +16,12 @@ export interface HoodFleetStats {
   loading: boolean;
 }
 
-const depositedEvent = parseAbiItem("event Deposited(address indexed user, uint256 amount0, uint256 amount1, uint256 sharesMinted)");
-const withdrawnEvent = parseAbiItem("event Withdrawn(address indexed user, uint256 amount0, uint256 amount1, uint256 sharesBurned, uint256 feeBps)");
-
 /// Real, on-chain Robinhood Chain stats -- same "no fabricated numbers" discipline as
-/// useFleetStats.ts on the Solana side. Deliberately queries real event logs + real
-/// contract reads, not a cached/estimated figure.
+/// useFleetStats.ts on the Solana side. Fetched via /api/hood-activity (server-side,
+/// cached 60s for all visitors) rather than scanning event logs directly from the
+/// browser: Robinhood Chain's public RPC caps eth_getLogs at 2000 blocks per request,
+/// so a full since-deployment scan needs real chunking that shouldn't run once per
+/// visitor per page load.
 export function useHoodFleetStats(): HoodFleetStats {
   const [hoodDepositedUsd, setHoodDepositedUsd] = useState(0);
   const [hoodFeesUsd, setHoodFeesUsd] = useState(0);
@@ -45,63 +33,21 @@ export function useHoodFleetStats(): HoodFleetStats {
   const fetchStats = useCallback(async () => {
     const requestId = ++requestIdRef.current;
     try {
-      const [reserves, treasuryUsde, treasuryUsdg, depositLogs, withdrawLogs] = await Promise.all([
-        hoodPublicClient.readContract({
-          address: HOOK_ADDRESS,
-          abi: hookAbi,
-          functionName: "getReserves",
-          args: [POOL_KEY],
-        }) as Promise<readonly [bigint, bigint]>,
-        hoodPublicClient.readContract({ address: USDE_ADDRESS, abi: erc20Abi, functionName: "balanceOf", args: [HOOD_TREASURY_ADDRESS] }) as Promise<bigint>,
-        hoodPublicClient.readContract({ address: USDG_ADDRESS, abi: erc20Abi, functionName: "balanceOf", args: [HOOD_TREASURY_ADDRESS] }) as Promise<bigint>,
-        hoodPublicClient.getLogs({
-          address: HOOD_WRAPPER_ADDRESS,
-          event: depositedEvent,
-          fromBlock: "earliest",
-          toBlock: "latest",
-        }),
-        hoodPublicClient.getLogs({
-          address: HOOD_WRAPPER_ADDRESS,
-          event: withdrawnEvent,
-          fromBlock: "earliest",
-          toBlock: "latest",
-        }),
-      ]);
-
+      const res = await fetch("/api/hood-activity");
+      const data = await res.json();
       if (requestId !== requestIdRef.current) return;
 
-      // Reserves are USDe (18 dec) + USDG (6 dec), both real stablecoins ~= $1 each.
-      const depositedUsd = Number(reserves[0]) / 1e18 + Number(reserves[1]) / 1e6;
-      const feesUsd = Number(treasuryUsde) / 1e18 + Number(treasuryUsdg) / 1e6;
-
-      // Unique real depositor addresses (from real Deposited events), then check who
-      // STILL holds a nonzero share balance right now -- not just "ever deposited".
-      const uniqueUsers = Array.from(new Set(depositLogs.map((l) => l.args.user as `0x${string}`)));
-      const shareBalances = await Promise.all(
-        uniqueUsers.map((u) =>
-          hoodPublicClient.readContract({ address: HOOD_WRAPPER_ADDRESS, abi: hoodVaultAbi, functionName: "userShares", args: [u] }) as Promise<bigint>
-        )
+      setHoodDepositedUsd(data.depositedUsd ?? 0);
+      setHoodFeesUsd(data.feesUsd ?? 0);
+      setHoodActivePositions(data.activePositions ?? 0);
+      setHoodActivity(
+        (data.activity ?? []).map((a: { id: string; blockTime: number | null; explorerUrl: string }) => ({
+          id: a.id,
+          chain: "robinhood" as const,
+          blockTime: a.blockTime,
+          explorerUrl: a.explorerUrl,
+        }))
       );
-      const activePositions = shareBalances.filter((s) => s > 0n).length;
-
-      // Real recent activity, both deposits and withdrawals, most recent first.
-      const allLogs = [...depositLogs, ...withdrawLogs].sort((a, b) => Number(b.blockNumber - a.blockNumber)).slice(0, 8);
-      const blocks = await Promise.all(
-        Array.from(new Set(allLogs.map((l) => l.blockNumber))).map((bn) => hoodPublicClient.getBlock({ blockNumber: bn }))
-      );
-      const blockTimeByNumber = new Map(blocks.map((b) => [b.number, Number(b.timestamp)]));
-      const activity: HoodActivity[] = allLogs.map((l) => ({
-        id: l.transactionHash,
-        chain: "robinhood" as const,
-        blockTime: blockTimeByNumber.get(l.blockNumber) ?? null,
-        explorerUrl: `${ROBINHOOD_EXPLORER_URL}/tx/${l.transactionHash}`,
-      }));
-
-      if (requestId !== requestIdRef.current) return;
-      setHoodDepositedUsd(depositedUsd);
-      setHoodFeesUsd(feesUsd);
-      setHoodActivePositions(activePositions);
-      setHoodActivity(activity);
     } catch (err) {
       console.error("useHoodFleetStats error", err);
     } finally {
