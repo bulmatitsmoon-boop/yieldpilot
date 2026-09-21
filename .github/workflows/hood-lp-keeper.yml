@@ -27,9 +27,10 @@ jobs:
         run: |
           set -u
           RPC=https://rpc.mainnet.chain.robinhood.com
-          if [ -z "$VAULT" ]; then echo "LP_VAULT_ADDRESS not set yet - nothing to do"; exit 0; fi
           if [ -z "$KEEPER_KEY" ]; then echo "HOOD_KEEPER_KEY secret missing"; exit 1; fi
           KEEPER=$(cast wallet address --private-key "$KEEPER_KEY")
+          echo "keeper wallet derived from HOOD_KEEPER_KEY: $KEEPER"
+          if [ -z "$VAULT" ]; then echo "LP_VAULT_ADDRESS not set yet - nothing to do"; exit 0; fi
 
           # Loud failure (GitHub emails you) if the keeper is about to run out of gas.
           BAL=$(cast balance "$KEEPER" --rpc-url $RPC)
