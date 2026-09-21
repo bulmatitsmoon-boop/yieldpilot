@@ -1,0 +1,46 @@
+name: Hood LP Vault Deploy (ETH/USDG)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "yes" to confirm this runs a REAL signed mainnet contract deployment'
+        required: true
+        default: 'no'
+      keeper:
+        description: 'Keeper bot wallet address (separate from admin; runs maintain() on a schedule)'
+        required: true
+      cap_usdg:
+        description: 'Deposit cap in USDG base units (6 decimals). 500000000 = $500'
+        required: true
+        default: '500000000'
+
+jobs:
+  deploy-lp-vault:
+    if: github.event.inputs.confirm == 'yes'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: hood-chain/lp
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Install dependencies (pinned commits, same ones the vault was fork-tested against)
+        run: |
+          forge install foundry-rs/forge-std@7fdf81f9ceb2f6ebbb8f9f1c6c5274d5bcc9a1f5 --no-commit
+          forge install OpenZeppelin/openzeppelin-contracts@32608b2a5168a2c6ac691c5967356a2994aa2165 --no-commit
+          forge install Uniswap/v4-core@46c6834698c48bc4a463a86d8420f4eb1d7f3b75 --no-commit
+
+      - name: Build
+        run: forge build
+
+      - name: Deploy ETH/USDG LP vault to Robinhood Chain mainnet
+        env:
+          HOOD_ADMIN_KEY: ${{ secrets.HOOD_ADMIN_KEY }}
+          KEEPER: ${{ github.event.inputs.keeper }}
+          CAP_USDG: ${{ github.event.inputs.cap_usdg }}
+        run: |
+          forge script script/DeployLpVault.s.sol             --rpc-url https://rpc.mainnet.chain.robinhood.com             --private-key "$HOOD_ADMIN_KEY"             --broadcast
