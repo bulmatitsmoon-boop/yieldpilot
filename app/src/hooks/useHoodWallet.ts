@@ -14,8 +14,21 @@ export interface Eip1193Provider {
 
 declare global {
   interface Window {
-    ethereum?: Eip1193Provider;
+    ethereum?: Eip1193Provider & { providers?: (Eip1193Provider & { isMetaMask?: boolean })[]; isMetaMask?: boolean };
   }
+}
+
+/// Multiple installed wallets (e.g. Phantom, which also injects an EVM provider) fight over
+/// `window.ethereum`. Whichever wins isn't necessarily MetaMask, and Phantom's EVM side isn't
+/// aware of custom chains like Robinhood Chain -- explicitly pick out the real MetaMask provider
+/// (`providers` is the de-facto multi-wallet array most extensions populate) rather than trusting
+/// whichever provider happened to claim `window.ethereum` first.
+function getMetaMaskProvider(): Eip1193Provider | null {
+  const eth = window.ethereum;
+  if (!eth) return null;
+  const fromList = eth.providers?.find((p) => p.isMetaMask);
+  if (fromList) return fromList;
+  return eth.isMetaMask ? eth : null;
 }
 
 const robinhoodChain = {
@@ -63,8 +76,8 @@ export function useHoodWallet() {
 
   // Auto-reconnect an already-authorized injected wallet (no popup) on page load.
   useEffect(() => {
-    if (!window.ethereum) return;
-    const injected = window.ethereum;
+    const injected = getMetaMaskProvider();
+    if (!injected) return;
     injected.request({ method: "eth_accounts" }).then((accs) => {
       const list = accs as string[];
       if (list.length > 0) bindProvider(injected, list[0] as `0x${string}`, "injected");
@@ -89,14 +102,15 @@ export function useHoodWallet() {
 
   const connect = useCallback(async () => {
     setError(null);
-    if (!window.ethereum) {
-      setError("No wallet extension found -- install MetaMask, or use \"Connect via mobile\" below.");
+    const injected = getMetaMaskProvider();
+    if (!injected) {
+      setError("MetaMask not found -- install it, or use \"Connect via mobile\" below. (If another wallet like Phantom is also installed, this button only ever looks for MetaMask.)");
       return;
     }
     setConnecting(true);
     try {
-      const accs = (await window.ethereum.request({ method: "eth_requestAccounts" })) as string[];
-      if (accs.length > 0) bindProvider(window.ethereum, accs[0] as `0x${string}`, "injected");
+      const accs = (await injected.request({ method: "eth_requestAccounts" })) as string[];
+      if (accs.length > 0) bindProvider(injected, accs[0] as `0x${string}`, "injected");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to connect wallet.");
     } finally {
@@ -192,3 +206,4 @@ export function useHoodWallet() {
     walletClient,
   };
 }
+
