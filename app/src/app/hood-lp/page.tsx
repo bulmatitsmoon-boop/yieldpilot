@@ -10,7 +10,7 @@ import {
   approveUsdgIfNeeded,
   depositToLpVault,
   withdrawFromLpVault,
-} from "@/hooks/useLpVault";
+} from "@/hooks/useHoodLpVault";
 import { LP_VAULT_ADDRESS, LP_POOL_ADDRESS } from "@/lib/hood/lpConstants";
 import { ROBINHOOD_EXPLORER_URL } from "@/lib/hood/constants";
 
