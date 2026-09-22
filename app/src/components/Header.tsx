@@ -57,7 +57,7 @@ export function Header() {
           </svg>
         </div>
         <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16, letterSpacing: "-0.02em", color: "var(--text-hi)" }}>YieldPilot</span>
-        <span className="header-logo-sub" style={{ color: "var(--text-low)", fontSize: 11, marginLeft: 1, fontFamily: "var(--font-mono)" }}>/ Solana</span>
+        <span className="header-logo-sub" style={{ color: "var(--text-low)", fontSize: 11, marginLeft: 1, fontFamily: "var(--font-mono)" }}>/ Solana + Robinhood Chain</span>
       </Link>
 
       {/* Nav links — hidden on mobile via CSS */}
