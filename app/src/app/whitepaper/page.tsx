@@ -273,11 +273,13 @@ export default function Whitepaper() {
               ["Phase 1", "Frontend", "Complete"],
               ["Phase 1", "Devnet deployment & vault initialization", "Complete"],
               ["Phase 1", "Admin / keeper wallet separation", "Complete"],
-              ["Phase 1", "Mainnet launch with $YPILOT token gating", "Pending"],
+              ["Phase 1", "Mainnet launch with $YPILOT token gating", "Pending -- $YPILOT has not launched yet"],
               ["Phase 2", "Third-party smart contract audit", "Planned, pending demonstrated demand"],
-              ["Phase 2", "Orca / Raydium LP integration", "Planned — opt-in only, carries impermanent loss risk"],
-              ["Phase 3", "Cross-chain deposits via Wormhole", "Research"],
-              ["Phase 3", "Auto-bridge to highest cross-chain yield", "Research"],
+              ["Phase 2", "Orca / Raydium LP integration", "Built and tested -- not yet open to public deposits"],
+              ["Phase 2", "Performance fee tiers by $YPILOT holdings", "Built -- inert until $YPILOT launches, same as above"],
+              ["Phase 3", "Native per-chain vaults instead of cross-chain bridging", "In progress -- replaces the earlier Wormhole plan to avoid bridge risk"],
+              ["Phase 3", "Robinhood Chain: ETH/USDG LP vault", "Live -- small experimental deposit cap"],
+              ["Phase 3", "Additional chains", "Research"],
             ]} />
           </Section>
 
