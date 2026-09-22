@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useConnectWallet } from "@/components/useConnectWallet";
 import { StatCard, Card, CardHeader, Toggle, TxBanner, fmt, fmtAddr } from "@/components/ui";
@@ -194,6 +195,9 @@ export default function Dashboard() {
             Connect Wallet
           </button>
           <p style={{ color: "var(--text-low)", fontSize: 12, marginTop: 10 }}>Works with Phantom & Solflare</p>
+          <p style={{ color: "var(--text-low)", fontSize: 12, marginTop: 6 }}>
+            Have assets on Robinhood Chain instead? See the <Link href="/hood-lp" style={{ color: "var(--signal)" }}>Hood ETH/USDG vault</Link>, connected with a separate EVM wallet.
+          </p>
         </div>
 
         <div style={{ width: "100%", background: "var(--ink-800)", border: "1px solid var(--line)", borderRadius: 16, padding: "24px 28px", marginBottom: 32, position: "relative", zIndex: 1 }}>
