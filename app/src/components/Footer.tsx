@@ -24,7 +24,8 @@ export function Footer() {
               <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15, color: "var(--text-hi)" }}>YieldPilot</span>
             </div>
             <p style={{ color: "var(--text-muted)", fontSize: 13, lineHeight: 1.6 }}>
-              Automated yield optimization on Solana. Non-custodial, transparent, always on.
+              Automated yield optimization on Solana, plus a native ETH/USDG LP vault on
+              Robinhood Chain. Non-custodial, transparent, always on.
             </p>
           </div>
 
@@ -32,7 +33,7 @@ export function Footer() {
           <div style={{ display: "flex", gap: 48, flexWrap: "wrap" }}>
             <div>
               <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 12 }}>Product</div>
-              {[["Home", "/"], ["Dashboard", "/dashboard"], ["Live Rates", "/apys"]].map(([label, href]) => (
+              {[["Home", "/"], ["Dashboard", "/dashboard"], ["Live Rates", "/apys"], ["Hood (Robinhood Chain)", "/hood-lp"]].map(([label, href]) => (
                 <div key={href} style={{ marginBottom: 8 }}>
                   <Link href={href} style={{ color: "var(--text-muted)", fontSize: 13, textDecoration: "none" }}>{label}</Link>
                 </div>
@@ -63,9 +64,9 @@ export function Footer() {
           </p>
           <p style={{ color: "var(--text-dim)", fontSize: 12 }}>
             {isMainnet ? (
-              <>Live on <span style={{ color: "var(--signal)" }}>Solana Mainnet</span>.</>
+              <>Live on <span style={{ color: "var(--signal)" }}>Solana Mainnet</span> &amp; <span style={{ color: "var(--signal)" }}>Robinhood Chain</span>.</>
             ) : (
-              <>Currently on <span style={{ color: "var(--warn)" }}>Devnet</span> — do not deposit real funds.</>
+              <>Currently on <span style={{ color: "var(--warn)" }}>Devnet</span> — do not deposit real funds. (Hood runs on Robinhood Chain mainnet regardless.)</>
             )}
           </p>
         </div>
