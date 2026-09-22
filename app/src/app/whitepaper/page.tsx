@@ -152,12 +152,13 @@ export default function Whitepaper() {
           <div style={{ marginBottom: 48 }}>
             <div className="mono-num" style={{ fontSize: 12, color: "var(--text-low)", marginBottom: 12 }}>YIELDPILOT WHITEPAPER v1.0 — JULY 2026</div>
             <h1 style={{ fontFamily: "var(--font-display)", fontSize: 34, fontWeight: 700, letterSpacing: "-0.02em", lineHeight: 1.15, marginBottom: 16, color: "var(--text-hi)" }}>
-              YieldPilot: Automated Yield Optimization on Solana
+              YieldPilot: Automated Yield Optimization
             </h1>
             <p style={{ color: "var(--text-mid)", fontSize: 16, lineHeight: 1.7 }}>
               A non-custodial protocol that automatically routes deposits across Solana&apos;s
               highest-yielding lending and liquid staking protocols, re-evaluating
-              allocations roughly hourly.
+              allocations roughly hourly. YieldPilot also runs a native ETH/USDG LP vault on
+              Robinhood Chain (Hood) -- a separate product, listed in the Roadmap below.
             </p>
             {!IS_MAINNET && (
               <div style={{
