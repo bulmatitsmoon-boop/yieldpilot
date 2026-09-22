@@ -25,6 +25,7 @@ export function Header() {
     ["Dashboard", "/dashboard"],
     ["Live Rates", "/apys"],
     ["Epochs", "/epochs"],
+    ["Hood", "/hood-lp"],
     ...(phase2Visible ? [["Portfolio", "/portfolio"] as [string, string], ["LP", "/lp"] as [string, string]] : []),
     ["Whitepaper", "/whitepaper"],
     ...(isAdmin ? [["Admin", "/admin"] as [string, string]] : []),
