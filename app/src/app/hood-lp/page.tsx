@@ -93,7 +93,11 @@ export default function HoodLpPage() {
     }
   }
 
-  const profit = user && user.value > user.costBasis ? user.value - user.costBasis : 0n;
+  // Signed lifetime P&L on the CURRENT position (what you paid in vs. what it's worth now).
+  // Doesn't include anything already withdrawn -- see the note below the tracker.
+  const earned = user ? user.value - user.costBasis : 0n;
+  const profit = earned > 0n ? earned : 0n; // fee base -- only ever charged on a real gain
+  const earnedPct = user && user.costBasis > 0n ? (Number(earned) / Number(user.costBasis)) * 100 : 0;
 
   return (
     <div style={{ maxWidth: 880, margin: "0 auto", padding: "32px 20px" }}>
@@ -139,8 +143,20 @@ export default function HoodLpPage() {
             <StatCard label="Vault Value" value={vault ? `$${fmtUsdg(vault.totalAssets, 2)}` : "..."} />
             <StatCard label="Deposit Cap" value={vault ? `$${fmtUsdg(vault.depositCap, 0)}` : "..."} sub={vault ? `$${fmtUsdg(remainingCap, 2)} room left` : undefined} />
             <StatCard label="Your Value" value={user ? `$${fmtUsdg(user.value, 2)}` : "..."} sub={fmtAddr(address!)} />
-            {user && profit > 0n && <StatCard label="Your Profit" value={`$${fmtUsdg(profit, 2)}`} sub="9% fee applies on exit" />}
+            {user && (
+              <StatCard
+                label="Earned"
+                value={`${earned >= 0n ? "+" : "-"}$${fmtUsdg(earned >= 0n ? earned : -earned, 2)}`}
+                accent={earned > 0n ? "var(--signal, #4ade80)" : earned < 0n ? "#f87171" : undefined}
+                sub={user.costBasis > 0n ? `${earnedPct >= 0 ? "+" : ""}${earnedPct.toFixed(2)}% on $${fmtUsdg(user.costBasis, 2)} paid in` : "Deposit to start tracking"}
+              />
+            )}
           </div>
+          {user && user.costBasis > 0n && (
+            <p style={{ color: "var(--text-dim)", fontSize: 11, marginTop: -12, marginBottom: 20 }}>
+              &quot;Earned&quot; tracks your current open position only -- it resets if you withdraw everything, and doesn&apos;t include past withdrawals.
+            </p>
+          )}
 
           {vault?.depositsPaused && (
             <Card style={{ padding: 20, marginBottom: 20, border: "1px solid var(--warn, #b45309)" }}>
