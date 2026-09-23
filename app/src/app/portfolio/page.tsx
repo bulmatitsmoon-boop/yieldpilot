@@ -52,10 +52,31 @@ import {
   computeLpVaultValueUsd,
 } from "@/hooks/useLpVault";
 import { useConnection } from "@solana/wallet-adapter-react";
+import { PublicKey } from "@solana/web3.js";
+import bs58 from "bs58";
 import { blendedApy, estYearly, planLegs } from "@/lib/splitDeposit.mjs";
 import { portfolioTotals } from "@/lib/portfolio.mjs";
 import { usePhase2Gate } from "@/hooks/usePhase2Gate";
 import { useSolPrice } from "@/hooks/useSolPrice";
+
+// Same fallback pattern useYieldPilot.ts uses for the program address.
+const PROGRAM_ID = new PublicKey(
+  process.env.NEXT_PUBLIC_PROGRAM_ID || "3tAEmHXZ51YVLe9ts8b9cMcgQPgaSamLxLtxR31VpREi"
+);
+
+// Anchor instruction discriminators (first 8 bytes of instruction data), copied straight
+// from yieldpilot.mainnet.json's instruction entries -- used to label a real transaction
+// by what it actually called, not by guessing from token balance deltas alone.
+const ACTIVITY_LABELS: Record<string, string> = {
+  "242,35,198,137,82,225,242,182": "Deposit — Safe vault",
+  "183,18,70,156,148,109,161,34": "Withdraw — Safe vault",
+  "88,107,221,55,243,42,213,224": "Deposit — Orca LP",
+  "93,205,207,240,112,216,33,152": "Deposit — Raydium LP",
+  "245,187,141,142,71,246,235,120": "Withdraw — Orca LP",
+  "98,40,61,227,237,139,213,48": "Withdraw — Raydium LP",
+  "101,247,112,208,47,58,24,44": "Fees collected — Orca LP",
+  "206,250,133,15,178,110,198,248": "Fees collected — Raydium LP",
+};
 
 const VAULT_ADDRESSES = (process.env.NEXT_PUBLIC_VAULT_ADDRESSES ?? "")
   .split(",")
@@ -394,6 +415,82 @@ export default function PortfolioPage() {
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [publicKey, lpOptions, solPrice, connection]);
+
+  // ── Real activity feed — decodes the user's own recent transactions against this
+  // program by their real Anchor instruction discriminator (not a guess from token
+  // balance deltas alone), and reads the actual token amount moved from
+  // pre/postTokenBalances. Every field here comes from a real confirmed transaction;
+  // nothing here is synthesized. Modeled on a StakeVault-style activity card Lloyd liked
+  // the look of (2026-09-22), scoped to what's real for us to show. ──
+  interface ActivityEntry {
+    signature: string;
+    blockTime: number | null;
+    success: boolean;
+    label: string;
+    amounts: { symbol: string; amount: number }[];
+  }
+  const [activity, setActivity] = useState<ActivityEntry[]>([]);
+  const [activityLoading, setActivityLoading] = useState(false);
+  useEffect(() => {
+    if (!publicKey) {
+      setActivity([]);
+      return;
+    }
+    let cancelled = false;
+    setActivityLoading(true);
+    (async () => {
+      try {
+        const sigs = await connection.getSignaturesForAddress(publicKey, { limit: 15 });
+        const results = await Promise.all(
+          sigs.map(async (sig): Promise<ActivityEntry | null> => {
+            try {
+              const tx = await connection.getParsedTransaction(sig.signature, { maxSupportedTransactionVersion: 0 });
+              if (!tx) return null;
+              const ixs = tx.transaction.message.instructions;
+              const match = ixs.find((ix): ix is typeof ix & { programId: PublicKey; data: string } =>
+                "data" in ix && ix.programId.equals(PROGRAM_ID)
+              );
+              if (!match) return null; // not a YieldPilot instruction -- some other tx by this wallet
+              const discriminator = Array.from(bs58.decode(match.data).slice(0, 8)).join(",");
+              const label = ACTIVITY_LABELS[discriminator] ?? "YieldPilot transaction";
+
+              // Real amount: the token balance delta on accounts this wallet owns, taken
+              // straight from the transaction's own pre/post balances -- not re-derived
+              // from instruction args, which would need per-instruction decoding.
+              const owner = publicKey.toBase58();
+              const pre = tx.meta?.preTokenBalances ?? [];
+              const post = tx.meta?.postTokenBalances ?? [];
+              const amounts: { symbol: string; amount: number }[] = [];
+              for (const p of post) {
+                if (p.owner !== owner) continue;
+                const before = pre.find((b) => b.accountIndex === p.accountIndex);
+                const delta = (p.uiTokenAmount.uiAmount ?? 0) - (before?.uiTokenAmount.uiAmount ?? 0);
+                if (Math.abs(delta) < 1e-9) continue;
+                amounts.push({ symbol: symbolForMint(p.mint), amount: delta });
+              }
+              return {
+                signature: sig.signature,
+                blockTime: sig.blockTime ?? null,
+                success: !sig.err,
+                label,
+                amounts,
+              };
+            } catch {
+              return null;
+            }
+          })
+        );
+        if (!cancelled) {
+          setActivity(results.filter((r): r is ActivityEntry => r !== null));
+        }
+      } catch {
+        if (!cancelled) setActivity([]);
+      } finally {
+        if (!cancelled) setActivityLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [publicKey, connection]);
 
   // ── Withdraw side — was only ever built on the separate /lp page, which meant a
   // real user had to know that page existed and navigate away from the deposit flow
@@ -1090,6 +1187,49 @@ export default function PortfolioPage() {
             Each leg above is a separate on-chain transaction · funds stay in separate vaults
           </p>
         </div>
+      </div>
+
+      {/* Real activity feed — every row is a decoded, confirmed transaction (see the
+          `activity` effect above), never a placeholder or synthesized event. */}
+      <div style={{ ...cardStyle, marginTop: 24 }}>
+        <SectionLabel>Recent activity</SectionLabel>
+        {activityLoading ? (
+          <div style={{ fontSize: 13, color: "var(--text-mid)", padding: "8px 0" }}>Loading…</div>
+        ) : activity.length === 0 ? (
+          <div style={{ fontSize: 13, color: "var(--text-mid)", padding: "8px 0" }}>No YieldPilot transactions yet.</div>
+        ) : (
+          activity.map((a, i) => (
+            <a
+              key={a.signature}
+              href={`https://solscan.io/tx/${a.signature}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: "flex", justifyContent: "space-between", alignItems: "center",
+                padding: "10px 0", borderTop: i > 0 ? "1px solid var(--line)" : "none",
+                textDecoration: "none", color: "inherit",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 15 }}>{a.success ? (a.label.startsWith("Withdraw") ? "↓" : a.label.startsWith("Fees") ? "✦" : "↑") : "✕"}</span>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-hi)" }}>{a.label}</div>
+                  <div style={{ fontSize: 11, color: "var(--text-mid)" }}>
+                    {a.blockTime ? new Date(a.blockTime * 1000).toLocaleString() : "—"}
+                  </div>
+                </div>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                {a.amounts.map((amt, j) => (
+                  <div key={j} style={{ fontSize: 13, fontFamily: "var(--font-mono)", color: amt.amount >= 0 ? "var(--signal, #2ecc71)" : "var(--text-hi)" }}>
+                    {amt.amount >= 0 ? "+" : ""}{amt.amount.toLocaleString(undefined, { maximumFractionDigits: 6 })} {amt.symbol}
+                  </div>
+                ))}
+                {!a.success && <div style={{ fontSize: 11, color: "var(--loss, #e05d5d)" }}>Failed</div>}
+              </div>
+            </a>
+          ))
+        )}
       </div>
 
       {/* Two-column dashboard layout on desktop; the previous version had NO mobile
