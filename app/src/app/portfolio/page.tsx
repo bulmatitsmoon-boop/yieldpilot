@@ -510,7 +510,7 @@ export default function PortfolioPage() {
         <Badge tone="warn">Phase 2 · Preview — not public</Badge>
       </div>
 
-      <div style={twoColLayout}>
+      <div className="portfolio-two-col">
         {/* ══════════ LEFT: overview ══════════ */}
         <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
 
@@ -672,7 +672,7 @@ export default function PortfolioPage() {
         </div>
 
         {/* ══════════ RIGHT: action ══════════ */}
-        <div style={{ ...cardStyle, position: "sticky", top: 24, alignSelf: "start" }}>
+        <div className="portfolio-action-col" style={cardStyle}>
           <SectionLabel>Add to position</SectionLabel>
 
           {/* ── safe leg ── */}
@@ -865,16 +865,37 @@ export default function PortfolioPage() {
           </p>
         </div>
       </div>
+
+      {/* Two-column dashboard layout on desktop; the previous version had NO mobile
+          breakpoint at all -- a fixed 1.15fr/0.85fr grid squeezed both columns (including
+          a sticky, full-height deposit card) into a 375px phone screen. Collapses to a
+          single column below 860px, and drops the sticky positioning there too, since a
+          "sticky" card stacked below other content on a short viewport just floats
+          awkwardly rather than usefully following scroll. */}
+      <style>{`
+        .portfolio-two-col {
+          display: grid;
+          grid-template-columns: 1.15fr 0.85fr;
+          gap: 24px;
+          align-items: start;
+        }
+        .portfolio-action-col {
+          position: sticky;
+          top: 24px;
+          align-self: start;
+        }
+        @media (max-width: 860px) {
+          .portfolio-two-col {
+            grid-template-columns: 1fr;
+          }
+          .portfolio-action-col {
+            position: static;
+          }
+        }
+      `}</style>
     </main>
   );
 }
-
-const twoColLayout: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "1.15fr 0.85fr",
-  gap: 24,
-  alignItems: "start",
-};
 
 const cardStyle: CSSProperties = {
   border: "1px solid var(--line)",
