@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import {
   ConnectionProvider,
   WalletProvider,
@@ -9,6 +9,9 @@ import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
 import { PhantomWalletAdapter } from "@solana/wallet-adapter-phantom";
 import { SolflareWalletAdapter } from "@solana/wallet-adapter-solflare";
 import { clusterApiUrl } from "@solana/web3.js";
+import { PhantomDeeplinkWalletAdapter } from "./wallets/PhantomDeeplinkAdapter";
+import { PhantomReturnBanner } from "./PhantomReturnBanner";
+import * as phantomDeeplink from "@/lib/phantomDeeplink";
 
 import "@solana/wallet-adapter-react-ui/styles.css";
 
@@ -26,23 +29,46 @@ const WProv = WalletProvider as any;
 const WMProv = WalletModalProvider as any;
 
 export function WalletContextProvider({ children }: { children: React.ReactNode }) {
-  // Mobile support does NOT live here — see useConnectWallet.ts, which deep-links into
-  // a wallet's in-app browser when there's no injected provider (the real fix, shipped
-  // 2026-08-03 in PR #168).
-  //
   // A SolanaMobileWalletAdapter from @solana-mobile/wallet-adapter-mobile was briefly
-  // added to this array and is now removed: it was verified LIVE on production to never
-  // appear in the connect modal at all. Its real v2.x constructor takes
-  // {appIdentity, authorizationCache, chains, chainSelector, onWalletNotFound} — not the
+  // tried here and is not present: it was verified LIVE on production to never appear in
+  // the connect modal at all. Its real v2.x constructor takes {appIdentity,
+  // authorizationCache, chains, chainSelector, onWalletNotFound} — not the
   // {addressSelector, authorizationResultCache, cluster} shape used here — so the wrong
   // keys silently became `undefined` instead of throwing, and that class isn't meant for
-  // this array in the first place (MWA registers itself via the Wallet Standard).
-  // Note @solana/wallet-adapter-react already carries the MWA package transitively, so
-  // nothing is lost by dropping the direct dependency.
+  // this array in the first place (MWA registers itself via the Wallet Standard). Note
+  // @solana/wallet-adapter-react already carries the MWA package transitively, so nothing
+  // is lost by not depending on it directly.
+  //
+  // Phantom's real Connect deeplink (round-trips back to THIS browser tab, not into
+  // Phantom's own in-app browser) for mobile browsers with no injected provider — see
+  // wallets/PhantomDeeplinkAdapter.ts and useConnectWallet.ts, which routes mobile users
+  // to this adapter directly instead of showing PhantomWalletAdapter/SolflareWalletAdapter
+  // (permanently "NotDetected" there).
+  const phantomDeeplinkAdapter = useRef<PhantomDeeplinkWalletAdapter | null>(null);
+  if (!phantomDeeplinkAdapter.current) {
+    phantomDeeplinkAdapter.current = new PhantomDeeplinkWalletAdapter();
+  }
+
   const wallets = useMemo(
-    () => [new PhantomWalletAdapter(), new SolflareWalletAdapter()],
+    () => [new PhantomWalletAdapter(), new SolflareWalletAdapter(), phantomDeeplinkAdapter.current!],
     []
   );
+
+  // Result of a Phantom deeplink return, if this page load is one -- passed down to the
+  // banner as a prop (not read independently by the banner itself) so there's no race
+  // between two components both trying to read/clear the same one-shot storage key.
+  const [phantomResult, setPhantomResult] = React.useState<phantomDeeplink.PhantomResult | null>(null);
+
+  // Runs after WProv (below, a child in this tree) has already mounted and subscribed to
+  // adapter events -- React fires child effects before parent effects on mount, so
+  // emitting "connect" here is guaranteed to be caught, not missed.
+  useEffect(() => {
+    const result = phantomDeeplink.handleReturnIfPresent();
+    if (result) {
+      phantomDeeplinkAdapter.current?.handlePossibleReturn(result);
+      setPhantomResult(result);
+    }
+  }, []);
 
   // Route every RPC call through the app's own /api/rpc proxy instead of
   // talking to the real provider directly. Two reasons:
@@ -92,7 +118,10 @@ export function WalletContextProvider({ children }: { children: React.ReactNode 
   return (
     <Conn endpoint={endpoint} config={connectionConfig}>
       <WProv wallets={wallets} autoConnect>
-        <WMProv>{children}</WMProv>
+        <WMProv>
+          <PhantomReturnBanner result={phantomResult} onDismiss={() => setPhantomResult(null)} />
+          {children}
+        </WMProv>
       </WProv>
     </Conn>
   );
