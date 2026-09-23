@@ -210,8 +210,13 @@ export default function PortfolioPage() {
   const [safePct, setSafePct] = useState(70);
   const lpPct = 100 - safePct;
 
+  // Which Safe vault (USDC, SOL, ...) the deposit box targets. Used to just be hardcoded
+  // to vaults[0] (whichever vault address is listed first, currently USDC) with no way to
+  // reach the live SOL vault from this box at all -- fixed by making it a real picker.
+  const [safeVaultIndex, setSafeVaultIndex] = useState(0);
+
   // Live APYs for the preview. Safe = the vault the user will fund; LP = the paired vault.
-  const safeVault = vaults[0] ?? null;
+  const safeVault = vaults[safeVaultIndex] ?? vaults[0] ?? null;
   const safeApy = useMemo(() => {
     // Blended live rate of the safe vault's current allocation, if available; else 0.
     const a = apys.find((x) => safeVault && x.asset && safeVault.name.toUpperCase().includes(x.asset.toUpperCase()));
@@ -726,9 +731,27 @@ export default function PortfolioPage() {
           {/* ── safe leg ── */}
           <div style={{ marginBottom: 20 }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-hi)", marginBottom: 4 }}>Safe vault</div>
-            <div style={{ fontSize: 12.5, color: "var(--text-mid)", marginBottom: 10 }}>
-              {safeVault ? safeVault.name : "No vault configured"} · lending &amp; staking
-            </div>
+            {vaults.length > 1 ? (
+              <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
+                {vaults.map((v, i) => (
+                  <button
+                    key={v.address}
+                    onClick={() => setSafeVaultIndex(i)}
+                    style={{
+                      ...secondaryBtn(true),
+                      borderColor: i === safeVaultIndex ? "var(--signal, #2ecc71)" : undefined,
+                      color: i === safeVaultIndex ? "var(--signal, #2ecc71)" : undefined,
+                    }}
+                  >
+                    {v.name.replace(/^YieldPilot\s*/i, "")}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div style={{ fontSize: 12.5, color: "var(--text-mid)", marginBottom: 10 }}>
+                {safeVault ? safeVault.name : "No vault configured"} · lending &amp; staking
+              </div>
+            )}
             <input
               placeholder="Amount"
               value={safeAmount}
