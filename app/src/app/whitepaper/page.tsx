@@ -152,13 +152,12 @@ export default function Whitepaper() {
           <div style={{ marginBottom: 48 }}>
             <div className="mono-num" style={{ fontSize: 12, color: "var(--text-low)", marginBottom: 12 }}>YIELDPILOT WHITEPAPER v1.0 — JULY 2026</div>
             <h1 style={{ fontFamily: "var(--font-display)", fontSize: 34, fontWeight: 700, letterSpacing: "-0.02em", lineHeight: 1.15, marginBottom: 16, color: "var(--text-hi)" }}>
-              YieldPilot: Automated Yield Optimization
+              YieldPilot: Automated Yield Optimization on Solana
             </h1>
             <p style={{ color: "var(--text-mid)", fontSize: 16, lineHeight: 1.7 }}>
               A non-custodial protocol that automatically routes deposits across Solana&apos;s
               highest-yielding lending and liquid staking protocols, re-evaluating
-              allocations roughly hourly. YieldPilot also runs a native ETH/USDG LP vault on
-              Robinhood Chain (Hood) -- a separate product, listed in the Roadmap below.
+              allocations roughly hourly.
             </p>
             {!IS_MAINNET && (
               <div style={{
@@ -278,8 +277,7 @@ export default function Whitepaper() {
               ["Phase 2", "Third-party smart contract audit", "Planned, pending demonstrated demand"],
               ["Phase 2", "Orca / Raydium LP integration", "Built and tested -- not yet open to public deposits"],
               ["Phase 2", "Performance fee tiers by $YPILOT holdings", "Built -- inert until $YPILOT launches, same as above"],
-              ["Phase 3", "Native per-chain vaults instead of cross-chain bridging", "In progress -- replaces the earlier Wormhole plan to avoid bridge risk"],
-              ["Phase 3", "Robinhood Chain: ETH/USDG LP vault", "Live -- small experimental deposit cap"],
+              ["Phase 3", "Native per-chain vaults instead of cross-chain bridging", "Research -- an experimental Robinhood Chain vault was tested and discontinued (not a big enough edge over lending)"],
               ["Phase 3", "Additional chains", "Research"],
             ]} />
           </Section>
