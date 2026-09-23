@@ -19,7 +19,7 @@
 ///
 /// State (the dapp keypair + shared secret + session token) has to survive a full page
 /// reload, since leaving to the Phantom app and coming back is a real navigation, not an
-/// in-page async call -- sessionStorage is the only place that can live. This is
+/// in-page async call -- localStorage is the only place that can live. This is
 /// per-viewer session state for an in-flight wallet handshake, not financial state, so it
 /// fits the "browser storage for per-viewer convenience" bar even on a money app.
 
@@ -51,13 +51,13 @@ export interface PhantomResult {
 }
 
 function getOrCreateDappKeyPair(): nacl.BoxKeyPair {
-  const stored = sessionStorage.getItem(SS_DAPP_SECRET);
+  const stored = localStorage.getItem(SS_DAPP_SECRET);
   if (stored) {
     const secretKey = bs58.decode(stored);
     return nacl.box.keyPair.fromSecretKey(secretKey);
   }
   const kp = nacl.box.keyPair();
-  sessionStorage.setItem(SS_DAPP_SECRET, bs58.encode(kp.secretKey));
+  localStorage.setItem(SS_DAPP_SECRET, bs58.encode(kp.secretKey));
   return kp;
 }
 
@@ -67,22 +67,22 @@ function buildUrl(path: string, params: Record<string, string>): string {
 }
 
 export function isConnected(): boolean {
-  return !!sessionStorage.getItem(SS_PUBLIC_KEY) && !!sessionStorage.getItem(SS_SESSION);
+  return !!localStorage.getItem(SS_PUBLIC_KEY) && !!localStorage.getItem(SS_SESSION);
 }
 
 export function getConnectedPublicKey(): string | null {
-  return sessionStorage.getItem(SS_PUBLIC_KEY);
+  return localStorage.getItem(SS_PUBLIC_KEY);
 }
 
 export function clearSession(): void {
-  [SS_SHARED_SECRET, SS_SESSION, SS_PUBLIC_KEY].forEach((k) => sessionStorage.removeItem(k));
+  [SS_SHARED_SECRET, SS_SESSION, SS_PUBLIC_KEY].forEach((k) => localStorage.removeItem(k));
 }
 
 /// Kicks off a Connect round trip. Never returns -- the page navigates away.
 export function startConnect(label?: string): void {
   const dapp = getOrCreateDappKeyPair();
   const pending: PendingAction = { kind: "connect", label, returnTo: window.location.pathname + window.location.search };
-  sessionStorage.setItem(SS_PENDING, JSON.stringify(pending));
+  localStorage.setItem(SS_PENDING, JSON.stringify(pending));
 
   const url = buildUrl("connect", {
     dapp_encryption_public_key: bs58.encode(dapp.publicKey),
@@ -106,18 +106,18 @@ export function startConnect(label?: string): void {
 /// caller can show to the user. Returns null on an ordinary page load.
 export function handleReturnIfPresent(): PhantomResult | null {
   const params = new URLSearchParams(window.location.search);
-  const pendingRaw = sessionStorage.getItem(SS_PENDING);
+  const pendingRaw = localStorage.getItem(SS_PENDING);
   if (!params.has("phantom_encryption_public_key") && !params.has("errorCode") && !params.has("data")) {
     return null; // not a Phantom return at all
   }
   const pending: PendingAction | null = pendingRaw ? JSON.parse(pendingRaw) : null;
-  sessionStorage.removeItem(SS_PENDING);
+  localStorage.removeItem(SS_PENDING);
 
   // Strip Phantom's query params so a refresh/back-nav doesn't replay this.
   const cleanUrl = pending?.returnTo || window.location.pathname;
   window.history.replaceState({}, "", cleanUrl);
 
-  const kind: "connect" | "sign" = pending?.kind || (params.has("phantom_encryption_public_key") && !sessionStorage.getItem(SS_SESSION) ? "connect" : "sign");
+  const kind: "connect" | "sign" = pending?.kind || (params.has("phantom_encryption_public_key") && !localStorage.getItem(SS_SESSION) ? "connect" : "sign");
 
   if (params.has("errorCode")) {
     const result: PhantomResult = { ok: false, kind, error: params.get("errorMessage") || params.get("errorCode") || "Rejected", label: pending?.label };
@@ -125,7 +125,7 @@ export function handleReturnIfPresent(): PhantomResult | null {
   }
 
   try {
-    const dappSecretB58 = sessionStorage.getItem(SS_DAPP_SECRET);
+    const dappSecretB58 = localStorage.getItem(SS_DAPP_SECRET);
     if (!dappSecretB58) throw new Error("Missing local key -- session storage was cleared mid-flow.");
     const dappKeyPair = nacl.box.keyPair.fromSecretKey(bs58.decode(dappSecretB58));
 
@@ -138,14 +138,14 @@ export function handleReturnIfPresent(): PhantomResult | null {
       if (!decrypted) throw new Error("Could not decrypt Phantom's response.");
       const { public_key, session } = JSON.parse(Buffer.from(decrypted).toString("utf8"));
 
-      sessionStorage.setItem(SS_SHARED_SECRET, bs58.encode(sharedSecret));
-      sessionStorage.setItem(SS_SESSION, session);
-      sessionStorage.setItem(SS_PUBLIC_KEY, public_key);
+      localStorage.setItem(SS_SHARED_SECRET, bs58.encode(sharedSecret));
+      localStorage.setItem(SS_SESSION, session);
+      localStorage.setItem(SS_PUBLIC_KEY, public_key);
 
       const result: PhantomResult = { ok: true, kind: "connect", publicKey: public_key, label: pending?.label };
       return result;
     } else {
-      const sharedSecretB58 = sessionStorage.getItem(SS_SHARED_SECRET);
+      const sharedSecretB58 = localStorage.getItem(SS_SHARED_SECRET);
       if (!sharedSecretB58) throw new Error("No active session -- reconnect and try again.");
       const sharedSecret = bs58.decode(sharedSecretB58);
       const nonce = bs58.decode(params.get("nonce")!);
