@@ -1,16 +1,15 @@
 "use client";
 
 /**
- * useLpVault.ts — frontend hook for the opt-in, dual-asset Orca Whirlpool
- * LP vault (Phase 2 groundwork, not linked from any nav/page yet).
+ * useLpVault.ts — frontend hook for the opt-in, dual-asset Orca/Raydium LP vault
+ * (Phase 2 — not linked from any public nav, gated behind usePhase2Gate).
  *
- * IMPORTANT: this hook targets instructions (initialize_orca_lp_vault,
- * deposit_orca_lp, withdraw_orca_lp, etc.) that exist in lp_vault.rs but are
- * NOT YET DEPLOYED —
- * the committed mainnet IDL (@/idl/yieldpilot.mainnet.json) won't include
- * them until that program upgrade happens. This hook will not actually work
- * against the live program yet; it's written correctly against the PR's
- * Rust source so it's ready the moment the real IDL catches up.
+ * LIVE on the real mainnet program (confirmed 2026-09-22 against the current
+ * yieldpilot.mainnet.json IDL: initialize_orca_lp_vault, deposit_orca_lp,
+ * withdraw_orca_lp, and their Raydium equivalents are all present). An earlier
+ * version of this comment said these were not yet deployed -- that was true when
+ * written but went stale after the program upgrade that shipped them; verify
+ * against the real IDL rather than trusting this kind of note again.
  *
  * Mirrors useYieldPilot.ts's conventions (getProgram/wrapTx pattern) so it
  * feels consistent once wired into a real page.
@@ -149,6 +148,7 @@ const RAYDIUM_CLMM_PROGRAM_ID = new PublicKey("CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTa
 interface WhirlpoolInfo {
   tickSpacing: number;
   sqrtPrice: bigint;
+  tickCurrent: number;
   tokenMintA: PublicKey;
   tokenVaultA: PublicKey;
   tokenMintB: PublicKey;
@@ -165,6 +165,14 @@ function decodeWhirlpool(data: Buffer): WhirlpoolInfo {
   return {
     tickSpacing: data.readUInt16LE(41),
     sqrtPrice: readU128LE(data, 65),
+    // tick_current_index: i32 at byte 81 — verified against Orca's real Whirlpool struct
+    // layout (whirlpools_config(32) + bump(1) + tick_spacing(2) + tick_spacing_seed(2) +
+    // fee_rate(2) + protocol_fee_rate(2) + liquidity(16) + sqrt_price(16) = 73, + 8-byte
+    // discriminator = 81). Cross-checked: this same layout independently predicts
+    // tickSpacing at 41 and sqrtPrice at 65, both already verified correct by this file's
+    // existing (working) reads above, and tokenMintA at 101 below — three matches, not a
+    // guess.
+    tickCurrent: data.readInt32LE(81),
     tokenMintA: new PublicKey(data.subarray(101, 133)),
     tokenVaultA: new PublicKey(data.subarray(133, 165)),
     tokenMintB: new PublicKey(data.subarray(181, 213)),
@@ -274,6 +282,13 @@ export interface LpVaultInfo {
   totalShares: number;
   positionActive: boolean;
   paused: boolean;
+  tickLowerIndex: number;
+  tickUpperIndex: number;
+  // Real, vault-wide, all-time raw token amounts collected from the position's swap
+  // fees (lp_vault.rs's lifetime_fees_a/b) — proof the vault is actually earning, not a
+  // per-user figure. Kept as strings for the same u64-precision reason as totalLiquidity.
+  lifetimeFeesA: string;
+  lifetimeFeesB: string;
 }
 
 // ── Decimal <-> base-unit conversion ────────────────────────────────────────
@@ -548,6 +563,10 @@ export function useLpVault() {
         totalShares: (raw.totalShares as anchor.BN).toNumber(),
         positionActive: raw.positionActive as boolean,
         paused: raw.paused as boolean,
+        tickLowerIndex: raw.tickLowerIndex as number,
+        tickUpperIndex: raw.tickUpperIndex as number,
+        lifetimeFeesA: ((raw.lifetimeFeesA as anchor.BN | undefined) ?? new anchor.BN(0)).toString(),
+        lifetimeFeesB: ((raw.lifetimeFeesB as anchor.BN | undefined) ?? new anchor.BN(0)).toString(),
       };
     },
     [connection, getProgram]
@@ -1101,11 +1120,29 @@ export function useLpVault() {
     [publicKey, signTransaction, connection, wrapTx, fetchRaydiumLpDepositContext]
   );
 
+  // Real, live current tick of the vault's underlying pool -- compared against the
+  // vault's own tickLowerIndex/tickUpperIndex (from LpVaultInfo), this is the standard
+  // DeFi "is this LP position currently earning fees" signal: in range = earning,
+  // out of range = idle and skewed entirely into one of the two tokens. Reuses each
+  // protocol's existing (already-verified) account decoder rather than adding new ones.
+  const fetchLpCurrentTick = useCallback(
+    async (info: LpVaultInfo): Promise<number> => {
+      const poolPubkey = new PublicKey(info.whirlpool);
+      const accountInfo = await connection.getAccountInfo(poolPubkey);
+      if (!accountInfo) throw new Error("Pool account not found");
+      return info.protocol === "raydium"
+        ? decodeRaydiumPool(accountInfo.data).tickCurrent
+        : decodeWhirlpool(accountInfo.data).tickCurrent;
+    },
+    [connection]
+  );
+
   return {
     txStatus,
     txError,
     fetchLpVault,
     fetchLpPosition,
+    fetchLpCurrentTick,
     getDepositQuote,
     getWithdrawQuote,
     getRaydiumDepositQuote,
