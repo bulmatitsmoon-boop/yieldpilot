@@ -134,8 +134,13 @@ export async function sendLpV0(
 }
 
 
+// Fallback was stale ("CVJrJGoKjseTJqiFGctssYde3pLAnPaRZtjAaKXd8pWk") -- a different
+// program ID than useYieldPilot.ts's fallback for the SAME env var, which would derive
+// every LP PDA against the wrong program if NEXT_PUBLIC_PROGRAM_ID were ever unset.
+// Harmless today only because that env var is always set in production (confirmed live
+// via Vercel, 2026-09-23). Now matches useYieldPilot.ts's real, confirmed value.
 const PROGRAM_ID = new PublicKey(
-  process.env.NEXT_PUBLIC_PROGRAM_ID || "CVJrJGoKjseTJqiFGctssYde3pLAnPaRZtjAaKXd8pWk"
+  process.env.NEXT_PUBLIC_PROGRAM_ID || "3tAEmHXZ51YVLe9ts8b9cMcgQPgaSamLxLtxR31VpREi"
 );
 const WHIRLPOOL_PROGRAM_ID = new PublicKey("whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc");
 const RAYDIUM_CLMM_PROGRAM_ID = new PublicKey("CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK");
