@@ -8,9 +8,6 @@ import { useApys } from "@/hooks/useApys";
 import { useYieldPilot } from "@/hooks/useYieldPilot";
 import { useSolPrice } from "@/hooks/useSolPrice";
 import { computeLpVaultValueUsd, computeLpVaultLifetimeFeesUsd } from "@/hooks/useLpVault";
-import { useHoodFleetStats } from "@/hooks/useHoodFleetStats";
-import { LP_VAULT_ADDRESS as HOOD_LP_VAULT_ADDRESS } from "@/lib/hood/lpConstants";
-import { ROBINHOOD_EXPLORER_URL } from "@/lib/hood/constants";
 import { useConnection } from "@solana/wallet-adapter-react";
 import { useEffect, useState } from "react";
 import { fmt } from "@/components/ui";
@@ -122,12 +119,8 @@ export default function Home() {
     return () => { cancelled = true; };
   }, [connection, solPrice]);
 
-  // Real Robinhood Chain TVL + fee revenue -- same discipline as the Solana LP figures
-  // above: real on-chain reads (pool reserves, treasury balance), never a placeholder.
-  const { hoodDepositedUsd, hoodFeesUsd } = useHoodFleetStats();
-
-  const totalDepositedUsd = safeDepositedUsd + lpDepositedUsd + hoodDepositedUsd;
-  const totalFeesUsd = lpFeesUsd + hoodFeesUsd;
+  const totalDepositedUsd = safeDepositedUsd + lpDepositedUsd;
+  const totalFeesUsd = lpFeesUsd;
   // Excludes stale entries: averaging a rate we did not actually fetch would put a
   // fabricated number in the hero. null (not 0) when nothing is live, so FleetRadar
   // can render "—" — 0.0% would read as a real, terrible rate.
@@ -193,9 +186,8 @@ export default function Home() {
               color: "var(--text-mid)", fontSize: 16, lineHeight: 1.75,
               maxWidth: 460, marginBottom: 40,
             }}>
-              YieldPilot routes your USDC or SOL to the top Solana protocol, around the clock —
-              plus a native ETH/USDG LP vault on Robinhood Chain. No manual moves. No missed
-              rates. Non-custodial the whole way.
+              YieldPilot routes your USDC or SOL to the top Solana protocol, around the clock.
+              No manual moves. No missed rates. Non-custodial the whole way.
             </p>
 
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
@@ -446,26 +438,6 @@ export default function Home() {
                   style={{ fontSize: 12, color: "var(--signal)", textDecoration: "none" }}
                 >
                   View on Solscan →
-                </a>
-              </div>
-            </Reveal>
-
-            <Reveal delay={0.03}>
-              <div style={{
-                background: "var(--ink-800)", border: "1px solid var(--line)",
-                borderRadius: 10, padding: "20px 24px",
-                display: "flex", flexDirection: "column", gap: 10, height: "100%",
-              }}>
-                <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-low)", textTransform: "uppercase", letterSpacing: "0.06em", fontFamily: "var(--font-mono)" }}>Hood contract (Robinhood Chain)</div>
-                <div className="mono-num" style={{ fontSize: 12, color: "var(--text-mid)", wordBreak: "break-all" }}>
-                  {HOOD_LP_VAULT_ADDRESS}
-                </div>
-                <a
-                  href={`${ROBINHOOD_EXPLORER_URL}/address/${HOOD_LP_VAULT_ADDRESS}`}
-                  target="_blank" rel="noopener noreferrer"
-                  style={{ fontSize: 12, color: "var(--signal)", textDecoration: "none" }}
-                >
-                  View on Blockscout →
                 </a>
               </div>
             </Reveal>
