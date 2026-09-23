@@ -22,9 +22,17 @@
  * approved. Deliberately did NOT add a unified "one amount field" or a wallet-balance
  * display from the mockup — the real architecture has two independent leg inputs (safe
  * amount, LP token-A amount) and no wired USDC-balance hook, and faking either would be
- * dishonest UI. The "quick amount" chips instead set the existing preview-only `planUsd`
- * field. No change to data flow, hook usage, effects, or any handler logic below —
- * visual/structure only.
+ * dishonest UI.
+ *
+ * "Use this plan" (2026-09-22): the slider/plan-amount dial used to be preview-only with
+ * no way to act on it. It now genuinely sizes both leg inputs from the slider split: the
+ * Safe leg via live price, the LP leg via a REAL deposit quote (getDepositQuote /
+ * getRaydiumDepositQuote) against the vault's current pool price and range — not a naive
+ * 50/50 dollar split, which would be wrong for a concentrated-liquidity position skewed
+ * away from the center of its range. It only fills the two existing inputs; it never
+ * deposits on its own, and it refuses (with a message) rather than guessing when it can't
+ * price a leg's asset or no LP vault is selected yet. The user still reviews the filled
+ * amounts and clicks the real Deposit button.
  */
 import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
@@ -87,6 +95,15 @@ function symbolForMint(mint: string): string {
   if (mint === SOL_MINT) return "SOL";
   if (mint === USDC_MINT) return "USDC";
   return `${mint.slice(0, 4)}…${mint.slice(-4)}`;
+}
+
+// Real USD price for a mint this app already knows how to price -- only ever SOL (live
+// solPrice) or USDC (always $1). Returns null for anything else rather than guessing, so
+// "Use this plan" can refuse instead of silently mispricing an unknown asset.
+function priceForMint(mint: string, solPrice: number): number | null {
+  if (mint === SOL_MINT) return solPrice > 0 ? solPrice : null;
+  if (mint === USDC_MINT) return 1;
+  return null;
 }
 
 // ---- small presentational helpers (styling only, no logic) ----
@@ -231,6 +248,8 @@ export default function PortfolioPage() {
   // Plan amount is a preview figure the user types once; each leg still confirms its own
   // real input below. Kept in dollars for the blended-yield display only.
   const [planUsd, setPlanUsd] = useState(2000);
+  const [planLoading, setPlanLoading] = useState(false);
+  const [planError, setPlanError] = useState<string | null>(null);
   const blended = blendedApy(safePct, safeApy, lpApy);
   const yearly = estYearly(planUsd, blended);
 
@@ -494,6 +513,75 @@ export default function PortfolioPage() {
     }
   }
 
+  // Turns the slider + plan amount into real amounts in the two leg inputs below, using
+  // live prices and a real deposit quote for the LP ratio -- NOT a naive 50/50 dollar
+  // split (see the CLMM ratio math discussion this was built from). This only FILLS the
+  // two existing inputs; it never deposits by itself -- the user still reviews the
+  // populated amounts and clicks the real Deposit button, same as if they'd typed them by
+  // hand. Refuses rather than guessing if a leg's assets aren't ones we know how to price.
+  async function applyPlan() {
+    setPlanError(null);
+    if (planUsd <= 0) {
+      setPlanError("Enter a plan amount first.");
+      return;
+    }
+    setPlanLoading(true);
+    try {
+      const safeUsd = (planUsd * safePct) / 100;
+      const lpUsd = (planUsd * lpPct) / 100;
+
+      if (safePct > 0) {
+        if (!safeVault) {
+          setPlanError("No Safe vault selected.");
+          return;
+        }
+        const priceA = priceForMint(safeVault.mint, solPrice);
+        if (priceA === null) {
+          setPlanError(`Don't have a live price for ${safeVault.name} yet -- enter the Safe amount manually.`);
+          return;
+        }
+        setSafeAmount((safeUsd / priceA).toFixed(priceA === 1 ? 2 : 4));
+      } else {
+        setSafeAmount("");
+      }
+
+      if (lpPct > 0) {
+        if (!lpInfo) {
+          setPlanError("Pick an LP vault below first, then re-apply the plan.");
+          return;
+        }
+        const priceA = priceForMint(lpInfo.tokenAMint, solPrice);
+        const priceB = priceForMint(lpInfo.tokenBMint, solPrice);
+        if (priceA === null || priceB === null) {
+          setPlanError(`Don't have a live price for ${lpInfo.name}'s tokens yet -- enter the LP amount manually.`);
+          return;
+        }
+        // Real quote for a small reference amount of token A to derive the pool's current
+        // A:B ratio at this range (getDepositQuote/getRaydiumDepositQuote already do the
+        // real CLMM math -- same call the manual amount field's own debounced quote uses).
+        const refA = new anchor.BN(10 ** lpInfo.tokenADecimals); // 1.0 whole token A
+        const q = lpInfo.protocol === "raydium"
+          ? await getRaydiumDepositQuote(lpInfo.address, refA, DEFAULT_SLIPPAGE_BPS)
+          : await getDepositQuote(lpInfo.address, refA, DEFAULT_SLIPPAGE_BPS);
+        const refB = Number(formatBaseUnitsToDecimal(q.tokenMaxB.toString(), lpInfo.tokenBDecimals));
+        // amountB ≈ k * amountA (linear in CLMM liquidity math), k = refB / 1.0
+        const k = refB;
+        const amountA = lpUsd / (priceA + k * priceB);
+        if (!Number.isFinite(amountA) || amountA <= 0) {
+          setPlanError("Couldn't size the LP leg from the current pool price -- enter it manually.");
+          return;
+        }
+        setLpAmountA(amountA.toFixed(lpInfo.tokenADecimals >= 9 ? 4 : 2));
+      } else {
+        setLpAmountA("");
+      }
+    } catch (e: unknown) {
+      setPlanError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPlanLoading(false);
+    }
+  }
+
   // Gate check happens HERE — after every hook above has already run this render — not as
   // an early return further up. See the comment on usePhase2Gate() for why.
   if (!visible) {
@@ -702,6 +790,21 @@ export default function PortfolioPage() {
             </div>
 
             <Badge tone={risk.tone}>{risk.text}</Badge>
+
+            <button
+              onClick={applyPlan}
+              disabled={planLoading}
+              style={{ ...secondaryBtn(!planLoading), width: "100%", marginTop: 12, padding: "9px 16px" }}
+            >
+              {planLoading ? "Sizing legs from live pool price…" : "Use this plan →"}
+            </button>
+            {planError && (
+              <div style={{ fontSize: 12, color: "var(--loss, #e05d5d)", marginTop: 8 }}>{planError}</div>
+            )}
+            <div style={{ fontSize: 11, color: "var(--text-low, #666)", marginTop: 6 }}>
+              Fills the Safe and LP amounts on the right from this split, using live prices and the
+              LP vault&apos;s real current ratio — you still review and confirm the deposit.
+            </div>
 
             <div style={{
               display: "flex", justifyContent: "space-between", alignItems: "baseline",
