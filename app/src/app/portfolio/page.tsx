@@ -32,7 +32,9 @@
  * away from the center of its range. It only fills the two existing inputs; it never
  * deposits on its own, and it refuses (with a message) rather than guessing when it can't
  * price a leg's asset or no LP vault is selected yet. The user still reviews the filled
- * amounts and clicks the real Deposit button.
+ * amounts and clicks the real Deposit button. If no LP vault is selected yet, it
+ * auto-picks the one with the highest live fee APY (obviously what someone running "the
+ * plan" wants) rather than making them click a vault option first.
  */
 import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
@@ -546,24 +548,41 @@ export default function PortfolioPage() {
       }
 
       if (lpPct > 0) {
-        if (!lpInfo) {
-          setPlanError("Pick an LP vault below first, then re-apply the plan.");
-          return;
+        // No LP vault picked yet -- rather than block on that, auto-pick the one showing
+        // the highest live fee APY (the obvious choice for "just run the plan"), same rate
+        // lookup the vault-picker chips below already use. Only guesses among vaults that
+        // are actually loaded; still refuses if none are available.
+        let targetLp = lpInfo;
+        if (!targetLp) {
+          if (lpOptions.length === 0) {
+            setPlanError(lpOptionsLoading ? "Still loading LP vaults -- try again in a moment." : "No LP vaults available.");
+            return;
+          }
+          const withRates = lpOptions.map((opt) => ({
+            opt,
+            rate: apys.find((x) => x.protocolId?.toLowerCase().includes(opt.protocol.toLowerCase())),
+          }));
+          const best = withRates
+            .filter((r) => r.rate && !r.rate.stale)
+            .sort((a, b) => (b.rate!.apyPercent ?? 0) - (a.rate!.apyPercent ?? 0))[0];
+          targetLp = (best ?? withRates[0]).opt;
+          await selectLp(targetLp);
         }
-        const priceA = priceForMint(lpInfo.tokenAMint, solPrice);
-        const priceB = priceForMint(lpInfo.tokenBMint, solPrice);
+
+        const priceA = priceForMint(targetLp.tokenAMint, solPrice);
+        const priceB = priceForMint(targetLp.tokenBMint, solPrice);
         if (priceA === null || priceB === null) {
-          setPlanError(`Don't have a live price for ${lpInfo.name}'s tokens yet -- enter the LP amount manually.`);
+          setPlanError(`Don't have a live price for ${targetLp.name}'s tokens yet -- enter the LP amount manually.`);
           return;
         }
         // Real quote for a small reference amount of token A to derive the pool's current
         // A:B ratio at this range (getDepositQuote/getRaydiumDepositQuote already do the
         // real CLMM math -- same call the manual amount field's own debounced quote uses).
-        const refA = new anchor.BN(10 ** lpInfo.tokenADecimals); // 1.0 whole token A
-        const q = lpInfo.protocol === "raydium"
-          ? await getRaydiumDepositQuote(lpInfo.address, refA, DEFAULT_SLIPPAGE_BPS)
-          : await getDepositQuote(lpInfo.address, refA, DEFAULT_SLIPPAGE_BPS);
-        const refB = Number(formatBaseUnitsToDecimal(q.tokenMaxB.toString(), lpInfo.tokenBDecimals));
+        const refA = new anchor.BN(10 ** targetLp.tokenADecimals); // 1.0 whole token A
+        const q = targetLp.protocol === "raydium"
+          ? await getRaydiumDepositQuote(targetLp.address, refA, DEFAULT_SLIPPAGE_BPS)
+          : await getDepositQuote(targetLp.address, refA, DEFAULT_SLIPPAGE_BPS);
+        const refB = Number(formatBaseUnitsToDecimal(q.tokenMaxB.toString(), targetLp.tokenBDecimals));
         // amountB ≈ k * amountA (linear in CLMM liquidity math), k = refB / 1.0
         const k = refB;
         const amountA = lpUsd / (priceA + k * priceB);
@@ -571,7 +590,7 @@ export default function PortfolioPage() {
           setPlanError("Couldn't size the LP leg from the current pool price -- enter it manually.");
           return;
         }
-        setLpAmountA(amountA.toFixed(lpInfo.tokenADecimals >= 9 ? 4 : 2));
+        setLpAmountA(amountA.toFixed(targetLp.tokenADecimals >= 9 ? 4 : 2));
       } else {
         setLpAmountA("");
       }
