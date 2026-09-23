@@ -345,6 +345,7 @@ export default function PortfolioPage() {
     valueUsd: number;
     sharePct: number;
     inRange: boolean | null;
+    rangePct: number | null; // 0-100: where the live price sits between tickLower/tickUpper
   }[]>([]);
   useEffect(() => {
     if (!publicKey || lpOptions.length === 0 || solPrice <= 0) return;
@@ -359,13 +360,21 @@ export default function PortfolioPage() {
             const sharePct = pos.shares / info.totalShares;
             const valueUsd = vaultValueUsd * sharePct;
             let inRange: boolean | null = null;
+            let rangePct: number | null = null;
             try {
               const tick = await fetchLpCurrentTick(info);
               inRange = tick >= info.tickLowerIndex && tick <= info.tickUpperIndex;
+              // Real tick math, clamped to [0,100] for display when price has moved outside
+              // the range entirely (still shows pinned to whichever edge it blew past).
+              const span = info.tickUpperIndex - info.tickLowerIndex;
+              rangePct = span > 0
+                ? Math.min(100, Math.max(0, ((tick - info.tickLowerIndex) / span) * 100))
+                : null;
             } catch {
               inRange = null; // couldn't read the pool's current tick -- show as unknown, not a guess
+              rangePct = null;
             }
-            return { info, shares: pos.shares, valueUsd, sharePct: sharePct * 100, inRange };
+            return { info, shares: pos.shares, valueUsd, sharePct: sharePct * 100, inRange, rangePct };
           } catch {
             return null;
           }
@@ -374,8 +383,10 @@ export default function PortfolioPage() {
       if (!cancelled) {
         setLpHoldings(
           results.filter(
-            (r): r is { info: LpVaultInfo; shares: number; valueUsd: number; sharePct: number; inRange: boolean | null } =>
-              r !== null
+            (r): r is {
+              info: LpVaultInfo; shares: number; valueUsd: number; sharePct: number;
+              inRange: boolean | null; rangePct: number | null;
+            } => r !== null
           )
         );
       }
@@ -728,7 +739,29 @@ export default function PortfolioPage() {
                             </span>
                             <span style={{ color: "var(--text-hi)", fontFamily: "var(--font-mono)" }}>${h.valueUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
                           </div>
-                          <div style={{ fontSize: 11, color: "var(--text-mid)", marginTop: 2, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                          {h.rangePct !== null && (
+                            <div style={{ marginTop: 6 }} title={`Live pool price is ${h.rangePct.toFixed(0)}% of the way through this vault's range`}>
+                              <div style={{ position: "relative", height: 6, borderRadius: 3, background: "var(--ink-800)", overflow: "hidden" }}>
+                                <div style={{
+                                  position: "absolute", inset: 0, borderRadius: 3,
+                                  background: h.inRange
+                                    ? "linear-gradient(90deg, var(--warn) 0%, var(--signal, #2ecc71) 50%, var(--warn) 100%)"
+                                    : "var(--loss, #e05d5d)",
+                                  opacity: h.inRange ? 1 : 0.5,
+                                }} />
+                                <div style={{
+                                  position: "absolute", top: -2, left: `${h.rangePct}%`,
+                                  width: 2, height: 10, background: "var(--text-hi)",
+                                  transform: "translateX(-1px)", borderRadius: 1,
+                                }} />
+                              </div>
+                              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "var(--text-low, #666)", marginTop: 2 }}>
+                                <span>Range low</span>
+                                <span>Range high</span>
+                              </div>
+                            </div>
+                          )}
+                          <div style={{ fontSize: 11, color: "var(--text-mid)", marginTop: 6, display: "flex", gap: 10, flexWrap: "wrap" }}>
                             <span>{h.sharePct.toFixed(h.sharePct < 1 ? 3 : 1)}% of vault</span>
                             <span>·</span>
                             <span title="Vault-wide lifetime fees collected, not just your share">
