@@ -193,6 +193,7 @@ export default function PortfolioPage() {
   const {
     fetchLpVault,
     fetchLpPosition,
+    fetchLpCurrentTick,
     getDepositQuote,
     depositLp,
     getRaydiumDepositQuote,
@@ -304,7 +305,21 @@ export default function PortfolioPage() {
   // refresh) was completely invisible here: "$0 · No positions yet" over an actual
   // ~$600+ position. Confirmed live 2026-08-27. This scans every configured vault on
   // load instead of waiting for the user to click into the one they already funded.
-  const [lpHoldings, setLpHoldings] = useState<{ info: LpVaultInfo; shares: number; valueUsd: number }[]>([]);
+  // Health fields are all real, on-chain values -- no fabricated P&L. There is no
+  // per-user USD cost basis available on-chain for LP vaults (unlike the old Hood
+  // vault's explicit costBasis mapping): LpUserPosition.liquidity_at_deposit is
+  // mathematically tautological with current proportional liquidity since shares are
+  // minted proportionally to liquidity, so it can't reveal IL/P&L on its own. What IS
+  // real and worth showing: whether the vault's position is currently in-range (the
+  // standard "is this earning fees right now" signal), this holding's real share of
+  // the vault, and the vault's real lifetime fees collected (vault-wide, not per-user).
+  const [lpHoldings, setLpHoldings] = useState<{
+    info: LpVaultInfo;
+    shares: number;
+    valueUsd: number;
+    sharePct: number;
+    inRange: boolean | null;
+  }[]>([]);
   useEffect(() => {
     if (!publicKey || lpOptions.length === 0 || solPrice <= 0) return;
     let cancelled = false;
@@ -315,15 +330,28 @@ export default function PortfolioPage() {
             const pos = await fetchLpPosition(info.address);
             if (!pos || pos.shares <= 0 || info.totalShares <= 0) return null;
             const vaultValueUsd = await computeLpVaultValueUsd(connection, info.address, solPrice);
-            const valueUsd = vaultValueUsd * (pos.shares / info.totalShares);
-            return { info, shares: pos.shares, valueUsd };
+            const sharePct = pos.shares / info.totalShares;
+            const valueUsd = vaultValueUsd * sharePct;
+            let inRange: boolean | null = null;
+            try {
+              const tick = await fetchLpCurrentTick(info);
+              inRange = tick >= info.tickLowerIndex && tick <= info.tickUpperIndex;
+            } catch {
+              inRange = null; // couldn't read the pool's current tick -- show as unknown, not a guess
+            }
+            return { info, shares: pos.shares, valueUsd, sharePct: sharePct * 100, inRange };
           } catch {
             return null;
           }
         })
       );
       if (!cancelled) {
-        setLpHoldings(results.filter((r): r is { info: LpVaultInfo; shares: number; valueUsd: number } => r !== null));
+        setLpHoldings(
+          results.filter(
+            (r): r is { info: LpVaultInfo; shares: number; valueUsd: number; sharePct: number; inRange: boolean | null } =>
+              r !== null
+          )
+        );
       }
     })();
     return () => { cancelled = true; };
@@ -575,14 +603,34 @@ export default function PortfolioPage() {
                 )}
                 {lpHoldings.length > 0 && (
                   <div style={{ borderTop: hasSafe ? "1px solid var(--line)" : undefined, marginTop: hasSafe ? 4 : 16, paddingTop: hasSafe ? 8 : 12 }}>
-                    {lpHoldings.map((h) => (
-                      <div key={h.info.address} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, padding: "5px 0" }}>
-                        <span style={{ color: "var(--text-mid)", display: "flex", alignItems: "center", gap: 6 }}>
-                          {h.info.name} · LP <Badge tone="warn">IL risk</Badge>
-                        </span>
-                        <span style={{ color: "var(--text-hi)", fontFamily: "var(--font-mono)" }}>${h.valueUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
-                      </div>
-                    ))}
+                    {lpHoldings.map((h) => {
+                      const feesA = formatBaseUnitsToDecimal(h.info.lifetimeFeesA, h.info.tokenADecimals);
+                      const feesB = formatBaseUnitsToDecimal(h.info.lifetimeFeesB, h.info.tokenBDecimals);
+                      return (
+                        <div key={h.info.address} style={{ padding: "6px 0" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13 }}>
+                            <span style={{ color: "var(--text-mid)", display: "flex", alignItems: "center", gap: 6 }}>
+                              {h.info.name} · LP <Badge tone="warn">IL risk</Badge>
+                              {h.inRange === true && <Badge tone="ok">In range</Badge>}
+                              {h.inRange === false && <Badge tone="loss">Out of range</Badge>}
+                            </span>
+                            <span style={{ color: "var(--text-hi)", fontFamily: "var(--font-mono)" }}>${h.valueUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                          </div>
+                          <div style={{ fontSize: 11, color: "var(--text-mid)", marginTop: 2, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                            <span>{h.sharePct.toFixed(h.sharePct < 1 ? 3 : 1)}% of vault</span>
+                            <span>·</span>
+                            <span title="Vault-wide lifetime fees collected, not just your share">
+                              Vault lifetime fees: {feesA} / {feesB} ({h.info.name})
+                            </span>
+                          </div>
+                          {h.inRange === false && (
+                            <div style={{ fontSize: 11, color: "var(--warn)", marginTop: 2 }}>
+                              Pool price has moved outside this vault&apos;s range — it isn&apos;t earning trading fees right now.
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </>
