@@ -8,6 +8,18 @@ const nextConfig = {
     NEXT_PUBLIC_ADMIN_WALLET: process.env.NEXT_PUBLIC_ADMIN_WALLET || '8i7kydJHwi3Cdp46Xugyux2vWJmTScYDvnJrBiBihBnP',
   },
   reactStrictMode: true,
+  // Fixes a REAL bug found live 2026-09-23: the two LP quote API routes
+  // (api/lp-deposit-quote, api/lp-withdraw-quote) load @orca-so/whirlpools-core's WASM
+  // binary via a dynamic import at request time. Vercel's output file tracer doesn't
+  // follow that dynamic import to know the .wasm binary needs to ship with the
+  // serverless function, so the deployed function threw
+  // "ENOENT: .../orca_whirlpools_core_js_bindings_bg.wasm" on every real request even
+  // though the build itself succeeded silently. Confirmed by curling the deployed
+  // function directly. This explicitly tells the tracer to include it.
+  outputFileTracingIncludes: {
+    "/api/lp-deposit-quote": ["./node_modules/@orca-so/whirlpools-core/dist/**/*.wasm"],
+    "/api/lp-withdraw-quote": ["./node_modules/@orca-so/whirlpools-core/dist/**/*.wasm"],
+  },
   webpack: (config) => {
     config.resolve.fallback = {
       ...config.resolve.fallback,
