@@ -53,7 +53,7 @@ export function Header() {
     ["Epochs", "/epochs"],
 
 
-    ...(phase2Visible ? [["Portfolio", "/portfolio"] as [string, string], ["LP", "/lp"] as [string, string]] : []),
+    ...(phase2Visible ? [["Portfolio", "/portfolio"] as [string, string]] : []),
 
     ["Whitepaper", "/whitepaper"],
 
