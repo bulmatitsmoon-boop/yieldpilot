@@ -8,18 +8,23 @@ const nextConfig = {
     NEXT_PUBLIC_ADMIN_WALLET: process.env.NEXT_PUBLIC_ADMIN_WALLET || '8i7kydJHwi3Cdp46Xugyux2vWJmTScYDvnJrBiBihBnP',
   },
   reactStrictMode: true,
-  // Fixes a REAL bug found live 2026-09-23: the two LP quote API routes
-  // (api/lp-deposit-quote, api/lp-withdraw-quote) load @orca-so/whirlpools-core's WASM
-  // binary via a dynamic import at request time. Vercel's output file tracer doesn't
-  // follow that dynamic import to know the .wasm binary needs to ship with the
-  // serverless function, so the deployed function threw
-  // "ENOENT: .../orca_whirlpools_core_js_bindings_bg.wasm" on every real request even
-  // though the build itself succeeded silently. Confirmed by curling the deployed
-  // function directly. This explicitly tells the tracer to include it.
-  outputFileTracingIncludes: {
-    "/api/lp-deposit-quote": ["./node_modules/@orca-so/whirlpools-core/dist/**/*.wasm"],
-    "/api/lp-withdraw-quote": ["./node_modules/@orca-so/whirlpools-core/dist/**/*.wasm"],
-  },
+  // Fixes a REAL bug found live 2026-09-23 (reproduced locally with `next start` before
+  // this fix, not guessed): the two LP quote API routes (api/lp-deposit-quote,
+  // api/lp-withdraw-quote) call @orca-so/whirlpools-core, a WASM package, from a server
+  // route. Webpack's asyncWebAssembly handling only ever emitted the .wasm binary into
+  // .next/static/wasm/ (the CLIENT asset path) even for this server-side import — it
+  // never wrote it into .next/server/chunks/ at all, confirmed by listing the actual
+  // build output — so the deployed function threw ENOENT looking for a file that
+  // genuinely doesn't exist anywhere in the server bundle. This isn't a Vercel file-
+  // tracing gap (tried outputFileTracingIncludes first; had no effect, since the file
+  // was missing before tracing even runs).
+  //
+  // The real fix: exclude this package from webpack's server bundle entirely via
+  // serverExternalPackages, so Node's own `require()` loads it directly from
+  // node_modules at runtime using its "main" (dist/nodejs) build, which does a plain
+  // fs.readFileSync for its wasm file -- a pattern Vercel's tracer handles natively,
+  // with no webpack chunk system involved at all.
+  serverExternalPackages: ["@orca-so/whirlpools-core"],
   webpack: (config) => {
     config.resolve.fallback = {
       ...config.resolve.fallback,
