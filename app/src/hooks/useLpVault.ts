@@ -719,6 +719,10 @@ export function useLpVault() {
             tickArrayUpper,
             tokenProgram: TOKEN_PROGRAM_ID,
             whirlpoolProgram: WHIRLPOOL_PROGRAM_ID,
+            // Explicit, not relying on Anchor's auto-fill for a well-known constant --
+            // confirmed instant/harmless either way while diagnosing an unrelated hang
+            // (2026-09-23), but a fragility worth removing rather than leaving in place.
+            systemProgram: anchor.web3.SystemProgram.programId,
           })
           .instruction();
 
