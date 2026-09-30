@@ -12,14 +12,22 @@ export const PhantomDeeplinkWalletName = "Phantom (Connect)" as WalletName<"Phan
 /// "NotDetected" and unusable. Replaces the old "open the whole site inside Phantom's
 /// in-app browser" fallback with a round trip that returns to THIS browser tab.
 ///
-/// CONNECT is fully implemented. SIGNING IS NOT (yet): Phantom's sign methods require the
-/// exact same full-page-navigation round trip connect does, which means whatever code
-/// called signTransaction/sendTransaction cannot itself resume after the redirect -- the
-/// page reloads, destroying that call stack. Making deposits/withdrawals work this way
-/// needs those flows rebuilt around a "redirect out, resume on the next page load" model
-/// (see the return-banner pattern this file already uses for connect), not a drop-in
-/// signTransaction. Until that's built, signTransaction/signAllTransactions throw a clear,
-/// immediate error instead of hanging forever on a promise that can never resolve.
+/// CONNECT is fully implemented via this adapter's standard wallet-adapter interface.
+/// SIGNING IS NOT, and structurally can't be: Phantom's sign methods require the exact
+/// same full-page-navigation round trip connect does, so whatever code called
+/// signTransaction/sendTransaction through the normal wallet-adapter Promise contract
+/// cannot itself resume after the redirect -- the page reloads, destroying that call
+/// stack. signTransaction/signAllTransactions below throw a clear, immediate error rather
+/// than hanging forever on a promise that can never resolve -- this is a permanent
+/// property of this transport, not a TODO.
+///
+/// The REAL deposit/withdraw signing path (added 2026-09-29) lives OUTSIDE this adapter
+/// interface entirely: useYieldPilot.ts detects this adapter by name and, instead of
+/// calling the standard signTransaction, builds the transaction, serializes it, and calls
+/// phantomDeeplink.startSign() directly -- a real "redirect out, resume on the next page
+/// load" flow, mirroring how connect() already works. The resume/broadcast half lives in
+/// WalletProvider.tsx's PhantomReturnHandler. See phantomDeeplink.ts for the encryption
+/// protocol both connect and sign share.
 export class PhantomDeeplinkWalletAdapter extends BaseSignerWalletAdapter<"Phantom (Connect)"> {
   name = PhantomDeeplinkWalletName;
   url = "https://phantom.app";
@@ -85,17 +93,21 @@ export class PhantomDeeplinkWalletAdapter extends BaseSignerWalletAdapter<"Phant
     this.emit("disconnect");
   }
 
+  /// Deliberately unreachable in normal use: useYieldPilot.ts calls phantomDeeplink.startSign()
+  /// directly for this adapter instead of going through wallet-adapter's signTransaction, since
+  /// the redirect this requires can never let this method actually return a value. Thrown only
+  /// as a safety net if some other, not-yet-updated call site tries the standard interface.
   async signTransaction<T extends Transaction | VersionedTransaction>(_transaction: T): Promise<T> {
     if (!this.publicKey) throw new WalletNotConnectedError();
     throw new Error(
-      "Signing isn't wired up for this connect method yet -- deposits/withdrawals need a browser extension wallet for now. Connecting to view your position works fine."
+      "This connect method can't sign through the standard wallet interface -- the caller needs to use phantomDeeplink.startSign() directly instead."
     );
   }
 
   async signAllTransactions<T extends Transaction | VersionedTransaction>(_transactions: T[]): Promise<T[]> {
     if (!this.publicKey) throw new WalletNotConnectedError();
     throw new Error(
-      "Signing isn't wired up for this connect method yet -- deposits/withdrawals need a browser extension wallet for now. Connecting to view your position works fine."
+      "This connect method can't sign through the standard wallet interface -- the caller needs to use phantomDeeplink.startSign() directly instead."
     );
   }
 }
