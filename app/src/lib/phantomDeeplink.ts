@@ -46,6 +46,15 @@ export interface PhantomResult {
   kind: "connect" | "sign";
   publicKey?: string;
   signature?: string;
+  /// Base64-encoded, Phantom-signed transaction bytes (from the `signTransaction` deeplink
+  /// method) -- the caller still has to broadcast this themselves, since Phantom hands
+  /// back a signed transaction rather than sending it. See WalletProvider.tsx's
+  /// PhantomReturnHandler for where that broadcast actually happens.
+  signedTransactionB64?: string;
+  /// True for a "sign" result between decrypting Phantom's response and finishing the
+  /// broadcast+confirm -- lets the UI show "Confirming..." rather than a premature
+  /// "Transaction confirmed." before the transaction has actually landed.
+  pending?: boolean;
   error?: string;
   label?: string;
 }
@@ -93,12 +102,41 @@ export function startConnect(label?: string): void {
   window.location.href = url;
 }
 
-// NOT YET IMPLEMENTED: signing transactions via this protocol (see the "sign" branch in
-// handleReturnIfPresent() below and PhantomDeeplinkAdapter's stubbed signTransaction).
-// When this gets built, use Phantom's `signTransaction` deeplink method, NOT
-// `signAndSendTransaction` -- Phantom deprecated that one (checked their docs 2026-09-22)
-// in favor of `signTransaction`/`signAllTransactions`, which return a signed transaction
-// for the dapp to broadcast itself rather than having Phantom broadcast it.
+/// Kicks off a signTransaction round trip. Never returns -- the page navigates away, and
+/// resumes on the NEXT page load via handleReturnIfPresent() (kind: "sign"). The caller
+/// must have already built and serialized the FULL unsigned transaction (all instructions,
+/// feePayer, recentBlockhash already set) -- this function only handles the Phantom
+/// encryption/redirect protocol, not transaction construction.
+///
+/// Uses Phantom's `signTransaction` deeplink method deliberately, not
+/// `signAndSendTransaction` -- Phantom deprecated the latter (checked their docs
+/// 2026-09-22) in favor of `signTransaction`/`signAllTransactions`, which return a signed
+/// transaction for the dapp to broadcast itself rather than having Phantom broadcast it.
+export function startSign(unsignedTxBase58: string, label: string | undefined, returnTo: string): void {
+  const dappSecretB58 = localStorage.getItem(SS_DAPP_SECRET);
+  const sharedSecretB58 = localStorage.getItem(SS_SHARED_SECRET);
+  const session = localStorage.getItem(SS_SESSION);
+  if (!dappSecretB58 || !sharedSecretB58 || !session) {
+    throw new Error("No active Phantom session -- reconnect and try again.");
+  }
+  const dappKeyPair = nacl.box.keyPair.fromSecretKey(bs58.decode(dappSecretB58));
+  const sharedSecret = bs58.decode(sharedSecretB58);
+
+  const pending: PendingAction = { kind: "sign", label, returnTo };
+  localStorage.setItem(SS_PENDING, JSON.stringify(pending));
+
+  const nonce = nacl.randomBytes(24);
+  const payload = JSON.stringify({ transaction: unsignedTxBase58, session });
+  const encrypted = nacl.box.after(Buffer.from(payload, "utf8"), nonce, sharedSecret);
+
+  const url = buildUrl("signTransaction", {
+    dapp_encryption_public_key: bs58.encode(dappKeyPair.publicKey),
+    nonce: bs58.encode(nonce),
+    redirect_link: window.location.origin + window.location.pathname,
+    payload: bs58.encode(encrypted),
+  });
+  window.location.href = url;
+}
 
 /// Call once on every page load (before anything else reads connection state). If the
 /// current URL is a Phantom deeplink return, decrypts it, updates session storage, cleans
@@ -152,9 +190,14 @@ export function handleReturnIfPresent(): PhantomResult | null {
       const data = bs58.decode(params.get("data")!);
       const decrypted = nacl.box.open.after(data, nonce, sharedSecret);
       if (!decrypted) throw new Error("Could not decrypt Phantom's response.");
-      const { signature } = JSON.parse(Buffer.from(decrypted).toString("utf8"));
+      // Phantom's signTransaction method returns { transaction: <base58 signed tx> }, not a
+      // signature -- it signs but does not broadcast. Re-encode to base64 since that's what
+      // @solana/web3.js's Transaction.from()/sendRawTransaction expect elsewhere in the app.
+      const { transaction } = JSON.parse(Buffer.from(decrypted).toString("utf8"));
+      if (!transaction) throw new Error("Phantom's response had no signed transaction.");
+      const signedTransactionB64 = Buffer.from(bs58.decode(transaction)).toString("base64");
 
-      const result: PhantomResult = { ok: true, kind: "sign", signature, label: pending?.label };
+      const result: PhantomResult = { ok: true, kind: "sign", signedTransactionB64, pending: true, label: pending?.label };
       return result;
     }
   } catch (e) {
