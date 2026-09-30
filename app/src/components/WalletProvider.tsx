@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useRef } from "react";
 import {
   ConnectionProvider,
   WalletProvider,
+  useConnection,
 } from "@solana/wallet-adapter-react";
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
 import { PhantomWalletAdapter } from "@solana/wallet-adapter-phantom";
@@ -59,17 +60,6 @@ export function WalletContextProvider({ children }: { children: React.ReactNode 
   // between two components both trying to read/clear the same one-shot storage key.
   const [phantomResult, setPhantomResult] = React.useState<phantomDeeplink.PhantomResult | null>(null);
 
-  // Runs after WProv (below, a child in this tree) has already mounted and subscribed to
-  // adapter events -- React fires child effects before parent effects on mount, so
-  // emitting "connect" here is guaranteed to be caught, not missed.
-  useEffect(() => {
-    const result = phantomDeeplink.handleReturnIfPresent();
-    if (result) {
-      phantomDeeplinkAdapter.current?.handlePossibleReturn(result);
-      setPhantomResult(result);
-    }
-  }, []);
-
   // Route every RPC call through the app's own /api/rpc proxy instead of
   // talking to the real provider directly. Two reasons:
   // 1. NEXT_PUBLIC_RPC_URL is, by definition, shipped to every visitor's
@@ -119,10 +109,68 @@ export function WalletContextProvider({ children }: { children: React.ReactNode 
     <Conn endpoint={endpoint} config={connectionConfig}>
       <WProv wallets={wallets} autoConnect>
         <WMProv>
+          <PhantomReturnHandler
+            adapter={phantomDeeplinkAdapter.current}
+            onResult={setPhantomResult}
+          />
           <PhantomReturnBanner result={phantomResult} onDismiss={() => setPhantomResult(null)} />
           {children}
         </WMProv>
       </WProv>
     </Conn>
   );
+}
+
+/// Runs the Phantom deeplink return handling that needs a live Connection -- rendered as a
+/// child of ConnectionProvider (unlike the outer WalletContextProvider itself, which is
+/// above it in the tree and can't call useConnection). Handles BOTH branches:
+///   - "connect": just forwards the decrypted result to the adapter + banner, as before.
+///   - "sign": Phantom only SIGNS via this protocol, it doesn't broadcast (see
+///     phantomDeeplink.ts) -- so this is also where the signed transaction actually gets
+///     sent and confirmed, since the original deposit()/withdraw() call that built it was
+///     abandoned on the earlier redirect. On success, dispatches "yp:tx-confirmed" so
+///     useYieldPilot.ts (in whatever page happens to be mounted) refreshes vaults/positions.
+function PhantomReturnHandler({
+  adapter,
+  onResult,
+}: {
+  adapter: PhantomDeeplinkWalletAdapter | null;
+  onResult: (r: phantomDeeplink.PhantomResult) => void;
+}) {
+  const { connection } = useConnection();
+  const ran = useRef(false);
+
+  useEffect(() => {
+    if (ran.current) return;
+    ran.current = true;
+
+    const result = phantomDeeplink.handleReturnIfPresent();
+    if (!result) return;
+
+    adapter?.handlePossibleReturn(result); // no-op for kind "sign"
+
+    if (result.kind === "sign" && result.ok && result.signedTransactionB64) {
+      onResult(result); // shows "Confirming..." via PhantomResult.pending
+      (async () => {
+        try {
+          const raw = Buffer.from(result.signedTransactionB64!, "base64");
+          const signature = await connection.sendRawTransaction(raw, { skipPreflight: true });
+          await connection.confirmTransaction(signature, "confirmed");
+          onResult({ ...result, pending: false, signature });
+          window.dispatchEvent(new CustomEvent("yp:tx-confirmed", { detail: { signature } }));
+        } catch (e) {
+          onResult({
+            ...result,
+            ok: false,
+            pending: false,
+            error: e instanceof Error ? e.message : "Broadcast failed.",
+          });
+        }
+      })();
+    } else {
+      onResult(result);
+    }
+  }, [connection, adapter, onResult]);
+
+  return null;
 }
