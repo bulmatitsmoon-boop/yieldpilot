@@ -19,7 +19,10 @@ import {
   createCloseAccountInstruction,
 } from "@solana/spl-token";
 import { Transaction, SystemProgram as SP } from "@solana/web3.js";
+import bs58 from "bs58";
 import IDL from "@/idl/yieldpilot.mainnet.json";
+import * as phantomDeeplink from "@/lib/phantomDeeplink";
+import { PhantomDeeplinkWalletName } from "@/components/wallets/PhantomDeeplinkAdapter";
 
 const PROGRAM_ID = new PublicKey(
   process.env.NEXT_PUBLIC_PROGRAM_ID || "3tAEmHXZ51YVLe9ts8b9cMcgQPgaSamLxLtxR31VpREi"
@@ -82,7 +85,12 @@ export type TxStatus = "idle" | "signing" | "confirming" | "success" | "error";
 
 export function useYieldPilot(vaultAddresses: string[]) {
   const { connection } = useConnection();
-  const { publicKey, signTransaction, sendTransaction } = useWallet();
+  const { publicKey, signTransaction, sendTransaction, wallet } = useWallet();
+  // Phantom's mobile Connect deeplink can never fulfill the standard wallet-adapter
+  // signTransaction Promise contract (see PhantomDeeplinkAdapter.ts) -- deposit/withdraw
+  // below detect this specific adapter and redirect out for a real signature instead of
+  // calling .rpc(), which would otherwise throw immediately every time on mobile.
+  const isDeeplinkWallet = wallet?.adapter?.name === PhantomDeeplinkWalletName;
 
   const [vaults, setVaults] = useState<VaultInfo[]>([]);
   const [positions, setPositions] = useState<UserPosition[]>([]);
@@ -312,6 +320,39 @@ export function useYieldPilot(vaultAddresses: string[]) {
     [publicKey, fetchVaults, fetchPositions, connection]
   );
 
+  // Broadcast normally for a real signer, or redirect out to Phantom and never resolve
+  // (mirroring connect()) for the mobile deeplink adapter -- see the isDeeplinkWallet
+  // comment above and PhantomDeeplinkAdapter.ts. The actual broadcast for the deeplink
+  // path happens after the redirect returns, in WalletProvider.tsx's PhantomReturnHandler,
+  // since nothing on this call stack survives the navigation.
+  const signAndSendOrRedirect = useCallback(
+    async (builder: any, label: string): Promise<string> => {
+      if (!isDeeplinkWallet) {
+        return builder.rpc({ skipPreflight: true, commitment: "confirmed", preflightCommitment: "confirmed" });
+      }
+      const tx: Transaction = await builder.transaction();
+      tx.feePayer = publicKey!;
+      const { blockhash } = await connection.getLatestBlockhash("confirmed");
+      tx.recentBlockhash = blockhash;
+      const unsignedTxBase58 = bs58.encode(
+        tx.serialize({ requireAllSignatures: false, verifySignatures: false })
+      );
+      phantomDeeplink.startSign(unsignedTxBase58, label, window.location.pathname + window.location.search);
+      return new Promise<string>(() => {}); // never resolves -- page navigates away
+    },
+    [isDeeplinkWallet, publicKey, connection]
+  );
+
+  // A deeplink-signed deposit/withdraw confirms on a LATER page load (after the Phantom
+  // redirect returns), in WalletProvider.tsx -- not on this hook instance, which was
+  // abandoned when the page navigated away. That component dispatches this event once the
+  // broadcast actually confirms, so any currently-mounted page picks up the fresh balances.
+  useEffect(() => {
+    const onConfirmed = () => { fetchVaults(); fetchPositions(); };
+    window.addEventListener("yp:tx-confirmed", onConfirmed);
+    return () => window.removeEventListener("yp:tx-confirmed", onConfirmed);
+  }, [fetchVaults, fetchPositions]);
+
   const deposit = useCallback(
     async (vaultAddress: string, mint: string, amount: anchor.BN) => {
       if (!publicKey) return;
@@ -450,7 +491,7 @@ export function useYieldPilot(vaultAddresses: string[]) {
           // keeper's next cycle deploys the idle balance as a fallback.
         }
 
-        return program.methods
+        const builder = program.methods
           .deposit(amount)
           .accounts({
             user: publicKey,
@@ -468,11 +509,11 @@ export function useYieldPilot(vaultAddresses: string[]) {
             systemProgram: SystemProgram.programId,
           })
           .preInstructions(preIxs)
-          .postInstructions(postIxs)
-          .rpc({ skipPreflight: true, commitment: "confirmed", preflightCommitment: "confirmed" });
+          .postInstructions(postIxs);
+        return signAndSendOrRedirect(builder, `Deposit ${vaultRaw.name}`);
       });
     },
-    [publicKey, getProgram, wrapTx]
+    [publicKey, getProgram, wrapTx, signAndSendOrRedirect]
   );
 
   const withdraw = useCallback(
@@ -707,7 +748,7 @@ export function useYieldPilot(vaultAddresses: string[]) {
           : new anchor.BN(0);
         const minAmountOut = netAmountOutBN.muln(99).divn(100); // 1% slippage buffer on top of known costs
 
-        return program.methods
+        const builder = program.methods
           .withdraw(shares, minAmountOut)
           .accountsPartial({
             user: publicKey,
@@ -724,11 +765,11 @@ export function useYieldPilot(vaultAddresses: string[]) {
             tokenProgram: TOKEN_PROGRAM_ID,
           })
           .preInstructions(preIxs)
-          .postInstructions(postIxs)
-          .rpc({ skipPreflight: true, commitment: "confirmed", preflightCommitment: "confirmed" });
+          .postInstructions(postIxs);
+        return signAndSendOrRedirect(builder, `Withdraw ${vaultRaw.name}`);
       });
     },
-    [publicKey, getProgram, wrapTx]
+    [publicKey, getProgram, wrapTx, signAndSendOrRedirect]
   );
 
 
