@@ -116,6 +116,28 @@ pub struct LpVault {
     /// deployed. Carved from the same padding lifetime_fees_a/b used; no
     /// realloc needed, LpVault::LEN unchanged.
     pub lending_deployed_b:       u64,
+    /// Two-step admin transfer (propose_lp_admin/accept_lp_admin), same pattern as
+    /// Vault.pending_admin. Added 2026-09-28 after a real incident: LP vaults had NO
+    /// admin-transfer mechanism at all, so when the admin key was compromised
+    /// (see project memory, project_yieldpilot_critical_keys.md) every LP vault's
+    /// admin/treasury was permanently stuck pointing at the burned key with no way to
+    /// migrate it — flagged and deliberately deprioritized while LP vaults were empty,
+    /// then a real deposit landed before this got fixed. Carved from the existing
+    /// padding below — no realloc needed, LpVault::LEN unchanged.
+    /// Pubkey::default() = no pending transfer.
+    pub pending_admin:            Pubkey,
+    /// Performance-fee gate/tier config, mirroring Vault's gate_mint + threshold fields
+    /// exactly (see lib.rs, resolve_lp_fee_bps above). Added 2026-09-29 alongside the
+    /// fee logic itself -- see LpUserPosition.deposited_amount_a/b's doc comment for the
+    /// full incident writeup (withdraw_orca_lp/withdraw_raydium_lp had NO fee logic at
+    /// all before this). gate_mint == SystemProgram means disabled (always standard
+    /// rate), same convention as the Safe vault. Present in LpVault::LEN from this
+    /// program's very first deploy -- every vault gets these fields set correctly at
+    /// initialize_orca_lp_vault/initialize_raydium_lp_vault, no migration ever needed.
+    pub gate_mint:                Pubkey,
+    pub gold_threshold:           u64,
+    pub silver_threshold:         u64,
+    pub bronze_threshold:         u64,
 }
 
 impl LpVault {
@@ -130,7 +152,10 @@ impl LpVault {
         + 4 + 32    // name
         + 8 * 2     // lifetime_fees_a, lifetime_fees_b
         + 8         // lending_deployed_b
-        + 40;       // padding for future fields (was 48; 8 spent on lending_deployed_b)
+        + 32        // pending_admin
+        + 32        // gate_mint
+        + 8 * 3     // gold_threshold, silver_threshold, bronze_threshold
+        + 8;        // padding for future fields (was 8, unchanged -- gating fields grow the account instead)
 }
 
 /// Per-user LP position ledger — mirrors UserPosition's cost-basis-tracking
@@ -144,10 +169,31 @@ pub struct LpUserPosition {
     pub shares:           u64,
     pub liquidity_at_deposit: u128,
     pub bump:             u8,
+    /// Real per-token deposited amounts, used as the actual cost basis for the
+    /// performance-fee-on-profit charged at withdrawal. Added 2026-09-29 after a real
+    /// incident: withdraw_orca_lp/withdraw_raydium_lp had NO fee logic at all since the
+    /// LP vault instructions were first shipped -- every LP withdrawal, ever, paid zero
+    /// performance fee regardless of profit. liquidity_at_deposit (above) can't serve as
+    /// a cost basis on its own -- it's mathematically tautological with the current
+    /// proportional share of liquidity, since shares are minted proportional to
+    /// liquidity (see project memory). Tracked per-token rather than as a single USD
+    /// value deliberately: an on-chain price oracle would add a real manipulation
+    /// surface (a temporarily-skewed price at withdrawal time could zero out or inflate
+    /// the reported profit) for a problem that doesn't need one -- profit in token A and
+    /// profit in token B, charged independently in their own units, is exactly as
+    /// correct and has no oracle dependency at all. Carved from the account's own
+    /// existing padding -- no realloc needed, LpUserPosition::LEN unchanged.
+    pub deposited_amount_a: u64,
+    pub deposited_amount_b: u64,
+    /// Snapshotted fee tier at deposit time (0=gold..3=standard), same anti-flash-loan
+    /// purpose as UserPosition.tier_at_deposit on the Safe vault: the WORSE (higher-fee)
+    /// of this and the live tier at withdrawal is always used, so gate tokens borrowed
+    /// right before withdrawing can't retroactively cheapen a fee already locked in.
+    pub tier_at_deposit: u8,
 }
 
 impl LpUserPosition {
-    pub const LEN: usize = 8 + 32 + 32 + 8 + 16 + 1 + 32;
+    pub const LEN: usize = 8 + 32 + 32 + 8 + 16 + 1 + 8 * 2 + 1 + 15;
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
@@ -200,6 +246,147 @@ pub enum LpVaultError {
     PositionStillActive,
     #[msg("Vault does not hold enough idle balance for this redeploy amount")]
     InsufficientIdleBalance,
+    #[msg("No pending LP vault admin transfer")]
+    NoPendingLpAdmin,
+    #[msg("Caller is not the pending LP vault admin")]
+    NotPendingLpAdmin,
+    #[msg("Treasury token account required when a performance fee is owed")]
+    LpTreasuryRequired,
+    #[msg("Treasury token account is not owned by the vault's registered treasury wallet")]
+    LpTreasuryOwnerMismatch,
+    #[msg("Gate account mint/owner does not match the caller")]
+    InvalidLpGateAccount,
+    #[msg("LP vault still has liquidity or an active position — exit and withdraw everything before closing")]
+    LpVaultNotEmpty,
+    #[msg("LP position still has shares — withdraw everything before closing")]
+    LpPositionNotEmpty,
+}
+
+// Same tier structure and rates as the Safe vault's GOLD/SILVER/BRONZE/STANDARD_FEE_BPS
+// (see lib.rs) -- defined separately here rather than imported cross-module, but MUST be
+// kept numerically identical. Inert (gate_mint defaults to SystemProgram, same convention
+// as the Safe vault) until the $YPILOT gate token exists -- see project memory,
+// project_inert_features.md -- but the scaffolding has to be real from day one, not
+// bolted on later, exactly like the Safe vault already has it.
+const LP_GOLD_FEE_BPS: u64 = 0;
+const LP_SILVER_FEE_BPS: u64 = 300;
+const LP_BRONZE_FEE_BPS: u64 = 600;
+const LP_STANDARD_FEE_BPS: u64 = 900;
+const LP_FEE_BPS_DENOM: u64 = 10_000;
+
+/// Resolves the effective fee tier exactly like the Safe vault's withdraw() does: live
+/// gate-token balance against the vault's OWN thresholds, floored by the WORSE
+/// (higher-fee) of that and the tier snapshotted at deposit time -- so nobody can flash-
+/// borrow gate tokens right before withdrawing to retroactively cheapen a fee they
+/// already locked in. Disabled entirely (always standard rate) when gate_mint is the
+/// default SystemProgram placeholder, same convention as the Safe vault.
+fn resolve_lp_fee_bps(
+    gate_mint: Pubkey,
+    gold_threshold: u64,
+    silver_threshold: u64,
+    bronze_threshold: u64,
+    gate_balance: u64,
+    tier_at_deposit: u8,
+) -> u64 {
+    if gate_mint == anchor_lang::solana_program::system_program::ID {
+        return LP_STANDARD_FEE_BPS;
+    }
+    let current_tier_u8: u8 = if gate_balance >= gold_threshold { 0 }
+        else if gate_balance >= silver_threshold { 1 }
+        else if gate_balance >= bronze_threshold { 2 }
+        else { 3 };
+    let effective_tier = current_tier_u8.max(tier_at_deposit);
+    match effective_tier {
+        0 => LP_GOLD_FEE_BPS,
+        1 => LP_SILVER_FEE_BPS,
+        2 => LP_BRONZE_FEE_BPS,
+        _ => LP_STANDARD_FEE_BPS,
+    }
+}
+
+#[cfg(test)]
+mod lp_fee_tests {
+    use super::*;
+
+    const NO_GATE: Pubkey = anchor_lang::solana_program::system_program::ID;
+    // Any non-default pubkey stands in for a real gate mint in these tests.
+    const GATE: Pubkey = Pubkey::new_from_array([7u8; 32]);
+    const GOLD_T: u64 = 1_000_000;
+    const SILVER_T: u64 = 100_000;
+    const BRONZE_T: u64 = 10_000;
+
+    #[test]
+    fn disabled_gating_always_charges_standard_rate() {
+        // This is the current mainnet reality: gate_mint == SystemProgram on every LP
+        // vault today, since no $YPILOT gate token exists yet. Must charge the full
+        // 900bps regardless of any balance/tier snapshot passed in -- the user's own
+        // real withdrawal (0% fee taken, pre-fix) must NOT be reproduced by the fixed code.
+        assert_eq!(resolve_lp_fee_bps(NO_GATE, GOLD_T, SILVER_T, BRONZE_T, 999_999_999, 0), LP_STANDARD_FEE_BPS);
+        assert_eq!(resolve_lp_fee_bps(NO_GATE, GOLD_T, SILVER_T, BRONZE_T, 0, 3), LP_STANDARD_FEE_BPS);
+    }
+
+    #[test]
+    fn tier_scales_with_live_gate_balance() {
+        // The exact thing Lloyd was worried I'd forget: the rate is NOT a flat 9%, it
+        // scales down as the wallet holds more of the native gate token.
+        assert_eq!(resolve_lp_fee_bps(GATE, GOLD_T, SILVER_T, BRONZE_T, GOLD_T, 0), LP_GOLD_FEE_BPS);
+        assert_eq!(resolve_lp_fee_bps(GATE, GOLD_T, SILVER_T, BRONZE_T, SILVER_T, 0), LP_SILVER_FEE_BPS);
+        assert_eq!(resolve_lp_fee_bps(GATE, GOLD_T, SILVER_T, BRONZE_T, BRONZE_T, 0), LP_BRONZE_FEE_BPS);
+        assert_eq!(resolve_lp_fee_bps(GATE, GOLD_T, SILVER_T, BRONZE_T, 0, 0), LP_STANDARD_FEE_BPS);
+        // Just below a threshold falls to the next tier down.
+        assert_eq!(resolve_lp_fee_bps(GATE, GOLD_T, SILVER_T, BRONZE_T, GOLD_T - 1, 0), LP_SILVER_FEE_BPS);
+        assert_eq!(resolve_lp_fee_bps(GATE, GOLD_T, SILVER_T, BRONZE_T, SILVER_T - 1, 0), LP_BRONZE_FEE_BPS);
+        assert_eq!(resolve_lp_fee_bps(GATE, GOLD_T, SILVER_T, BRONZE_T, BRONZE_T - 1, 0), LP_STANDARD_FEE_BPS);
+    }
+
+    #[test]
+    fn worse_of_live_and_deposit_snapshot_wins() {
+        // Anti-flash-loan: even if the wallet holds gold-tier balance live, a worse
+        // (higher-fee) tier snapshotted at deposit time still applies.
+        assert_eq!(resolve_lp_fee_bps(GATE, GOLD_T, SILVER_T, BRONZE_T, GOLD_T, 3), LP_STANDARD_FEE_BPS);
+        assert_eq!(resolve_lp_fee_bps(GATE, GOLD_T, SILVER_T, BRONZE_T, GOLD_T, 1), LP_SILVER_FEE_BPS);
+        // And the reverse: gold snapshotted at deposit doesn't help if the wallet has
+        // since drained its gate tokens -- the WORSE of the two always wins either way.
+        assert_eq!(resolve_lp_fee_bps(GATE, GOLD_T, SILVER_T, BRONZE_T, 0, 0), LP_STANDARD_FEE_BPS);
+    }
+
+    // Cost-basis / profit-decomposition math used directly in both withdraw handlers,
+    // extracted here as pure arithmetic so it's testable without a live CPI/validator.
+    fn profit_and_fee(deposited: u64, shares_withdrawn: u64, shares_total: u64, payout: u64, fee_bps: u64) -> (u64, u64) {
+        let cost_basis = deposited.checked_mul(shares_withdrawn).and_then(|x| x.checked_div(shares_total)).unwrap_or(0);
+        let profit = payout.saturating_sub(cost_basis);
+        let fee = profit.checked_mul(fee_bps).and_then(|x| x.checked_div(LP_FEE_BPS_DENOM)).unwrap_or(0);
+        (profit, fee)
+    }
+
+    #[test]
+    fn no_fee_when_withdrawing_at_or_below_cost_basis() {
+        // Full withdrawal, payout exactly equals cost basis -- zero profit, zero fee.
+        let (profit, fee) = profit_and_fee(1_000, 500, 500, 1_000, LP_STANDARD_FEE_BPS);
+        assert_eq!(profit, 0);
+        assert_eq!(fee, 0);
+        // Payout below cost basis (a real loss) must not underflow or charge a fee.
+        let (profit, fee) = profit_and_fee(1_000, 500, 500, 800, LP_STANDARD_FEE_BPS);
+        assert_eq!(profit, 0);
+        assert_eq!(fee, 0);
+    }
+
+    #[test]
+    fn fee_charged_only_on_the_profit_slice_at_standard_rate() {
+        // Deposited 1000, full withdrawal returns 1300 -> 300 profit, 9% of that = 27.
+        let (profit, fee) = profit_and_fee(1_000, 500, 500, 1_300, LP_STANDARD_FEE_BPS);
+        assert_eq!(profit, 300);
+        assert_eq!(fee, 27);
+    }
+
+    #[test]
+    fn partial_withdrawal_uses_pro_rata_cost_basis() {
+        // Deposited 1000 total, withdrawing half the shares: cost basis is 500, not 1000.
+        // Payout of 700 on that half -> 200 profit, 900bps fee = 18.
+        let (profit, fee) = profit_and_fee(1_000, 250, 500, 700, LP_STANDARD_FEE_BPS);
+        assert_eq!(profit, 200);
+        assert_eq!(fee, 18);
+    }
 }
 
 // ── Shared math helpers ────────────────────────────────────────────────────────
@@ -496,6 +683,91 @@ pub mod orca_lp {
         Ok(())
     }
 
+    /// Two-step admin transfer for LP vaults, mirroring Vault's propose_admin/accept_admin
+    /// exactly (see lib.rs). Added 2026-09-28 -- see LpVault.pending_admin's doc comment
+    /// for why this didn't exist until now.
+    #[derive(Accounts)]
+    pub struct ProposeLpAdmin<'info> {
+        #[account(constraint = admin.key() == lp_vault.admin @ LpVaultError::Unauthorized)]
+        pub admin: Signer<'info>,
+
+        #[account(mut)]
+        pub lp_vault: Box<Account<'info, LpVault>>,
+    }
+
+    pub fn propose_lp_admin_handler(ctx: Context<ProposeLpAdmin>, new_admin: Pubkey) -> Result<()> {
+        ctx.accounts.lp_vault.pending_admin = new_admin;
+        Ok(())
+    }
+
+    #[derive(Accounts)]
+    pub struct AcceptLpAdmin<'info> {
+        pub new_admin: Signer<'info>,
+
+        #[account(mut, constraint = lp_vault.pending_admin == new_admin.key() @ LpVaultError::NotPendingLpAdmin)]
+        pub lp_vault: Box<Account<'info, LpVault>>,
+    }
+
+    pub fn accept_lp_admin_handler(ctx: Context<AcceptLpAdmin>) -> Result<()> {
+        let v = &mut ctx.accounts.lp_vault;
+        require!(v.pending_admin != Pubkey::default(), LpVaultError::NoPendingLpAdmin);
+        v.admin = ctx.accounts.new_admin.key();
+        v.pending_admin = Pubkey::default();
+        Ok(())
+    }
+
+    /// Admin-closable: reclaims an LpVault's own rent once it's fully wound down. Added
+    /// 2026-10-06 -- no close path ever existed for this account type (confirmed live:
+    /// both LP vaults on the pre-relaunch program were permanently unclosable, ~0.0096 SOL
+    /// of rent each abandoned when that program was closed). Requires the vault be
+    /// genuinely empty (no liquidity, no shares) AND have no still-open external
+    /// Whirlpool/Raydium position -- closing while position_active is true would abandon
+    /// a real, possibly nonzero-value position with no account left to track it. Mirrors
+    /// close_vault's zero-balance safety check on the Safe vault.
+    pub fn close_lp_vault_handler(ctx: Context<CloseLpVault>) -> Result<()> {
+        let v = &ctx.accounts.lp_vault;
+        require!(v.total_liquidity == 0, LpVaultError::LpVaultNotEmpty);
+        require!(v.total_shares == 0, LpVaultError::LpVaultNotEmpty);
+        require!(!v.position_active, LpVaultError::LpVaultNotEmpty);
+        Ok(())
+    }
+
+    #[derive(Accounts)]
+    pub struct CloseLpVault<'info> {
+        #[account(mut)]
+        pub admin: Signer<'info>,
+        #[account(
+            mut,
+            close = admin,
+            constraint = lp_vault.admin == admin.key() @ LpVaultError::Unauthorized,
+        )]
+        pub lp_vault: Box<Account<'info, LpVault>>,
+    }
+
+    /// User-closable: reclaims an LpUserPosition's own rent once it's fully withdrawn.
+    /// Same rationale and pattern as close_user_position on the Safe vault -- see that
+    /// instruction's doc comment in lib.rs for the full incident writeup.
+    pub fn close_lp_user_position_handler(ctx: Context<CloseLpUserPosition>) -> Result<()> {
+        require!(ctx.accounts.user_position.shares == 0, LpVaultError::LpPositionNotEmpty);
+        Ok(())
+    }
+
+    #[derive(Accounts)]
+    pub struct CloseLpUserPosition<'info> {
+        #[account(mut)]
+        pub user: Signer<'info>,
+        pub lp_vault: Box<Account<'info, LpVault>>,
+        #[account(
+            mut,
+            close = user,
+            seeds = [b"lp_position", lp_vault.key().as_ref(), user.key().as_ref()],
+            bump = user_position.bump,
+            constraint = user_position.owner == user.key() @ LpVaultError::Unauthorized,
+            constraint = user_position.lp_vault == lp_vault.key() @ LpVaultError::Unauthorized,
+        )]
+        pub user_position: Box<Account<'info, LpUserPosition>>,
+    }
+
     #[derive(Accounts)]
     #[instruction(params: InitLpVaultParams)]
     pub struct InitializeOrcaLpVault<'info> {
@@ -629,6 +901,12 @@ pub mod orca_lp {
         #[account(address = WHIRLPOOL_PROGRAM_ID)]
         pub whirlpool_program: UncheckedAccount<'info>,
         pub system_program: Program<'info, System>,
+
+        /// Live gate-token balance, read to snapshot tier_at_deposit. Same convention as
+        /// the Safe vault's Deposit context: absent/None is valid whenever gating is
+        /// disabled (gate_mint == SystemProgram), which is every LP vault today.
+        #[account(constraint = user_gate_account.owner == user.key() && user_gate_account.mint == lp_vault.gate_mint @ LpVaultError::InvalidLpGateAccount)]
+        pub user_gate_account: Option<Box<Account<'info, TokenAccount>>>,
     }
 
     #[derive(Accounts)]
@@ -690,6 +968,19 @@ pub mod orca_lp {
         /// CHECK: address verified in adapter
         #[account(address = WHIRLPOOL_PROGRAM_ID)]
         pub whirlpool_program: UncheckedAccount<'info>,
+
+        /// Required only when a performance fee is actually owed (checked at runtime in the
+        /// handler, since whether a fee is owed depends on profit which isn't known until
+        /// the CPI executes). Added 2026-09-29 alongside the LP fee fix -- see
+        /// LpUserPosition.deposited_amount_a/b's doc comment for the incident this closes.
+        #[account(mut, constraint = treasury_token_a_account.owner == lp_vault.treasury @ LpVaultError::LpTreasuryOwnerMismatch)]
+        pub treasury_token_a_account: Option<Box<Account<'info, TokenAccount>>>,
+        #[account(mut, constraint = treasury_token_b_account.owner == lp_vault.treasury @ LpVaultError::LpTreasuryOwnerMismatch)]
+        pub treasury_token_b_account: Option<Box<Account<'info, TokenAccount>>>,
+        /// Live gate-token balance, read to resolve the current fee tier. Same
+        /// gate_mint/owner validation as the Safe vault's withdraw() gate account.
+        #[account(constraint = user_gate_account.owner == user.key() && user_gate_account.mint == lp_vault.gate_mint @ LpVaultError::InvalidLpGateAccount)]
+        pub user_gate_account: Option<Box<Account<'info, TokenAccount>>>,
     }
 
     #[derive(Accounts)]
@@ -890,6 +1181,11 @@ pub mod orca_lp {
         v.bump                    = ctx.bumps.lp_vault;
         v.authority_bump          = authority_bump;
         v.name                    = params.name;
+        v.pending_admin           = Pubkey::default(); // explicit, matching Vault's own init pattern
+        v.gate_mint               = anchor_lang::solana_program::system_program::ID; // disabled by default, same convention as the Safe vault
+        v.gold_threshold          = 0;
+        v.silver_threshold        = 0;
+        v.bronze_threshold        = 0;
 
         emit!(LpVaultInitialized { lp_vault: lp_vault_key, protocol: LpProtocolKind::Orca, pool: v.pool });
         Ok(())
@@ -1008,6 +1304,12 @@ pub mod orca_lp {
         }
         msg!("deposit_orca_lp: refunded {} token_a / {} token_b to user", refund_a, refund_b);
 
+        // Real amount actually consumed into the position -- token_max_a/b are caps, the
+        // refund is whatever the CPI didn't use, so the difference is the real deposit.
+        // This becomes the cost basis for the performance fee at withdrawal.
+        let consumed_a = token_max_a.saturating_sub(refund_a);
+        let consumed_b = token_max_b.saturating_sub(refund_b);
+
         let v = &mut ctx.accounts.lp_vault;
         let shares_to_mint = calculate_deposit_shares(liquidity_amount, v.total_liquidity, v.total_shares)?;
 
@@ -1026,6 +1328,10 @@ pub mod orca_lp {
 
         v.total_liquidity = v.total_liquidity.checked_add(liquidity_amount).ok_or(LpVaultError::MathOverflow)?;
         v.total_shares = v.total_shares.checked_add(shares_to_mint).ok_or(LpVaultError::MathOverflow)?;
+        let gate_mint = v.gate_mint;
+        let gold_threshold = v.gold_threshold;
+        let silver_threshold = v.silver_threshold;
+        let bronze_threshold = v.bronze_threshold;
 
         let pos = &mut ctx.accounts.user_position;
         if pos.owner == Pubkey::default() {
@@ -1035,6 +1341,19 @@ pub mod orca_lp {
         }
         pos.shares = pos.shares.checked_add(shares_to_mint).ok_or(LpVaultError::MathOverflow)?;
         pos.liquidity_at_deposit = pos.liquidity_at_deposit.checked_add(liquidity_amount).ok_or(LpVaultError::MathOverflow)?;
+        pos.deposited_amount_a = pos.deposited_amount_a.checked_add(consumed_a).ok_or(LpVaultError::MathOverflow)?;
+        pos.deposited_amount_b = pos.deposited_amount_b.checked_add(consumed_b).ok_or(LpVaultError::MathOverflow)?;
+
+        // Snapshot fee tier (worse of current vs. existing) -- same anti-flash-loan logic
+        // as the Safe vault's deposit(). No-op while gating is disabled.
+        if gate_mint != anchor_lang::solana_program::system_program::ID {
+            let gate_balance = ctx.accounts.user_gate_account.as_ref().map_or(0, |a| a.amount);
+            let tier_u8: u8 = if gate_balance >= gold_threshold { 0 }
+                else if gate_balance >= silver_threshold { 1 }
+                else if gate_balance >= bronze_threshold { 2 }
+                else { 3 };
+            pos.tier_at_deposit = pos.tier_at_deposit.max(tier_u8);
+        }
 
         emit!(LpDeposited { lp_vault: lp_vault_key, user: ctx.accounts.user.key(), liquidity_amount, shares_minted: shares_to_mint });
         Ok(())
@@ -1111,9 +1430,39 @@ pub mod orca_lp {
             .checked_mul(shares).and_then(|x| x.checked_div(total_shares_before)).unwrap_or(0);
         let idle_b = vault_b_before
             .checked_mul(shares).and_then(|x| x.checked_div(total_shares_before)).unwrap_or(0);
-        let payout_a = received_a.saturating_add(idle_a);
-        let payout_b = received_b.saturating_add(idle_b);
+        let mut payout_a = received_a.saturating_add(idle_a);
+        let mut payout_b = received_b.saturating_add(idle_b);
         msg!("lp withdraw: position {}/{} + idle {}/{}", received_a, received_b, idle_a, idle_b);
+
+        // Performance fee on profit only, tiered by live gate-token balance (worse of live
+        // vs. tier_at_deposit -- same anti-flash-loan logic as the Safe vault). Cost basis is
+        // the pro-rata slice of this position's OWN real deposited amounts, not the pool's
+        // current price, so it has no oracle dependency -- see LpUserPosition's doc comment.
+        let pos_shares_before = ctx.accounts.user_position.shares;
+        let cost_basis_a = ctx.accounts.user_position.deposited_amount_a
+            .checked_mul(shares).and_then(|x| x.checked_div(pos_shares_before)).unwrap_or(0);
+        let cost_basis_b = ctx.accounts.user_position.deposited_amount_b
+            .checked_mul(shares).and_then(|x| x.checked_div(pos_shares_before)).unwrap_or(0);
+        let profit_a = payout_a.saturating_sub(cost_basis_a);
+        let profit_b = payout_b.saturating_sub(cost_basis_b);
+
+        let gate_balance = ctx.accounts.user_gate_account.as_ref().map_or(0, |a| a.amount);
+        let v_ro = &ctx.accounts.lp_vault;
+        let fee_bps = resolve_lp_fee_bps(
+            v_ro.gate_mint, v_ro.gold_threshold, v_ro.silver_threshold, v_ro.bronze_threshold,
+            gate_balance, ctx.accounts.user_position.tier_at_deposit,
+        );
+        let fee_a = profit_a.checked_mul(fee_bps).and_then(|x| x.checked_div(LP_FEE_BPS_DENOM)).unwrap_or(0);
+        let fee_b = profit_b.checked_mul(fee_bps).and_then(|x| x.checked_div(LP_FEE_BPS_DENOM)).unwrap_or(0);
+
+        if fee_a > 0 || fee_b > 0 {
+            require!(
+                ctx.accounts.treasury_token_a_account.is_some() && ctx.accounts.treasury_token_b_account.is_some(),
+                LpVaultError::LpTreasuryRequired
+            );
+        }
+        payout_a = payout_a.saturating_sub(fee_a);
+        payout_b = payout_b.saturating_sub(fee_b);
 
         if payout_a > 0 {
             anchor_spl::token::transfer(
@@ -1135,6 +1484,26 @@ pub mod orca_lp {
                 payout_b,
             )?;
         }
+        if fee_a > 0 {
+            anchor_spl::token::transfer(
+                CpiContext::new_with_signer(ctx.accounts.token_program.to_account_info(), Transfer {
+                    from: ctx.accounts.vault_token_a_account.to_account_info(),
+                    to: ctx.accounts.treasury_token_a_account.as_ref().unwrap().to_account_info(),
+                    authority: ctx.accounts.vault_authority.to_account_info(),
+                }, &[seeds]),
+                fee_a,
+            )?;
+        }
+        if fee_b > 0 {
+            anchor_spl::token::transfer(
+                CpiContext::new_with_signer(ctx.accounts.token_program.to_account_info(), Transfer {
+                    from: ctx.accounts.vault_token_b_account.to_account_info(),
+                    to: ctx.accounts.treasury_token_b_account.as_ref().unwrap().to_account_info(),
+                    authority: ctx.accounts.vault_authority.to_account_info(),
+                }, &[seeds]),
+                fee_b,
+            )?;
+        }
 
         let v = &mut ctx.accounts.lp_vault;
         v.total_liquidity = v.total_liquidity.saturating_sub(liquidity_amount);
@@ -1143,6 +1512,8 @@ pub mod orca_lp {
         let pos = &mut ctx.accounts.user_position;
         pos.shares = pos.shares.saturating_sub(shares);
         pos.liquidity_at_deposit = pos.liquidity_at_deposit.saturating_sub(liquidity_amount);
+        pos.deposited_amount_a = pos.deposited_amount_a.saturating_sub(cost_basis_a);
+        pos.deposited_amount_b = pos.deposited_amount_b.saturating_sub(cost_basis_b);
 
         emit!(LpWithdrawn { lp_vault: lp_vault_key, user: ctx.accounts.user.key(), shares_burned: shares, liquidity_amount });
         Ok(())
@@ -1607,6 +1978,10 @@ pub mod raydium_lp {
         /// CHECK: seeds verified; Raydium validates the account itself
         #[account(mut, seeds = [TICK_ARRAY_BITMAP_EXTENSION_SEED, pool_state.key().as_ref()], bump, seeds::program = RAYDIUM_CLMM_PROGRAM_ID)]
         pub tick_array_bitmap_extension: UncheckedAccount<'info>,
+
+        /// Same tier-snapshot purpose as DepositOrcaLp's identical field.
+        #[account(constraint = user_gate_account.owner == user.key() && user_gate_account.mint == lp_vault.gate_mint @ LpVaultError::InvalidLpGateAccount)]
+        pub user_gate_account: Option<Box<Account<'info, TokenAccount>>>,
     }
 
     #[derive(Accounts)]
@@ -1682,6 +2057,14 @@ pub mod raydium_lp {
         /// CHECK: seeds verified; Raydium validates the account itself
         #[account(mut, seeds = [TICK_ARRAY_BITMAP_EXTENSION_SEED, pool_state.key().as_ref()], bump, seeds::program = RAYDIUM_CLMM_PROGRAM_ID)]
         pub tick_array_bitmap_extension: UncheckedAccount<'info>,
+
+        /// Same performance-fee accounts as WithdrawOrcaLp -- see that struct's doc comment.
+        #[account(mut, constraint = treasury_token_a_account.owner == lp_vault.treasury @ LpVaultError::LpTreasuryOwnerMismatch)]
+        pub treasury_token_a_account: Option<Box<Account<'info, TokenAccount>>>,
+        #[account(mut, constraint = treasury_token_b_account.owner == lp_vault.treasury @ LpVaultError::LpTreasuryOwnerMismatch)]
+        pub treasury_token_b_account: Option<Box<Account<'info, TokenAccount>>>,
+        #[account(constraint = user_gate_account.owner == user.key() && user_gate_account.mint == lp_vault.gate_mint @ LpVaultError::InvalidLpGateAccount)]
+        pub user_gate_account: Option<Box<Account<'info, TokenAccount>>>,
     }
 
     #[derive(Accounts)]
@@ -1957,6 +2340,11 @@ pub mod raydium_lp {
         v.bump                    = ctx.bumps.lp_vault;
         v.authority_bump          = authority_bump;
         v.name                    = params.name;
+        v.pending_admin           = Pubkey::default(); // explicit, matching Vault's own init pattern
+        v.gate_mint               = anchor_lang::solana_program::system_program::ID; // disabled by default, same convention as the Safe vault
+        v.gold_threshold          = 0;
+        v.silver_threshold        = 0;
+        v.bronze_threshold        = 0;
 
         emit!(LpVaultInitialized { lp_vault: lp_vault_key, protocol: LpProtocolKind::Raydium, pool: v.pool });
         Ok(())
@@ -2060,6 +2448,10 @@ pub mod raydium_lp {
         }
         msg!("deposit_raydium_lp: refunded {} token_a / {} token_b to user", refund_a, refund_b);
 
+        // Real amount actually consumed -- see deposit_orca_lp_handler for full reasoning.
+        let consumed_a = token_max_a.saturating_sub(refund_a);
+        let consumed_b = token_max_b.saturating_sub(refund_b);
+
         let v = &mut ctx.accounts.lp_vault;
         let shares_to_mint = calculate_deposit_shares(liquidity_amount, v.total_liquidity, v.total_shares)?;
 
@@ -2078,6 +2470,10 @@ pub mod raydium_lp {
 
         v.total_liquidity = v.total_liquidity.checked_add(liquidity_amount).ok_or(LpVaultError::MathOverflow)?;
         v.total_shares = v.total_shares.checked_add(shares_to_mint).ok_or(LpVaultError::MathOverflow)?;
+        let gate_mint = v.gate_mint;
+        let gold_threshold = v.gold_threshold;
+        let silver_threshold = v.silver_threshold;
+        let bronze_threshold = v.bronze_threshold;
 
         let pos = &mut ctx.accounts.user_position;
         if pos.owner == Pubkey::default() {
@@ -2087,6 +2483,17 @@ pub mod raydium_lp {
         }
         pos.shares = pos.shares.checked_add(shares_to_mint).ok_or(LpVaultError::MathOverflow)?;
         pos.liquidity_at_deposit = pos.liquidity_at_deposit.checked_add(liquidity_amount).ok_or(LpVaultError::MathOverflow)?;
+        pos.deposited_amount_a = pos.deposited_amount_a.checked_add(consumed_a).ok_or(LpVaultError::MathOverflow)?;
+        pos.deposited_amount_b = pos.deposited_amount_b.checked_add(consumed_b).ok_or(LpVaultError::MathOverflow)?;
+
+        if gate_mint != anchor_lang::solana_program::system_program::ID {
+            let gate_balance = ctx.accounts.user_gate_account.as_ref().map_or(0, |a| a.amount);
+            let tier_u8: u8 = if gate_balance >= gold_threshold { 0 }
+                else if gate_balance >= silver_threshold { 1 }
+                else if gate_balance >= bronze_threshold { 2 }
+                else { 3 };
+            pos.tier_at_deposit = pos.tier_at_deposit.max(tier_u8);
+        }
 
         emit!(LpDeposited { lp_vault: lp_vault_key, user: ctx.accounts.user.key(), liquidity_amount, shares_minted: shares_to_mint });
         Ok(())
@@ -2174,9 +2581,37 @@ pub mod raydium_lp {
             .checked_mul(shares).and_then(|x| x.checked_div(total_shares_before)).unwrap_or(0);
         let idle_b = vault_b_before
             .checked_mul(shares).and_then(|x| x.checked_div(total_shares_before)).unwrap_or(0);
-        let payout_a = received_a.saturating_add(idle_a);
-        let payout_b = received_b.saturating_add(idle_b);
+        let mut payout_a = received_a.saturating_add(idle_a);
+        let mut payout_b = received_b.saturating_add(idle_b);
         msg!("lp withdraw: position {}/{} + idle {}/{}", received_a, received_b, idle_a, idle_b);
+
+        // Performance fee on profit only, tiered by live gate-token balance -- see
+        // withdraw_orca_lp_handler's identical logic for the full rationale.
+        let pos_shares_before = ctx.accounts.user_position.shares;
+        let cost_basis_a = ctx.accounts.user_position.deposited_amount_a
+            .checked_mul(shares).and_then(|x| x.checked_div(pos_shares_before)).unwrap_or(0);
+        let cost_basis_b = ctx.accounts.user_position.deposited_amount_b
+            .checked_mul(shares).and_then(|x| x.checked_div(pos_shares_before)).unwrap_or(0);
+        let profit_a = payout_a.saturating_sub(cost_basis_a);
+        let profit_b = payout_b.saturating_sub(cost_basis_b);
+
+        let gate_balance = ctx.accounts.user_gate_account.as_ref().map_or(0, |a| a.amount);
+        let v_ro = &ctx.accounts.lp_vault;
+        let fee_bps = resolve_lp_fee_bps(
+            v_ro.gate_mint, v_ro.gold_threshold, v_ro.silver_threshold, v_ro.bronze_threshold,
+            gate_balance, ctx.accounts.user_position.tier_at_deposit,
+        );
+        let fee_a = profit_a.checked_mul(fee_bps).and_then(|x| x.checked_div(LP_FEE_BPS_DENOM)).unwrap_or(0);
+        let fee_b = profit_b.checked_mul(fee_bps).and_then(|x| x.checked_div(LP_FEE_BPS_DENOM)).unwrap_or(0);
+
+        if fee_a > 0 || fee_b > 0 {
+            require!(
+                ctx.accounts.treasury_token_a_account.is_some() && ctx.accounts.treasury_token_b_account.is_some(),
+                LpVaultError::LpTreasuryRequired
+            );
+        }
+        payout_a = payout_a.saturating_sub(fee_a);
+        payout_b = payout_b.saturating_sub(fee_b);
 
         if payout_a > 0 {
             anchor_spl::token::transfer(
@@ -2198,6 +2633,26 @@ pub mod raydium_lp {
                 payout_b,
             )?;
         }
+        if fee_a > 0 {
+            anchor_spl::token::transfer(
+                CpiContext::new_with_signer(ctx.accounts.token_program.to_account_info(), Transfer {
+                    from: ctx.accounts.vault_token_a_account.to_account_info(),
+                    to: ctx.accounts.treasury_token_a_account.as_ref().unwrap().to_account_info(),
+                    authority: ctx.accounts.vault_authority.to_account_info(),
+                }, &[seeds]),
+                fee_a,
+            )?;
+        }
+        if fee_b > 0 {
+            anchor_spl::token::transfer(
+                CpiContext::new_with_signer(ctx.accounts.token_program.to_account_info(), Transfer {
+                    from: ctx.accounts.vault_token_b_account.to_account_info(),
+                    to: ctx.accounts.treasury_token_b_account.as_ref().unwrap().to_account_info(),
+                    authority: ctx.accounts.vault_authority.to_account_info(),
+                }, &[seeds]),
+                fee_b,
+            )?;
+        }
 
         let v = &mut ctx.accounts.lp_vault;
         v.total_liquidity = v.total_liquidity.saturating_sub(liquidity_amount);
@@ -2206,6 +2661,8 @@ pub mod raydium_lp {
         let pos = &mut ctx.accounts.user_position;
         pos.shares = pos.shares.saturating_sub(shares);
         pos.liquidity_at_deposit = pos.liquidity_at_deposit.saturating_sub(liquidity_amount);
+        pos.deposited_amount_a = pos.deposited_amount_a.saturating_sub(cost_basis_a);
+        pos.deposited_amount_b = pos.deposited_amount_b.saturating_sub(cost_basis_b);
 
         emit!(LpWithdrawn { lp_vault: lp_vault_key, user: ctx.accounts.user.key(), shares_burned: shares, liquidity_amount });
         Ok(())
