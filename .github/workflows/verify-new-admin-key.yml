@@ -1,0 +1,35 @@
+name: Verify NEW_ADMIN_KEYPAIR_JSON Pubkey (read-only, no fund movement)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Install Solana CLI
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+
+      - name: Write keypair from secret JSON
+        env:
+          NEW_ADMIN_KEYPAIR_JSON: ${{ secrets.NEW_ADMIN_KEYPAIR_JSON }}
+        run: |
+          echo "$NEW_ADMIN_KEYPAIR_JSON" > /tmp/new-admin.json
+
+      - name: Print and verify pubkey against the known-safe admin wallet
+        run: |
+          PUBKEY=$(solana-keygen pubkey /tmp/new-admin.json)
+          echo "NEW_ADMIN_KEYPAIR_JSON public key: $PUBKEY"
+          EXPECTED="89J8qUmvq6HmkV3vKHcAayNgZEu5WFHq3LmiedBKaLCe"
+          if [ "$PUBKEY" = "$EXPECTED" ]; then
+            echo "MATCH: this is the safe admin wallet."
+          else
+            echo "MISMATCH! This key does NOT match the expected safe admin wallet ($EXPECTED)."
+            exit 1
+          fi
+
+      - name: Clean up keypair
+        if: always()
+        run: rm -f /tmp/new-admin.json
