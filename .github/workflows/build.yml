@@ -168,6 +168,20 @@ jobs:
           pip3 install --quiet base58
           python3 scripts/decode_mainnet_program_key.py /tmp/mainnet-program-keypair.json
 
+      - name: Write mainnet admin authority keypair from secret JSON
+        # Deliberately SEPARATE from the devnet deploy-authority.json above (still
+        # SOLANA_DEPLOY_KEY, left as-is for devnet). SOLANA_DEPLOY_KEY was compromised
+        # on mainnet 2026-09-03 and never rotated -- the real mainnet admin/upgrade
+        # authority (confirmed live on-chain) is NEW_ADMIN_KEYPAIR_JSON. Using the old
+        # key for the mainnet deploy/extend steps below would just fail outright on an
+        # authority mismatch, not move funds, but there's no reason to keep that trap
+        # live.
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.network == 'mainnet'
+        env:
+          NEW_ADMIN_KEYPAIR_JSON: ${{ secrets.NEW_ADMIN_KEYPAIR_JSON }}
+        run: |
+          echo "$NEW_ADMIN_KEYPAIR_JSON" > /tmp/mainnet-admin-authority.json
+
       # Solana's BPFLoaderUpgradeable can only extend a program account in minimum
       # 10240-byte chunks (ExtendProgram's own floor) — `solana program deploy`'s
       # auto-extend does NOT know this and just requests exactly (new_size - current_size)
@@ -188,7 +202,7 @@ jobs:
           # config-file lookup, not a per-command flag), confirmed live 2026-08-05 after
           # passing --keypair inline changed nothing. `solana config set` fixes it for
           # every solana CLI call in the rest of this step, not just this one.
-          solana config set --keypair /tmp/deploy-authority.json --url "${MAINNET_RPC_URL}"
+          solana config set --keypair /tmp/mainnet-admin-authority.json --url "${MAINNET_RPC_URL}"
           CURRENT_LEN=$(solana program show 3tAEmHXZ51YVLe9ts8b9cMcgQPgaSamLxLtxR31VpREi | awk -F'[ (]' '/Data Length:/{print $3}')
           if [ -z "$CURRENT_LEN" ]; then
             echo "Could not determine current program length — failing loudly instead of silently skipping the extend."
@@ -199,7 +213,7 @@ jobs:
           if [ "$NEW_LEN" -gt "$CURRENT_LEN" ]; then
             EXTEND_BY=$(( NEW_LEN - CURRENT_LEN > 10240 ? NEW_LEN - CURRENT_LEN : 10240 ))
             echo "extending program account by $EXTEND_BY bytes first"
-            solana program extend 3tAEmHXZ51YVLe9ts8b9cMcgQPgaSamLxLtxR31VpREi "$EXTEND_BY" --keypair /tmp/deploy-authority.json --url "${MAINNET_RPC_URL}"
+            solana program extend 3tAEmHXZ51YVLe9ts8b9cMcgQPgaSamLxLtxR31VpREi "$EXTEND_BY" --keypair /tmp/mainnet-admin-authority.json --url "${MAINNET_RPC_URL}"
           else
             echo "binary fits in current capacity, no extend needed"
           fi
@@ -209,9 +223,9 @@ jobs:
         env:
           MAINNET_RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
         run: |
-          solana program deploy --program-id /tmp/mainnet-program-keypair.json --upgrade-authority /tmp/deploy-authority.json --keypair /tmp/deploy-authority.json --url "${MAINNET_RPC_URL}" target/deploy/yieldpilot.so
+          solana program deploy --program-id /tmp/mainnet-program-keypair.json --upgrade-authority /tmp/mainnet-admin-authority.json --keypair /tmp/mainnet-admin-authority.json --url "${MAINNET_RPC_URL}" target/deploy/yieldpilot.so
 
       - name: Clean up keypairs
         if: always()
-        run: rm -f /tmp/deploy-authority.json /tmp/mainnet-program-keypair.json
+        run: rm -f /tmp/deploy-authority.json /tmp/mainnet-program-keypair.json /tmp/mainnet-admin-authority.json
 
