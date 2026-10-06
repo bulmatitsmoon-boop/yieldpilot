@@ -19,7 +19,7 @@ const VAULT_ADDRESSES = (process.env.NEXT_PUBLIC_VAULT_ADDRESSES || "F1r513ZZdof
 
 type Tab = "overview" | "protocols" | "deposit" | "withdraw";
 
-const ADMIN_PUBKEY = "8i7kydJHwi3Cdp46Xugyux2vWJmTScYDvnJrBiBihBnP";
+const ADMIN_PUBKEY = "89J8qUmvq6HmkV3vKHcAayNgZEu5WFHq3LmiedBKaLCe";
 
 
 export default function Dashboard() {
