@@ -1,0 +1,36 @@
+name: Verify MAINNET_PROGRAM_KEYPAIR Pubkey (read-only, no fund movement)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Install Solana CLI
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+
+      - name: Write keypair from base58 secret
+        env:
+          MAINNET_PROGRAM_KEYPAIR: ${{ secrets.MAINNET_PROGRAM_KEYPAIR }}
+        run: |
+          pip3 install --quiet base58
+          python3 scripts/decode_mainnet_program_key.py /tmp/program-key.json
+
+      - name: Print and verify pubkey against the expected new program identity
+        run: |
+          PUBKEY=$(solana-keygen pubkey /tmp/program-key.json)
+          echo "MAINNET_PROGRAM_KEYPAIR public key: $PUBKEY"
+          EXPECTED="3Am7Q6KyPb6L9cuUDZCwAVFSLZXbPtjCoXWHGiNBzKkR"
+          if [ "$PUBKEY" = "$EXPECTED" ]; then
+            echo "MATCH: this is the new program identity."
+          else
+            echo "MISMATCH! This key does NOT match the expected new program identity ($EXPECTED)."
+            exit 1
+          fi
+
+      - name: Clean up keypair
+        if: always()
+        run: rm -f /tmp/program-key.json
