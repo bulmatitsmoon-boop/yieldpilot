@@ -5,7 +5,7 @@ const nextConfig = {
     NEXT_PUBLIC_SOLANA_NETWORK: process.env.NEXT_PUBLIC_SOLANA_NETWORK || 'devnet',
     NEXT_PUBLIC_PROGRAM_ID: process.env.NEXT_PUBLIC_PROGRAM_ID || '8c7Boyk91MWkn5jabf5CnYD8DrG6p4hYm9eDdAAWXEKH',
     NEXT_PUBLIC_VAULT_ADDRESSES: process.env.NEXT_PUBLIC_VAULT_ADDRESSES || '8KcoRt5DcCbXBaqDVDorEbW2J6GofTrRyy9Afzb8wwaE',
-    NEXT_PUBLIC_ADMIN_WALLET: process.env.NEXT_PUBLIC_ADMIN_WALLET || '8i7kydJHwi3Cdp46Xugyux2vWJmTScYDvnJrBiBihBnP',
+    NEXT_PUBLIC_ADMIN_WALLET: process.env.NEXT_PUBLIC_ADMIN_WALLET || '89J8qUmvq6HmkV3vKHcAayNgZEu5WFHq3LmiedBKaLCe',
   },
   reactStrictMode: true,
   // Fixes a REAL bug found live 2026-09-23 (reproduced locally with `next start` before
