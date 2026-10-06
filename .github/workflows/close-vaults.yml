@@ -1,0 +1,42 @@
+name: Close Safe Vaults (USDC + SOL)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type CONFIRM to close both Safe vaults (irreversible — refunds rent to admin)'
+        required: true
+
+jobs:
+  close:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Abort unless explicitly confirmed
+        if: github.event.inputs.confirm != 'CONFIRM'
+        run: |
+          echo "Confirmation text did not match 'CONFIRM' — aborting."
+          exit 1
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install deps
+        run: npm install @solana/web3.js@1 @coral-xyz/anchor@0.31.0 --no-audit --no-fund
+
+      - name: Write admin authority keypair from secret JSON
+        env:
+          NEW_ADMIN_KEYPAIR_JSON: ${{ secrets.NEW_ADMIN_KEYPAIR_JSON }}
+        run: |
+          echo "$NEW_ADMIN_KEYPAIR_JSON" > /tmp/admin.json
+
+      - name: Close both vaults
+        env:
+          MAINNET_RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
+        run: node scripts/close_vaults.js /tmp/admin.json
+
+      - name: Clean up keypair
+        if: always()
+        run: rm -f /tmp/admin.json
