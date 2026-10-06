@@ -24,7 +24,11 @@ jobs:
           node-version: '20'
 
       - name: Install deps
-        run: npm install @solana/web3.js@1 @coral-xyz/anchor@0.31.0 --no-audit --no-fund
+        # Repo root package.json already declares @solana/web3.js and @coral-xyz/anchor
+        # (plus an "overrides" pin on web3.js) -- a plain install picks those up. Passing
+        # explicit versions on the command line conflicts with the overrides field
+        # (npm error EOVERRIDE), confirmed live 2026-10-06.
+        run: npm install --no-audit --no-fund
 
       - name: Write admin authority keypair from secret JSON
         env:
