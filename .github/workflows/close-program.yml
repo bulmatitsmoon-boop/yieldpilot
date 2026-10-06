@@ -27,12 +27,18 @@ jobs:
           sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
           echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
 
-      - name: Write deploy authority keypair from base58 secret
+      - name: Write admin authority keypair from secret JSON
+        # Was SOLANA_DEPLOY_KEY (base58) -- that key was compromised 2026-09-03 and
+        # never rotated after the real admin migrated to NEW_ADMIN_KEYPAIR_JSON
+        # (verified live 2026-10-06 via a dedicated read-only check: SOLANA_DEPLOY_KEY
+        # still decodes to the dead key, NEW_ADMIN_KEYPAIR_JSON decodes to the real
+        # admin). Using the dead key here would just fail outright on-chain (the
+        # program's upgrade authority check rejects it), not move funds -- but better
+        # to not waste a CI cycle finding that out.
         env:
-          SOLANA_DEPLOY_KEY: ${{ secrets.SOLANA_DEPLOY_KEY }}
+          NEW_ADMIN_KEYPAIR_JSON: ${{ secrets.NEW_ADMIN_KEYPAIR_JSON }}
         run: |
-          pip3 install --quiet base58
-          python3 scripts/decode_deploy_key.py /tmp/deploy-authority.json
+          echo "$NEW_ADMIN_KEYPAIR_JSON" > /tmp/deploy-authority.json
 
       - name: Close mainnet program
         env:
