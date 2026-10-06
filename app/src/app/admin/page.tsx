@@ -17,7 +17,7 @@ const PROGRAM_ID = new PublicKey(
 );
 const VAULT_ADDRESSES = (process.env.NEXT_PUBLIC_VAULT_ADDRESSES || "5XpzWiE8jb53CShYv19UoXcY2AywjeXpfwCff8mgrNYn,7MJGAiZmTre6VmVQXgYRK6vqoQeoMW1jwEL9jEXZgRy3")
   .split(",").map(s => s.trim()).filter(Boolean);
-const ADMIN_WALLET = process.env.NEXT_PUBLIC_ADMIN_WALLET || "8i7kydJHwi3Cdp46Xugyux2vWJmTScYDvnJrBiBihBnP";
+const ADMIN_WALLET = process.env.NEXT_PUBLIC_ADMIN_WALLET || "89J8qUmvq6HmkV3vKHcAayNgZEu5WFHq3LmiedBKaLCe";
 
 type TxStatus = "idle" | "signing" | "confirming" | "success" | "error";
 
