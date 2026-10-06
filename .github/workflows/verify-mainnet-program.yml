@@ -35,12 +35,13 @@ jobs:
       - name: Install Node deps for the signing step
         run: npm install @solana/web3.js@1 bs58@5 --no-audit --no-fund
 
-      - name: Write deploy authority keypair from base58 secret
+      - name: Write admin authority keypair from secret JSON
+        # Was SOLANA_DEPLOY_KEY (base58, the pre-compromise key, never rotated and
+        # confirmed dead live 2026-10-06). The real admin is NEW_ADMIN_KEYPAIR_JSON.
         env:
-          SOLANA_DEPLOY_KEY: ${{ secrets.SOLANA_DEPLOY_KEY }}
+          NEW_ADMIN_KEYPAIR_JSON: ${{ secrets.NEW_ADMIN_KEYPAIR_JSON }}
         run: |
-          pip3 install --quiet base58
-          python3 scripts/decode_deploy_key.py /tmp/deploy-authority.json
+          echo "$NEW_ADMIN_KEYPAIR_JSON" > /tmp/deploy-authority.json
 
       # Deterministic docker build + hash comparison + generate the (unsigned) verify
       # PDA init transaction, all in one step so the blockhash inside it stays fresh
@@ -59,7 +60,7 @@ jobs:
         run: |
           solana-verify export-pda-tx "${REPO_URL}" \
             --program-id 3tAEmHXZ51YVLe9ts8b9cMcgQPgaSamLxLtxR31VpREi \
-            --uploader 8i7kydJHwi3Cdp46Xugyux2vWJmTScYDvnJrBiBihBnP \
+            --uploader 89J8qUmvq6HmkV3vKHcAayNgZEu5WFHq3LmiedBKaLCe \
             --commit-hash ${{ github.event.inputs.commit_hash }} \
             --library-name yieldpilot --mount-path programs/yieldpilot \
             --workspace-path . \
@@ -89,7 +90,7 @@ jobs:
             sleep 10
             if solana-verify remote submit-job \
               --program-id 3tAEmHXZ51YVLe9ts8b9cMcgQPgaSamLxLtxR31VpREi \
-              --uploader 8i7kydJHwi3Cdp46Xugyux2vWJmTScYDvnJrBiBihBnP; then
+              --uploader 89J8qUmvq6HmkV3vKHcAayNgZEu5WFHq3LmiedBKaLCe; then
               echo "Queued successfully on attempt $i"
               break
             fi
