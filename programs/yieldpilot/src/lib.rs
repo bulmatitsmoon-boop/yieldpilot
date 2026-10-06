@@ -248,7 +248,7 @@ pub use lp_vault::lending_lp::*;
 // see project memory for why). PDA derivations implicitly use this ID, so it
 // must match whichever address the binary is actually deployed to.
 #[cfg(not(feature = "mainnet"))]
-declare_id!("F6u2k8fnFxs55eVQscZjKjxCob7FNqQvT1zLTgxJEqUf");
+declare_id!("8c7Boyk91MWkn5jabf5CnYD8DrG6p4hYm9eDdAAWXEKH");
 #[cfg(feature = "mainnet")]
 declare_id!("3tAEmHXZ51YVLe9ts8b9cMcgQPgaSamLxLtxR31VpREi");
 
@@ -812,6 +812,18 @@ pub mod yieldpilot {
     pub fn close_vault(ctx: Context<CloseVault>) -> Result<()> {
         let vault = &ctx.accounts.vault;
         require!(vault.total_shares == 0, VaultError::VaultNotEmpty);
+        Ok(())
+    }
+
+    /// User-closable: reclaims a UserPosition's own rent once it's fully withdrawn.
+    /// Added 2026-10-06 -- previously there was no way to ever close one of these, so a
+    /// full withdrawal left a permanent, zeroed-out shell behind forever (confirmed live:
+    /// 4 such orphaned accounts existed on the pre-relaunch program, all from Lloyd's own
+    /// past test withdrawals, none closeable). Same zero-balance safety check as
+    /// close_vault. Refunds to the USER, not admin -- it's their own rent they paid at
+    /// deposit time.
+    pub fn close_user_position(ctx: Context<CloseUserPosition>) -> Result<()> {
+        require!(ctx.accounts.user_position.shares == 0, VaultError::VaultNotEmpty);
         Ok(())
     }
 
@@ -1848,6 +1860,24 @@ pub mod yieldpilot {
         set_lp_keeper_handler(ctx, new_keeper)
     }
 
+    /// Two-step admin transfer for LP vaults, mirroring propose_admin/accept_admin
+    /// above. See ProposeLpAdmin's doc comment for why this didn't exist until now.
+    pub fn propose_lp_admin(ctx: Context<ProposeLpAdmin>, new_admin: Pubkey) -> Result<()> {
+        propose_lp_admin_handler(ctx, new_admin)
+    }
+
+    pub fn accept_lp_admin(ctx: Context<AcceptLpAdmin>) -> Result<()> {
+        accept_lp_admin_handler(ctx)
+    }
+
+    pub fn close_lp_vault(ctx: Context<CloseLpVault>) -> Result<()> {
+        close_lp_vault_handler(ctx)
+    }
+
+    pub fn close_lp_user_position(ctx: Context<CloseLpUserPosition>) -> Result<()> {
+        close_lp_user_position_handler(ctx)
+    }
+
     // ── LP vault (Raydium CLMM) — mirrors the Orca instructions above using
     // Raydium's own accounts/CPI (see lp_vault.rs's raydium_lp submodule and
     // adapters/raydium.rs for the protocol-specific differences). ──────────
@@ -2112,6 +2142,22 @@ pub struct CloseVault<'info> {
         constraint = vault.admin == admin.key() @ VaultError::Unauthorized,
     )]
     pub vault: Box<Account<'info, Vault>>,
+}
+
+#[derive(Accounts)]
+pub struct CloseUserPosition<'info> {
+    #[account(mut)]
+    pub user: Signer<'info>,
+    pub vault: Account<'info, Vault>,
+    #[account(
+        mut,
+        close = user,
+        seeds = [b"position", vault.key().as_ref(), user.key().as_ref()],
+        bump = user_position.bump,
+        constraint = user_position.owner == user.key() @ VaultError::Unauthorized,
+        constraint = user_position.vault == vault.key() @ VaultError::Unauthorized,
+    )]
+    pub user_position: Account<'info, UserPosition>,
 }
 
 #[derive(Accounts)]
