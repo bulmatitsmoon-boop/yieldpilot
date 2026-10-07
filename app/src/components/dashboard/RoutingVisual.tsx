@@ -70,11 +70,11 @@ export function RoutingVisual({ bestName, bestApy, runnerUpName }: Props) {
         </text>
 
         {/* Runner-up node. Labeled "0%" explicitly — the dashed line + visible dot alone
-            read as "some smaller share routes here," a leftover metaphor from the old
-            80/20 split. Routing is winner-take-all now: this protocol gets funded only
-            if it overtakes the current best by more than the drift threshold. Mirrors
-            the "100%" the winner shows in the allocation bar below, so the two together
-            read as a real 100/0 split, not 80/20. */}
+            read as "some smaller share routes here," a leftover metaphor from an earlier,
+            now-removed partial-allocation model. Routing is winner-take-all now: this
+            protocol gets funded only if it overtakes the current best by more than the
+            drift threshold. Mirrors the "100%" the winner shows in the allocation bar
+            below, so the two together read as a real all-or-nothing split. */}
         {runnerUpName && (
           <>
             <circle cx="340" cy="112" r="4" fill="var(--signal-dim)" opacity="0.6" />
