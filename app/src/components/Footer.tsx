@@ -43,6 +43,7 @@ export function Footer() {
               {[
                 ["Whitepaper", "/whitepaper"],
                 ["X / Twitter", "https://x.com/YieldPilotSOL"],
+                ["GitHub", "https://github.com/bulmatitsmoon-boop/yieldpilot"],
               ].map(([label, href]) => (
                 <div key={href} style={{ marginBottom: 8 }}>
                   {href.startsWith("/") ? (
