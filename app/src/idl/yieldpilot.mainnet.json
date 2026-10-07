@@ -31,6 +31,30 @@
       "args": []
     },
     {
+      "name": "accept_lp_admin",
+      "discriminator": [
+        130,
+        64,
+        186,
+        18,
+        221,
+        100,
+        252,
+        198
+      ],
+      "accounts": [
+        {
+          "name": "new_admin",
+          "signer": true
+        },
+        {
+          "name": "lp_vault",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "accrue_sol_lst",
       "docs": [
         "Books the REAL accrued yield on an SPL-stake-pool position (Jito, PSOL) into",
@@ -188,6 +212,149 @@
           "type": "u8"
         }
       ]
+    },
+    {
+      "name": "close_lp_user_position",
+      "discriminator": [
+        36,
+        84,
+        223,
+        110,
+        151,
+        26,
+        126,
+        150
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "lp_vault"
+        },
+        {
+          "name": "user_position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  95,
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "lp_vault"
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "close_lp_vault",
+      "discriminator": [
+        124,
+        45,
+        120,
+        170,
+        66,
+        67,
+        99,
+        18
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "lp_vault",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "close_user_position",
+      "docs": [
+        "User-closable: reclaims a UserPosition's own rent once it's fully withdrawn.",
+        "Added 2026-10-06 -- previously there was no way to ever close one of these, so a",
+        "full withdrawal left a permanent, zeroed-out shell behind forever (confirmed live:",
+        "4 such orphaned accounts existed on the pre-relaunch program, all from Lloyd's own",
+        "past test withdrawals, none closeable). Same zero-balance safety check as",
+        "close_vault. Refunds to the USER, not admin -- it's their own rent they paid at",
+        "deposit time."
+      ],
+      "discriminator": [
+        111,
+        105,
+        100,
+        191,
+        82,
+        118,
+        204,
+        64
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault"
+        },
+        {
+          "name": "user_position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault"
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
     },
     {
       "name": "close_vault",
@@ -547,6 +714,168 @@
         }
       ],
       "args": []
+    },
+    {
+      "name": "deploy_lp_idle_b_to_solend",
+      "discriminator": [
+        86,
+        24,
+        136,
+        127,
+        142,
+        202,
+        18,
+        169
+      ],
+      "accounts": [
+        {
+          "name": "keeper",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "lp_vault",
+          "writable": true
+        },
+        {
+          "name": "vault_authority",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "lp_vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_token_b_account",
+          "writable": true
+        },
+        {
+          "name": "lending_receipt_b",
+          "docs": [
+            "The vault's own cUSDC receipt account -- a PDA this program controls,",
+            "created on first use. Never keeper-supplied."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  95,
+                  108,
+                  101,
+                  110,
+                  100,
+                  105,
+                  110,
+                  103,
+                  95,
+                  114,
+                  101,
+                  99,
+                  101,
+                  105,
+                  112,
+                  116,
+                  95,
+                  98
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "lp_vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "reserve",
+          "writable": true
+        },
+        {
+          "name": "reserve_liquidity_supply",
+          "writable": true
+        },
+        {
+          "name": "reserve_collateral_mint",
+          "writable": true
+        },
+        {
+          "name": "lending_market"
+        },
+        {
+          "name": "lending_market_authority"
+        },
+        {
+          "name": "pyth_oracle"
+        },
+        {
+          "name": "switchboard_oracle"
+        },
+        {
+          "name": "clock_sysvar",
+          "address": "SysvarC1ock11111111111111111111111111111111"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
+        },
+        {
+          "name": "tx_instructions_sysvar",
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        },
+        {
+          "name": "solend_program",
+          "address": "So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
     },
     {
       "name": "deploy_to_kamino",
@@ -1363,6 +1692,15 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "user_gate_account",
+          "docs": [
+            "Live gate-token balance, read to snapshot tier_at_deposit. Same convention as",
+            "the Safe vault's Deposit context: absent/None is valid whenever gating is",
+            "disabled (gate_mint == SystemProgram), which is every LP vault today."
+          ],
+          "optional": true
         }
       ],
       "args": [
@@ -1632,6 +1970,13 @@
               ]
             }
           }
+        },
+        {
+          "name": "user_gate_account",
+          "docs": [
+            "Same tier-snapshot purpose as DepositOrcaLp's identical field."
+          ],
+          "optional": true
         }
       ],
       "args": [
@@ -3372,6 +3717,39 @@
       ]
     },
     {
+      "name": "propose_lp_admin",
+      "docs": [
+        "Two-step admin transfer for LP vaults, mirroring propose_admin/accept_admin",
+        "above. See ProposeLpAdmin's doc comment for why this didn't exist until now."
+      ],
+      "discriminator": [
+        251,
+        223,
+        10,
+        199,
+        203,
+        38,
+        114,
+        189
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "lp_vault",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "new_admin",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
       "name": "raise_tvl_cap",
       "discriminator": [
         189,
@@ -3875,6 +4253,153 @@
           "name": "protocol_index",
           "type": "u8"
         },
+        {
+          "name": "collateral_amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "recall_lp_idle_b_from_solend",
+      "discriminator": [
+        154,
+        44,
+        102,
+        1,
+        125,
+        25,
+        248,
+        65
+      ],
+      "accounts": [
+        {
+          "name": "keeper",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "lp_vault",
+          "writable": true
+        },
+        {
+          "name": "vault_authority",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "lp_vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "lending_receipt_b",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  95,
+                  108,
+                  101,
+                  110,
+                  100,
+                  105,
+                  110,
+                  103,
+                  95,
+                  114,
+                  101,
+                  99,
+                  101,
+                  105,
+                  112,
+                  116,
+                  95,
+                  98
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "lp_vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_token_b_account",
+          "writable": true
+        },
+        {
+          "name": "reserve",
+          "writable": true
+        },
+        {
+          "name": "reserve_collateral_mint",
+          "writable": true
+        },
+        {
+          "name": "reserve_liquidity_supply",
+          "writable": true
+        },
+        {
+          "name": "lending_market",
+          "writable": true
+        },
+        {
+          "name": "lending_market_authority"
+        },
+        {
+          "name": "pyth_oracle"
+        },
+        {
+          "name": "switchboard_oracle"
+        },
+        {
+          "name": "clock_sysvar",
+          "address": "SysvarC1ock11111111111111111111111111111111"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "tx_instructions_sysvar",
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        },
+        {
+          "name": "solend_program",
+          "address": "So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo"
+        }
+      ],
+      "args": [
         {
           "name": "collateral_amount",
           "type": "u64"
@@ -4915,6 +5440,30 @@
         {
           "name": "whirlpool_program",
           "address": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc"
+        },
+        {
+          "name": "treasury_token_a_account",
+          "docs": [
+            "Required only when a performance fee is actually owed (checked at runtime in the",
+            "handler, since whether a fee is owed depends on profit which isn't known until",
+            "the CPI executes). Added 2026-09-29 alongside the LP fee fix -- see",
+            "LpUserPosition.deposited_amount_a/b's doc comment for the incident this closes."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "treasury_token_b_account",
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "user_gate_account",
+          "docs": [
+            "Live gate-token balance, read to resolve the current fee tier. Same",
+            "gate_mint/owner validation as the Safe vault's withdraw() gate account."
+          ],
+          "optional": true
         }
       ],
       "args": [
@@ -5178,6 +5727,23 @@
               ]
             }
           }
+        },
+        {
+          "name": "treasury_token_a_account",
+          "docs": [
+            "Same performance-fee accounts as WithdrawOrcaLp -- see that struct's doc comment."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "treasury_token_b_account",
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "user_gate_account",
+          "optional": true
         }
       ],
       "args": [
@@ -5340,6 +5906,32 @@
         158,
         108,
         232
+      ]
+    },
+    {
+      "name": "LpIdleDeployed",
+      "discriminator": [
+        240,
+        227,
+        232,
+        79,
+        197,
+        19,
+        84,
+        200
+      ]
+    },
+    {
+      "name": "LpIdleRecalled",
+      "discriminator": [
+        50,
+        41,
+        84,
+        134,
+        101,
+        154,
+        4,
+        17
       ]
     },
     {
@@ -5572,6 +6164,41 @@
       "code": 12111,
       "name": "InsufficientIdleBalance",
       "msg": "Vault does not hold enough idle balance for this redeploy amount"
+    },
+    {
+      "code": 12112,
+      "name": "NoPendingLpAdmin",
+      "msg": "No pending LP vault admin transfer"
+    },
+    {
+      "code": 12113,
+      "name": "NotPendingLpAdmin",
+      "msg": "Caller is not the pending LP vault admin"
+    },
+    {
+      "code": 12114,
+      "name": "LpTreasuryRequired",
+      "msg": "Treasury token account required when a performance fee is owed"
+    },
+    {
+      "code": 12115,
+      "name": "LpTreasuryOwnerMismatch",
+      "msg": "Treasury token account is not owned by the vault's registered treasury wallet"
+    },
+    {
+      "code": 12116,
+      "name": "InvalidLpGateAccount",
+      "msg": "Gate account mint/owner does not match the caller"
+    },
+    {
+      "code": 12117,
+      "name": "LpVaultNotEmpty",
+      "msg": "LP vault still has liquidity or an active position — exit and withdraw everything before closing"
+    },
+    {
+      "code": 12118,
+      "name": "LpPositionNotEmpty",
+      "msg": "LP position still has shares — withdraw everything before closing"
     }
   ],
   "types": [
@@ -5777,6 +6404,42 @@
       }
     },
     {
+      "name": "LpIdleDeployed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "lp_vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LpIdleRecalled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "lp_vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "collateral_amount",
+            "type": "u64"
+          },
+          {
+            "name": "received",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
       "name": "LpLiquidityRedeployed",
       "type": {
         "kind": "struct",
@@ -5874,6 +6537,40 @@
           },
           {
             "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "deposited_amount_a",
+            "docs": [
+              "Real per-token deposited amounts, used as the actual cost basis for the",
+              "performance-fee-on-profit charged at withdrawal. Added 2026-09-29 after a real",
+              "incident: withdraw_orca_lp/withdraw_raydium_lp had NO fee logic at all since the",
+              "LP vault instructions were first shipped -- every LP withdrawal, ever, paid zero",
+              "performance fee regardless of profit. liquidity_at_deposit (above) can't serve as",
+              "a cost basis on its own -- it's mathematically tautological with the current",
+              "proportional share of liquidity, since shares are minted proportional to",
+              "liquidity (see project memory). Tracked per-token rather than as a single USD",
+              "value deliberately: an on-chain price oracle would add a real manipulation",
+              "surface (a temporarily-skewed price at withdrawal time could zero out or inflate",
+              "the reported profit) for a problem that doesn't need one -- profit in token A and",
+              "profit in token B, charged independently in their own units, is exactly as",
+              "correct and has no oracle dependency at all. Carved from the account's own",
+              "existing padding -- no realloc needed, LpUserPosition::LEN unchanged."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "deposited_amount_b",
+            "type": "u64"
+          },
+          {
+            "name": "tier_at_deposit",
+            "docs": [
+              "Snapshotted fee tier at deposit time (0=gold..3=standard), same anti-flash-loan",
+              "purpose as UserPosition.tier_at_deposit on the Safe vault: the WORSE (higher-fee)",
+              "of this and the live tier at withdrawal is always used, so gate tokens borrowed",
+              "right before withdrawing can't retroactively cheapen a fee already locked in."
+            ],
             "type": "u8"
           }
         ]
@@ -6019,6 +6716,61 @@
           },
           {
             "name": "lifetime_fees_b",
+            "type": "u64"
+          },
+          {
+            "name": "lending_deployed_b",
+            "docs": [
+              "Idle-capital lending backstop (added 2026-09-03, see project memory",
+              "project_lp_idle_capital_lending_backstop): raw token amount of the B",
+              "leg (USDC) currently deposited in Solend earning lending yield instead",
+              "of sitting idle. The matching cToken receipt account is a PDA, never",
+              "stored here -- derived from [b\"lp_lending_receipt_b\", lp_vault] --",
+              "so this costs only 8 bytes, not 8+32. A leg is 0 when nothing is",
+              "deployed. Carved from the same padding lifetime_fees_a/b used; no",
+              "realloc needed, LpVault::LEN unchanged."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "pending_admin",
+            "docs": [
+              "Two-step admin transfer (propose_lp_admin/accept_lp_admin), same pattern as",
+              "Vault.pending_admin. Added 2026-09-28 after a real incident: LP vaults had NO",
+              "admin-transfer mechanism at all, so when the admin key was compromised",
+              "(see project memory, project_yieldpilot_critical_keys.md) every LP vault's",
+              "admin/treasury was permanently stuck pointing at the burned key with no way to",
+              "migrate it — flagged and deliberately deprioritized while LP vaults were empty,",
+              "then a real deposit landed before this got fixed. Carved from the existing",
+              "padding below — no realloc needed, LpVault::LEN unchanged.",
+              "Pubkey::default() = no pending transfer."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "gate_mint",
+            "docs": [
+              "Performance-fee gate/tier config, mirroring Vault's gate_mint + threshold fields",
+              "exactly (see lib.rs, resolve_lp_fee_bps above). Added 2026-09-29 alongside the",
+              "fee logic itself -- see LpUserPosition.deposited_amount_a/b's doc comment for the",
+              "full incident writeup (withdraw_orca_lp/withdraw_raydium_lp had NO fee logic at",
+              "all before this). gate_mint == SystemProgram means disabled (always standard",
+              "rate), same convention as the Safe vault. Present in LpVault::LEN from this",
+              "program's very first deploy -- every vault gets these fields set correctly at",
+              "initialize_orca_lp_vault/initialize_raydium_lp_vault, no migration ever needed."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "gold_threshold",
+            "type": "u64"
+          },
+          {
+            "name": "silver_threshold",
+            "type": "u64"
+          },
+          {
+            "name": "bronze_threshold",
             "type": "u64"
           }
         ]
