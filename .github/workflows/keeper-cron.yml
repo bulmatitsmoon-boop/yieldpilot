@@ -78,8 +78,8 @@ jobs:
         env:
           RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
           KEEPER_KEYPAIR_PATH: ./keeper.json
-          PROGRAM_ID: 3tAEmHXZ51YVLe9ts8b9cMcgQPgaSamLxLtxR31VpREi
-          VAULT_ADDRESSES: 5XpzWiE8jb53CShYv19UoXcY2AywjeXpfwCff8mgrNYn,7MJGAiZmTre6VmVQXgYRK6vqoQeoMW1jwEL9jEXZgRy3
+          PROGRAM_ID: E6t55FucaBNmf32MBdrQwqnx6P29KTHioqTKaEgxzRHK
+          VAULT_ADDRESSES: 8J5UUzh1xQ94iecGNFBKMyqm4f5PdCTs6MxFnDYKbzL9,2tTcRgAvT6Sn2P4sFojKQAfFXqFe6pF9db8aptzxgMqN
           # LP vaults (Orca + Raydium SOL/USDC) — was unset entirely until 2026-09-01,
           # meaning fetchAllLpVaults() always returned empty and the keeper's LP-fee-
           # collection wiring (collectLpFees, added the same day set_lp_keeper fixed
@@ -88,7 +88,7 @@ jobs:
           # ready the moment it's funded again. Raydium fee collection isn't wired yet
           # (collectLpFees explicitly skips Raydium with a log line) — listing it here
           # is harmless and future-proofs this line for when it is.
-          LP_VAULT_ADDRESSES: FhuthBKSw2TWZRrzxGFm3fcetuDsPLxFhqfM6KdcSyax,7eMRVqgNFt8qMUBPFbycyCPYaKUdx7BKGW1GyxsXSoZP
+          LP_VAULT_ADDRESSES: # none yet -- LP vaults not recreated in the relaunch yet, intentionally empty
           IDL_PATH: idl/yieldpilot.mainnet.json
           KAMINO_API_URL: https://api.kamino.finance
           MARINADE_API_URL: https://api.marinade.finance
