@@ -193,6 +193,12 @@ jobs:
       # subsequent deploy always a same-size upgrade (never needs its own extend), so
       # this failure mode can't recur regardless of how small the future overage is.
       - name: Extend mainnet program account if needed (works around Solana's 10240-byte minimum extend)
+        # Program ID is derived from the keypair FILE, never hardcoded -- a hardcoded
+        # address here is exactly what broke this step on 2026-10-06: it still pointed at
+        # the OLD program after a full close+relaunch to a brand-new address, so
+        # `solana program show` correctly reported "has been closed" and the step failed
+        # before ever reaching the real deploy. Deriving it live means this can never go
+        # stale again, including across any FUTURE close+relaunch.
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.network == 'mainnet'
         env:
           MAINNET_RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
@@ -203,19 +209,31 @@ jobs:
           # passing --keypair inline changed nothing. `solana config set` fixes it for
           # every solana CLI call in the rest of this step, not just this one.
           solana config set --keypair /tmp/mainnet-admin-authority.json --url "${MAINNET_RPC_URL}"
-          CURRENT_LEN=$(solana program show 3tAEmHXZ51YVLe9ts8b9cMcgQPgaSamLxLtxR31VpREi | awk -F'[ (]' '/Data Length:/{print $3}')
-          if [ -z "$CURRENT_LEN" ]; then
-            echo "Could not determine current program length — failing loudly instead of silently skipping the extend."
-            exit 1
-          fi
-          NEW_LEN=$(stat -c%s target/deploy/yieldpilot.so)
-          echo "current on-chain capacity: $CURRENT_LEN bytes, new binary: $NEW_LEN bytes"
-          if [ "$NEW_LEN" -gt "$CURRENT_LEN" ]; then
-            EXTEND_BY=$(( NEW_LEN - CURRENT_LEN > 10240 ? NEW_LEN - CURRENT_LEN : 10240 ))
-            echo "extending program account by $EXTEND_BY bytes first"
-            solana program extend 3tAEmHXZ51YVLe9ts8b9cMcgQPgaSamLxLtxR31VpREi "$EXTEND_BY" --keypair /tmp/mainnet-admin-authority.json --url "${MAINNET_RPC_URL}"
+          PROGRAM_ID=$(solana-keygen pubkey /tmp/mainnet-program-keypair.json)
+          echo "target program id: $PROGRAM_ID"
+          SHOW_OUTPUT=$(solana program show "$PROGRAM_ID" 2>&1) || true
+          if echo "$SHOW_OUTPUT" | grep -q "Unable to find the account\|has been closed"; then
+            # First-ever deploy to this address (or it's a fresh/closed account) -- there
+            # is nothing to extend yet. `solana program deploy` allocates the account from
+            # scratch on its own; this step only matters for a later UPGRADE where the
+            # binary has grown past the already-allocated size.
+            echo "No existing program account at $PROGRAM_ID yet — this is a first-time deploy, no extend needed."
           else
-            echo "binary fits in current capacity, no extend needed"
+            CURRENT_LEN=$(echo "$SHOW_OUTPUT" | awk -F'[ (]' '/Data Length:/{print $3}')
+            if [ -z "$CURRENT_LEN" ]; then
+              echo "Program account exists but its length could not be parsed — failing loudly instead of silently skipping the extend."
+              echo "$SHOW_OUTPUT"
+              exit 1
+            fi
+            NEW_LEN=$(stat -c%s target/deploy/yieldpilot.so)
+            echo "current on-chain capacity: $CURRENT_LEN bytes, new binary: $NEW_LEN bytes"
+            if [ "$NEW_LEN" -gt "$CURRENT_LEN" ]; then
+              EXTEND_BY=$(( NEW_LEN - CURRENT_LEN > 10240 ? NEW_LEN - CURRENT_LEN : 10240 ))
+              echo "extending program account by $EXTEND_BY bytes first"
+              solana program extend "$PROGRAM_ID" "$EXTEND_BY" --keypair /tmp/mainnet-admin-authority.json --url "${MAINNET_RPC_URL}"
+            else
+              echo "binary fits in current capacity, no extend needed"
+            fi
           fi
 
       - name: Deploy to mainnet
