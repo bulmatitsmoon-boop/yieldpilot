@@ -88,7 +88,7 @@ jobs:
           # ready the moment it's funded again. Raydium fee collection isn't wired yet
           # (collectLpFees explicitly skips Raydium with a log line) — listing it here
           # is harmless and future-proofs this line for when it is.
-          LP_VAULT_ADDRESSES: # none yet -- LP vaults not recreated in the relaunch yet, intentionally empty
+          LP_VAULT_ADDRESSES: J8oPW397NEgoM2htMkhydFCu17nc2Rz7Bayb7e4eCmWu,Bx3BmVBLF6HTYcm5BvLaBik19RqCTjFTnN1cPyQHf1Qf
           IDL_PATH: idl/yieldpilot.mainnet.json
           KAMINO_API_URL: https://api.kamino.finance
           MARINADE_API_URL: https://api.marinade.finance
