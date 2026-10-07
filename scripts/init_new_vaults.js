@@ -7,7 +7,7 @@ const anchor = require("@coral-xyz/anchor");
 const { Connection, Keypair, PublicKey, SystemProgram, SYSVAR_RENT_PUBKEY } = require("@solana/web3.js");
 const { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync, NATIVE_MINT } = require("@solana/spl-token");
 const fs = require("fs");
-const IDL = require("./src/idl/yieldpilot.mainnet.json");
+const IDL = require("../app/src/idl/yieldpilot.mainnet.json");
 
 const PROGRAM_ID = new PublicKey("3Am7Q6KyPb6L9cuUDZCwAVFSLZXbPtjCoXWHGiNBzKkR");
 const RPC = process.env.MAINNET_RPC_URL || "https://api.mainnet-beta.solana.com";
