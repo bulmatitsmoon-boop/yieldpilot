@@ -25,7 +25,7 @@ jobs:
         run: |
           PUBKEY=$(solana-keygen pubkey /tmp/program-key.json)
           echo "MAINNET_PROGRAM_KEYPAIR public key: $PUBKEY"
-          EXPECTED="3Am7Q6KyPb6L9cuUDZCwAVFSLZXbPtjCoXWHGiNBzKkR"
+          EXPECTED="E6t55FucaBNmf32MBdrQwqnx6P29KTHioqTKaEgxzRHK"
           if [ "$PUBKEY" = "$EXPECTED" ]; then
             echo "MATCH: this is the new program identity."
           else
