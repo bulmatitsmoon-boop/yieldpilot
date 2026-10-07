@@ -70,6 +70,12 @@ async function retryFetch(fn, attempts = 6, delayMs = 1500) {
   const wallet = new anchor.Wallet(admin);
   const provider = new anchor.AnchorProvider(connection, wallet, { commitment: "confirmed" });
   anchor.setProvider(provider);
+  // The committed IDL's own `address` field still points at the OLD, now-closed program
+  // (declare_id!() in the Rust source was never updated when we switched to a fresh
+  // keypair for the relaunch) -- Anchor 0.30+ derives the client's program ID from this
+  // field automatically, so override it here rather than silently sending transactions
+  // at a dead program ID.
+  IDL.address = PROGRAM_ID.toBase58();
   const program = new anchor.Program(IDL, provider);
 
   for (const v of VAULTS) {
