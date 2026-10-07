@@ -9,7 +9,7 @@ const { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID, getAssociatedTokenAddress
 const fs = require("fs");
 const IDL = require("../app/src/idl/yieldpilot.mainnet.json");
 
-const PROGRAM_ID = new PublicKey("3Am7Q6KyPb6L9cuUDZCwAVFSLZXbPtjCoXWHGiNBzKkR");
+const PROGRAM_ID = new PublicKey("E6t55FucaBNmf32MBdrQwqnx6P29KTHioqTKaEgxzRHK");
 const RPC = process.env.MAINNET_RPC_URL || "https://api.mainnet-beta.solana.com";
 const USDC_MINT = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
 const TREASURY = new PublicKey("DQxZQF94ZkNwqL7FMpV1xK7XipaHHRBrnniUcRZC36iL");
