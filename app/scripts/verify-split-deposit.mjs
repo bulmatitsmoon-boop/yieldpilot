@@ -95,7 +95,7 @@ check("non-numeric amount is not deposited", () => {
 });
 
 // ── phase 2 visibility (admin preview gate) ────────────────────────────────────
-const ADMIN = "89J8qUmvq6HmkV3vKHcAayNgZEu5WFHq3LmiedBKaLCe";
+const ADMIN = "yaZDx7cKF8WqJyaVQJDhiTgi1UEB6rgjSpg5sW4GpD7";
 check("flag on = visible to everyone, not a preview", () => {
   assert.deepEqual(phase2Visible(null, true, ADMIN), { visible: true, adminPreview: false });
   assert.deepEqual(phase2Visible("anyone", true, ADMIN), { visible: true, adminPreview: false });
