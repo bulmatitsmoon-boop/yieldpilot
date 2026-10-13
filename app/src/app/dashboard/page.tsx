@@ -29,7 +29,7 @@ export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [selectedVaultAddr, setSelectedVaultAddr] = useState<string | null>(null);
 
-  const { vaults, positions, loading, txStatus, txError, vaultError, lastTxSig, userGateBalance, deposit, withdraw, updateSettings, refresh } =
+  const { vaults, positions, loading, txStatus, txError, vaultError, lastTxSig, userGateBalance, userGateMintDecimals, deposit, withdraw, updateSettings, refresh } =
     useYieldPilot(VAULT_ADDRESSES);
   const { apys, loading: apyLoading } = useApys();
   const solPrice = useSolPrice();
@@ -157,7 +157,12 @@ export default function Dashboard() {
   // Suppressed while gating is off: promising a fee saving nobody can unlock is the same
   // class of claim as the cadence and harvest copy removed in #121/#122.
   const nextTier = gatingActive ? NEXT_TIER[tierLabel] : undefined;
-  const tokensToNextTier = nextTier ? Math.max(0, THRESHOLD_BY_TIER[nextTier] - userGateBalance) : 0;
+  // Raw gate-token units (matches userGateBalance's scale, both straight off-chain) --
+  // NOT human-readable $YPILOT yet. Caught live 2026-10-13: this rendered unconverted
+  // as "10,000,000,000 $YPILOT away from Bronze" for a user who actually held 1M+ (the
+  // 10B figure is the raw bronze_threshold itself, off by the mint's 10^decimals).
+  const tokensToNextTierRaw = nextTier ? Math.max(0, THRESHOLD_BY_TIER[nextTier] - userGateBalance) : 0;
+  const tokensToNextTier = Math.ceil(userGateMintDecimals > 0 ? tokensToNextTierRaw / 10 ** userGateMintDecimals : tokensToNextTierRaw);
   const nextTierFeeSavingsPct = nextTier ? FEE_BPS_BY_TIER[tierLabel] - FEE_BPS_BY_TIER[nextTier] : 0;
 
   const tabStyle = (t: Tab): React.CSSProperties => ({
