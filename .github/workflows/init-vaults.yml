@@ -26,11 +26,12 @@ jobs:
       - name: Install deps
         run: npm install --no-audit --no-fund
 
-      - name: Write admin authority keypair from secret JSON
+      - name: Write admin authority keypair from base58 secret
         env:
-          NEW_ADMIN_KEYPAIR_JSON: ${{ secrets.NEW_ADMIN_KEYPAIR_JSON }}
+          FRESH_ADMIN_KEYPAIR_JSON: ${{ secrets.FRESH_ADMIN_KEYPAIR_JSON }}
         run: |
-          echo "$NEW_ADMIN_KEYPAIR_JSON" > /tmp/admin.json
+          pip3 install --quiet base58
+          python3 scripts/decode_base58_key.py FRESH_ADMIN_KEYPAIR_JSON /tmp/admin.json
 
       - name: Initialize vaults
         env:
