@@ -65,11 +65,13 @@ jobs:
           mkdir -p dist/idl
           cp src/idl/*.json dist/idl/
 
-      - name: Write keeper keypair
+      - name: Write keeper keypair from base58 secret
         working-directory: keeper
-        run: echo "$KEEPER_KEYPAIR_JSON" > keeper.json
+        run: |
+          pip3 install --quiet base58
+          python3 ../scripts/decode_base58_key.py FRESH_KEEPER_KEYPAIR_JSON keeper.json
         env:
-          KEEPER_KEYPAIR_JSON: ${{ secrets.KEEPER_KEYPAIR_JSON }}
+          FRESH_KEEPER_KEYPAIR_JSON: ${{ secrets.FRESH_KEEPER_KEYPAIR_JSON }}
 
       - name: Run single keeper cycle
         id: run_cycle
@@ -78,17 +80,14 @@ jobs:
         env:
           RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
           KEEPER_KEYPAIR_PATH: ./keeper.json
-          PROGRAM_ID: E6t55FucaBNmf32MBdrQwqnx6P29KTHioqTKaEgxzRHK
-          VAULT_ADDRESSES: 8J5UUzh1xQ94iecGNFBKMyqm4f5PdCTs6MxFnDYKbzL9,2tTcRgAvT6Sn2P4sFojKQAfFXqFe6pF9db8aptzxgMqN
-          # LP vaults (Orca + Raydium SOL/USDC) — was unset entirely until 2026-09-01,
-          # meaning fetchAllLpVaults() always returned empty and the keeper's LP-fee-
-          # collection wiring (collectLpFees, added the same day set_lp_keeper fixed
-          # this vault's keeper field) never actually ran despite being fully built and
-          # tested. Orca vault is currently empty (0 shares) but the keeper is now
-          # ready the moment it's funded again. Raydium fee collection isn't wired yet
-          # (collectLpFees explicitly skips Raydium with a log line) — listing it here
-          # is harmless and future-proofs this line for when it is.
-          LP_VAULT_ADDRESSES: J8oPW397NEgoM2htMkhydFCu17nc2Rz7Bayb7e4eCmWu,Bx3BmVBLF6HTYcm5BvLaBik19RqCTjFTnN1cPyQHf1Qf
+          PROGRAM_ID: D9YJR8fvGLRSVfX82fpextgS9T7fT2QLm5Esnro6Yjmx
+          # TODO: fill in with the real Safe vault addresses once init-vaults.yml has
+          # run against the new program (2026-10-13 close-and-redeploy) — left blank
+          # rather than stale dead addresses so a cron tick in the gap just finds
+          # nothing to do instead of erroring against closed accounts.
+          VAULT_ADDRESSES:
+          # TODO: same as above, fill in once init-lp-vaults.yml has run.
+          LP_VAULT_ADDRESSES:
           IDL_PATH: idl/yieldpilot.mainnet.json
           KAMINO_API_URL: https://api.kamino.finance
           MARINADE_API_URL: https://api.marinade.finance
