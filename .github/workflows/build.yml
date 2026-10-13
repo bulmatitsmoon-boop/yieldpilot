@@ -168,19 +168,19 @@ jobs:
           pip3 install --quiet base58
           python3 scripts/decode_mainnet_program_key.py /tmp/mainnet-program-keypair.json
 
-      - name: Write mainnet admin authority keypair from secret JSON
+      - name: Write mainnet admin authority keypair from base58 secret
         # Deliberately SEPARATE from the devnet deploy-authority.json above (still
-        # SOLANA_DEPLOY_KEY, left as-is for devnet). SOLANA_DEPLOY_KEY was compromised
-        # on mainnet 2026-09-03 and never rotated -- the real mainnet admin/upgrade
-        # authority (confirmed live on-chain) is NEW_ADMIN_KEYPAIR_JSON. Using the old
-        # key for the mainnet deploy/extend steps below would just fail outright on an
-        # authority mismatch, not move funds, but there's no reason to keep that trap
-        # live.
+        # SOLANA_DEPLOY_KEY, left as-is for devnet). NEW_ADMIN_KEYPAIR_JSON (the Round
+        # 2026-10-06 admin) is retired as of the 2026-10-13 close-and-redeploy -- the
+        # real mainnet admin/upgrade authority is now FRESH_ADMIN_KEYPAIR_JSON, stored
+        # as a base58 string (Phantom's export format) rather than a JSON byte array,
+        # so it needs the same decode step as MAINNET_PROGRAM_KEYPAIR above.
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.network == 'mainnet'
         env:
-          NEW_ADMIN_KEYPAIR_JSON: ${{ secrets.NEW_ADMIN_KEYPAIR_JSON }}
+          FRESH_ADMIN_KEYPAIR_JSON: ${{ secrets.FRESH_ADMIN_KEYPAIR_JSON }}
         run: |
-          echo "$NEW_ADMIN_KEYPAIR_JSON" > /tmp/mainnet-admin-authority.json
+          pip3 install --quiet base58
+          python3 scripts/decode_base58_key.py FRESH_ADMIN_KEYPAIR_JSON /tmp/mainnet-admin-authority.json
 
       # Solana's BPFLoaderUpgradeable can only extend a program account in minimum
       # 10240-byte chunks (ExtendProgram's own floor) — `solana program deploy`'s
