@@ -9,11 +9,11 @@ const { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID, getAssociatedTokenAddress
 const fs = require("fs");
 const IDL = require("../app/src/idl/yieldpilot.mainnet.json");
 
-const PROGRAM_ID = new PublicKey("E6t55FucaBNmf32MBdrQwqnx6P29KTHioqTKaEgxzRHK");
+const PROGRAM_ID = new PublicKey("D9YJR8fvGLRSVfX82fpextgS9T7fT2QLm5Esnro6Yjmx");
 const RPC = process.env.MAINNET_RPC_URL || "https://api.mainnet-beta.solana.com";
 const USDC_MINT = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
-const TREASURY = new PublicKey("DQxZQF94ZkNwqL7FMpV1xK7XipaHHRBrnniUcRZC36iL");
-const KEEPER = new PublicKey("DzBe4ag5Ehjd3eE3wa5JVnqcVM2mQ8FFd2ZmxKjVvY2M");
+const TREASURY = new PublicKey("CiZb5cLMT6T8Spb4NspPCMgF5yNrZo5nxXimkJYPvnDA");
+const KEEPER = new PublicKey("CRbCudvTiEnut2564zHk7PSt5em1JTngNPn7KnYMb1DS");
 
 const VAULTS = [
   {
@@ -61,7 +61,7 @@ async function retryFetch(fn, attempts = 6, delayMs = 1500) {
   const admin = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(fs.readFileSync(process.argv[2], "utf8"))));
   console.log("Admin:", admin.publicKey.toBase58());
 
-  const EXPECTED_ADMIN = "89J8qUmvq6HmkV3vKHcAayNgZEu5WFHq3LmiedBKaLCe";
+  const EXPECTED_ADMIN = "yaZDx7cKF8WqJyaVQJDhiTgi1UEB6rgjSpg5sW4GpD7";
   if (admin.publicKey.toBase58() !== EXPECTED_ADMIN) {
     console.error("ABORT: signer is not the expected safe admin wallet.");
     process.exit(1);
