@@ -117,6 +117,7 @@ export function useYieldPilot(vaultAddresses: string[]) {
   const [vaultError, setVaultError] = useState<string | null>(null);
   const [txHistory, setTxHistory] = useState<{ sig: string; type: string; ts: number }[]>([]);
   const [userGateBalance, setUserGateBalance] = useState<number>(0);
+  const [userGateMintDecimals, setUserGateMintDecimals] = useState<number>(0);
 
   // Build Anchor program (read-only, no wallet needed for fetching)
   const getProgram = useCallback(() => {
@@ -194,13 +195,21 @@ export function useYieldPilot(vaultAddresses: string[]) {
       const gateMint = vaults.find(v => v.gateMint && v.gateMint !== '11111111111111111111111111111111')?.gateMint;
       if (gateMint) {
         try {
-          const gateAta = await (await import("@solana/spl-token")).getAssociatedTokenAddress(
-            new PublicKey(gateMint), publicKey
-          );
+          const gateMintPubkey = new PublicKey(gateMint);
+          // Same Token-2022 bug as deposit()/withdraw() above (see resolveTokenProgramId):
+          // this used the 2-arg getAssociatedTokenAddress, which defaults to the classic
+          // token program. For a Token-2022 gate mint ($YPILOT) that computes a DIFFERENT
+          // address than the holder's real account, so the lookup always 404s and silently
+          // falls back to 0 -- caught live 2026-10-13: a wallet holding 1M+ $YPILOT (well
+          // past Gold) was shown as "Standard" tier, 10,000,000,000 $YPILOT short of Bronze.
+          const gateTokenProgramId = await resolveTokenProgramId(connection, gateMintPubkey);
+          const gateAta = await getAssociatedTokenAddress(gateMintPubkey, publicKey, false, gateTokenProgramId);
           const gateAcct = await connection.getTokenAccountBalance(gateAta);
           setUserGateBalance(gateAcct.value.amount ? parseInt(gateAcct.value.amount) : 0);
+          setUserGateMintDecimals(gateAcct.value.decimals);
         } catch {
           setUserGateBalance(0);
+          setUserGateMintDecimals(0);
         }
       }
       const results = await Promise.allSettled(
@@ -910,6 +919,7 @@ export function useYieldPilot(vaultAddresses: string[]) {
     lastTxSig,
     txHistory,
     userGateBalance,
+    userGateMintDecimals,
     deposit,
     withdraw,
     updateSettings,
