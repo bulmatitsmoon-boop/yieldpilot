@@ -250,7 +250,7 @@ pub use lp_vault::lending_lp::*;
 #[cfg(not(feature = "mainnet"))]
 declare_id!("8c7Boyk91MWkn5jabf5CnYD8DrG6p4hYm9eDdAAWXEKH");
 #[cfg(feature = "mainnet")]
-declare_id!("E6t55FucaBNmf32MBdrQwqnx6P29KTHioqTKaEgxzRHK");
+declare_id!("D9YJR8fvGLRSVfX82fpextgS9T7fT2QLm5Esnro6Yjmx");
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
