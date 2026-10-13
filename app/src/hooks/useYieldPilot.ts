@@ -12,6 +12,7 @@ import {
 import {
   getAssociatedTokenAddress,
   TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
   NATIVE_MINT,
   createAssociatedTokenAccountInstruction,
@@ -27,6 +28,21 @@ import { PhantomDeeplinkWalletName } from "@/components/wallets/PhantomDeeplinkA
 const PROGRAM_ID = new PublicKey(
   process.env.NEXT_PUBLIC_PROGRAM_ID || "3tAEmHXZ51YVLe9ts8b9cMcgQPgaSamLxLtxR31VpREi"
 );
+
+// $YPILOT (the gate mint) is a Token-2022 mint, not classic SPL Token -- every other
+// mint this program touches (USDC, wSOL, protocol receipt tokens) is classic SPL, so
+// this was never exercised until gating went live 2026-10-13. getAssociatedTokenAddress
+// defaults to the classic token program; called against a Token-2022 mint it silently
+// computes the WRONG address (a different PDA that was never created), which is why
+// every gated deposit/withdraw failed with AccountNotInitialized even for a wallet
+// that genuinely holds millions of $YPILOT in its real (Token-2022) account. Detecting
+// the owning program per-mint at runtime, rather than hardcoding Token-2022, keeps this
+// correct if a future gate mint ever IS classic SPL.
+async function resolveTokenProgramId(connection: anchor.web3.Connection, mint: PublicKey): Promise<PublicKey> {
+  const info = await connection.getAccountInfo(mint);
+  if (info && info.owner.equals(TOKEN_2022_PROGRAM_ID)) return TOKEN_2022_PROGRAM_ID;
+  return TOKEN_PROGRAM_ID;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -379,8 +395,9 @@ export function useYieldPilot(vaultAddresses: string[]) {
         const gateMint = new PublicKey((vaultRaw.gateMint as PublicKey).toBase58());
         const isGatingEnabled = gateMint.toBase58() !== PublicKey.default.toBase58() &&
           gateMint.toBase58() !== SystemProgram.programId.toBase58();
+        const gateTokenProgramId = isGatingEnabled ? await resolveTokenProgramId(connection, gateMint) : TOKEN_PROGRAM_ID;
         const userGateAccount = isGatingEnabled
-          ? await getAssociatedTokenAddress(gateMint, publicKey)
+          ? await getAssociatedTokenAddress(gateMint, publicKey, false, gateTokenProgramId)
           : null;
 
         const isSOL = mintPubkey.toBase58() === NATIVE_MINT.toBase58();
@@ -394,11 +411,14 @@ export function useYieldPilot(vaultAddresses: string[]) {
         // below -- caught live 2026-10-13, the first real deposit attempt after
         // set_gate_mint went live: every deposit failed outright with AnchorError
         // AccountNotInitialized on user_gate_account for a wallet that had simply never
-        // held $YPILOT before.
+        // held $YPILOT before. A second bug stacked on top of this one: $YPILOT is a
+        // Token-2022 mint, so the ATA address itself must be derived (and, if missing,
+        // created) against TOKEN_2022_PROGRAM_ID -- using the classic program id here
+        // computes a DIFFERENT address than the user's real token account.
         if (isGatingEnabled && userGateAccount) {
           const gateAtaInfo = await connection.getAccountInfo(userGateAccount);
           if (!gateAtaInfo) {
-            preIxs.push(createAssociatedTokenAccountInstruction(publicKey, userGateAccount, publicKey, gateMint));
+            preIxs.push(createAssociatedTokenAccountInstruction(publicKey, userGateAccount, publicKey, gateMint, gateTokenProgramId));
           }
         }
 
@@ -563,8 +583,9 @@ export function useYieldPilot(vaultAddresses: string[]) {
 
         const gateMint = new PublicKey((vaultRaw.gateMint as PublicKey).toBase58());
         const isGatingEnabled = gateMint.toBase58() !== PublicKey.default.toBase58();
+        const gateTokenProgramId = isGatingEnabled ? await resolveTokenProgramId(connection, gateMint) : TOKEN_PROGRAM_ID;
         const userGateAccount = isGatingEnabled
-          ? await getAssociatedTokenAddress(gateMint, publicKey)
+          ? await getAssociatedTokenAddress(gateMint, publicKey, false, gateTokenProgramId)
           : null;
 
         // Resolve whitelist entry PDA — only pass it if it actually exists on-chain,
@@ -590,10 +611,12 @@ export function useYieldPilot(vaultAddresses: string[]) {
         // INITIALIZED once gating is live, even at zero balance, to read the holder's
         // tier for the fee calculation. Never tested with gating live before now (both
         // vaults' SOL/USDC withdraws were verified working BEFORE set_gate_mint ran).
+        // Also needs the real Token-2022 program id -- see resolveTokenProgramId's
+        // doc comment, same $YPILOT-is-Token-2022 bug as deposit() above.
         if (isGatingEnabled && userGateAccount) {
           const gateAtaInfo = await connection.getAccountInfo(userGateAccount);
           if (!gateAtaInfo) {
-            preIxs.push(createAssociatedTokenAccountInstruction(publicKey, userGateAccount, publicKey, gateMint));
+            preIxs.push(createAssociatedTokenAccountInstruction(publicKey, userGateAccount, publicKey, gateMint, gateTokenProgramId));
           }
         }
 
