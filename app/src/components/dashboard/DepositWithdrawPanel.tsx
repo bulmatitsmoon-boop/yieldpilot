@@ -39,7 +39,16 @@ export function DepositWithdrawPanel({ vault, apys, onDeposit, onWithdraw, userS
 
   const asset = vault.name.toUpperCase().includes("SOL") ? "SOL" : "USDC";
   const decimals = DECIMALS[asset] || 6;
-  const bestApy = [...apys].sort((a, b) => b.apyBps - a.apyBps)[0];
+  // Was `[...apys].sort(...)[0]` with no filter at all -- picked the single highest
+  // APY across the ENTIRE platform, including LP-only pools (Orca/Raydium, riskScore
+  // 3) that this Safe vault can never actually route to. Caught live 2026-10-13: the
+  // USDC/SOL deposit panel showed "Auto-routed to best APY: Orca - SOL-USDC - 80.11%"
+  // on a vault that has never registered Orca as a protocol. Matches the same
+  // riskScore<=1 + asset filter dashboard/page.tsx already uses for its own
+  // "Best Available" stat -- this panel just wasn't using it.
+  const bestApy = [...apys]
+    .filter(a => a.asset === asset && a.riskScore <= 1 && !a.stale)
+    .sort((a, b) => b.apyBps - a.apyBps)[0];
   const SYSTEM_PROGRAM = '11111111111111111111111111111111';
   const gatingActive = vault.gateMint && vault.gateMint !== SYSTEM_PROGRAM && vault.gateMint !== '';
   // Tier-based fee: compare raw gate token balance against vault thresholds
