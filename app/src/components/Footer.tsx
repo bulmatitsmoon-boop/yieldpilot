@@ -23,9 +23,22 @@ export function Footer() {
                 </div>
               <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15, color: "var(--text-hi)" }}>YieldPilot</span>
             </div>
-            <p style={{ color: "var(--text-muted)", fontSize: 13, lineHeight: 1.6 }}>
+            <p style={{ color: "var(--text-muted)", fontSize: 13, lineHeight: 1.6, marginBottom: 12 }}>
               Automated yield optimization on Solana. Non-custodial, transparent, always on.
             </p>
+            <a
+              href="https://pump.fun/coin/BrzPQi5XHXwuZTDFNmYHF6YGXNRfsJ3DYLmTXwR5pump"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 6,
+                fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-dim)",
+                textDecoration: "none", border: "1px solid var(--border)", borderRadius: 6,
+                padding: "6px 10px", wordBreak: "break-all",
+              }}
+            >
+              $YPILOT: BrzPQi5XHXwuZTDFNmYHF6YGXNRfsJ3DYLmTXwR5pump
+            </a>
           </div>
 
           {/* Nav */}
