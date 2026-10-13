@@ -1,0 +1,43 @@
+name: Create Treasury Token Accounts
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type CONFIRM to create the treasury USDC/wSOL associated token accounts'
+        required: true
+
+jobs:
+  create:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Abort unless explicitly confirmed
+        if: github.event.inputs.confirm != 'CONFIRM'
+        run: |
+          echo "Confirmation text did not match 'CONFIRM' — aborting."
+          exit 1
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install deps
+        run: npm install --no-audit --no-fund
+
+      - name: Write admin authority keypair from base58 secret
+        env:
+          FRESH_ADMIN_KEYPAIR_JSON: ${{ secrets.FRESH_ADMIN_KEYPAIR_JSON }}
+        run: |
+          pip3 install --quiet base58
+          python3 scripts/decode_base58_key.py FRESH_ADMIN_KEYPAIR_JSON /tmp/admin.json
+
+      - name: Create treasury token accounts
+        env:
+          MAINNET_RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
+        run: node scripts/create_treasury_atas.js /tmp/admin.json
+
+      - name: Clean up keypair
+        if: always()
+        run: rm -f /tmp/admin.json
