@@ -27,30 +27,31 @@ jobs:
         working-directory: keeper
         run: npm ci
 
-      - name: Write admin authority keypair from secret JSON
+      - name: Write admin authority keypair from base58 secret
         env:
-          NEW_ADMIN_KEYPAIR_JSON: ${{ secrets.NEW_ADMIN_KEYPAIR_JSON }}
+          FRESH_ADMIN_KEYPAIR_JSON: ${{ secrets.FRESH_ADMIN_KEYPAIR_JSON }}
         run: |
-          echo "$NEW_ADMIN_KEYPAIR_JSON" > /tmp/admin.json
+          pip3 install --quiet base58
+          python3 scripts/decode_base58_key.py FRESH_ADMIN_KEYPAIR_JSON /tmp/admin.json
 
       - name: Initialize Orca LP vault
         working-directory: keeper
         env:
           RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
           KEEPER_KEYPAIR_PATH: /tmp/admin.json
-          PROGRAM_ID: E6t55FucaBNmf32MBdrQwqnx6P29KTHioqTKaEgxzRHK
+          PROGRAM_ID: D9YJR8fvGLRSVfX82fpextgS9T7fT2QLm5Esnro6Yjmx
           IDL_PATH: ../idl/yieldpilot.mainnet.json
-        run: npx ts-node src/scripts/init-orca-lp-vault.ts --keeper DzBe4ag5Ehjd3eE3wa5JVnqcVM2mQ8FFd2ZmxKjVvY2M --treasury DQxZQF94ZkNwqL7FMpV1xK7XipaHHRBrnniUcRZC36iL
+        run: npx ts-node src/scripts/init-orca-lp-vault.ts --keeper CRbCudvTiEnut2564zHk7PSt5em1JTngNPn7KnYMb1DS --treasury CiZb5cLMT6T8Spb4NspPCMgF5yNrZo5nxXimkJYPvnDA
 
       - name: Initialize Raydium LP vault
         working-directory: keeper
         env:
           RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
           KEEPER_KEYPAIR_PATH: /tmp/admin.json
-          PROGRAM_ID: E6t55FucaBNmf32MBdrQwqnx6P29KTHioqTKaEgxzRHK
+          PROGRAM_ID: D9YJR8fvGLRSVfX82fpextgS9T7fT2QLm5Esnro6Yjmx
           IDL_PATH: ../idl/yieldpilot.mainnet.json
           RAYDIUM_PROGRAM_ID: CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK
-        run: npx ts-node src/scripts/init-raydium-lp-vault.ts --keeper DzBe4ag5Ehjd3eE3wa5JVnqcVM2mQ8FFd2ZmxKjVvY2M --treasury DQxZQF94ZkNwqL7FMpV1xK7XipaHHRBrnniUcRZC36iL
+        run: npx ts-node src/scripts/init-raydium-lp-vault.ts --keeper CRbCudvTiEnut2564zHk7PSt5em1JTngNPn7KnYMb1DS --treasury CiZb5cLMT6T8Spb4NspPCMgF5yNrZo5nxXimkJYPvnDA
 
       - name: Clean up keypair
         if: always()
