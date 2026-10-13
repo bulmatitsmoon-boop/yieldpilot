@@ -387,6 +387,21 @@ export function useYieldPilot(vaultAddresses: string[]) {
         const preIxs: anchor.web3.TransactionInstruction[] = [];
         const postIxs: anchor.web3.TransactionInstruction[] = [];
 
+        // deposit() requires user_gate_account to already be INITIALIZED once gating is
+        // live, even for a depositor holding zero gate tokens (it reads the balance to
+        // assign Standard/Bronze/Silver/Gold -- it can't do that against an account that
+        // doesn't exist). Was missing entirely here, unlike the wSOL ATA check right
+        // below -- caught live 2026-10-13, the first real deposit attempt after
+        // set_gate_mint went live: every deposit failed outright with AnchorError
+        // AccountNotInitialized on user_gate_account for a wallet that had simply never
+        // held $YPILOT before.
+        if (isGatingEnabled && userGateAccount) {
+          const gateAtaInfo = await connection.getAccountInfo(userGateAccount);
+          if (!gateAtaInfo) {
+            preIxs.push(createAssociatedTokenAccountInstruction(publicKey, userGateAccount, publicKey, gateMint));
+          }
+        }
+
         if (isSOL) {
           const ataInfo = await connection.getAccountInfo(userTokenAccount);
           if (!ataInfo) {
@@ -570,6 +585,18 @@ export function useYieldPilot(vaultAddresses: string[]) {
         if (!ataInfo) {
           preIxs.push(createAssociatedTokenAccountInstruction(publicKey, userTokenAccount, publicKey, mintPubkey));
         }
+
+        // Same gap as deposit() above: withdraw() also requires user_gate_account to be
+        // INITIALIZED once gating is live, even at zero balance, to read the holder's
+        // tier for the fee calculation. Never tested with gating live before now (both
+        // vaults' SOL/USDC withdraws were verified working BEFORE set_gate_mint ran).
+        if (isGatingEnabled && userGateAccount) {
+          const gateAtaInfo = await connection.getAccountInfo(userGateAccount);
+          if (!gateAtaInfo) {
+            preIxs.push(createAssociatedTokenAccountInstruction(publicKey, userGateAccount, publicKey, gateMint));
+          }
+        }
+
         // For SOL: after the program sends wSOL back, close the wSOL account → native SOL
         if (isSOL) {
           postIxs.push(createCloseAccountInstruction(userTokenAccount, publicKey, publicKey));
