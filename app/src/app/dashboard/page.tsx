@@ -258,6 +258,10 @@ export default function Dashboard() {
           )}
         </div>
 
+        <div style={{ width: "100%", position: "relative", zIndex: 1, marginBottom: 32, textAlign: "left" }}>
+          <ProfitCalculator liveApy={hasLiveApys ? bestApy : null} />
+        </div>
+
         <div style={{ width: "100%", position: "relative", zIndex: 1 }}>
           <ProtocolTable apys={apys} loading={apyLoading} />
         </div>
