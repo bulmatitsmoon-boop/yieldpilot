@@ -16,6 +16,7 @@ const fs = require("fs");
 const PROGRAM_ID = new PublicKey("D9YJR8fvGLRSVfX82fpextgS9T7fT2QLm5Esnro6Yjmx");
 const WHIRLPOOL_PROGRAM_ID = new PublicKey("whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc");
 const LP_VAULT = new PublicKey("99w4cTCrjgwveLwYWBMWNsV9waEookwxbb8Mn5oKo8LF");
+const TREASURY = new PublicKey("CiZb5cLMT6T8Spb4NspPCMgF5yNrZo5nxXimkJYPvnDA");
 const RPC = process.env.MAINNET_RPC_URL || "https://api.mainnet-beta.solana.com";
 const ALT_ADDR = new PublicKey("5Hyve3RBPNAk8F4ZYTo2TdedzN33izGZ5Q8L4Vk3V7rF");
 
@@ -181,6 +182,8 @@ async function sendLpV0(connection, signer, instructions, computeUnits = 600000)
 
   const tokenMinA = new anchor.BN(wQuote.tokenMinA.toString());
   const tokenMinB = new anchor.BN(wQuote.tokenMinB.toString());
+  const treasuryTokenAAccount = await getAssociatedTokenAddress(tokenAMint, TREASURY);
+  const treasuryTokenBAccount = await getAssociatedTokenAddress(tokenBMint, TREASURY);
   const zero = new anchor.BN(0);
   const withdrawPreIxs = [
     ...(await ensureAtaAndWrapIfNativeIxs(connection, admin.publicKey, tokenAMint, zero)),
@@ -199,6 +202,7 @@ async function sendLpV0(connection, signer, instructions, computeUnits = 600000)
       tickArrayLower, tickArrayUpper, tokenProgram: TOKEN_PROGRAM_ID,
       whirlpoolProgram: WHIRLPOOL_PROGRAM_ID,
       userGateAccount: null,
+      treasuryTokenAAccount, treasuryTokenBAccount,
     })
     .instruction();
 
