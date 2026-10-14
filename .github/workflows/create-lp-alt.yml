@@ -1,0 +1,49 @@
+name: Create LP Address Lookup Table (Raydium)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type CONFIRM to create a fresh address lookup table for the new Raydium LP vault'
+        required: true
+
+jobs:
+  create:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Abort unless explicitly confirmed
+        if: github.event.inputs.confirm != 'CONFIRM'
+        run: |
+          echo "Confirmation text did not match 'CONFIRM' — aborting."
+          exit 1
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install keeper deps
+        working-directory: keeper
+        run: npm ci
+
+      - name: Write keeper keypair from base58 secret
+        working-directory: keeper
+        run: |
+          pip3 install --quiet base58
+          python3 ../scripts/decode_base58_key.py FRESH_KEEPER_KEYPAIR_JSON keeper.json
+        env:
+          FRESH_KEEPER_KEYPAIR_JSON: ${{ secrets.FRESH_KEEPER_KEYPAIR_JSON }}
+
+      - name: Create ALT for Raydium LP vault
+        working-directory: keeper
+        env:
+          RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
+          KEEPER_KEYPAIR_PATH: ./keeper.json
+          IDL_PATH: ../idl/yieldpilot.mainnet.json
+        run: npx ts-node src/scripts/create-lp-alt.ts FxmqpUQWJ5oKXKkpRCrat33LkLx3GFbMnVDqbeRk6b44
+
+      - name: Clean up keypair
+        if: always()
+        working-directory: keeper
+        run: rm -f keeper.json
