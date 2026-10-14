@@ -5,7 +5,7 @@ import { fmtTvl } from "@/components/ui";
 
 interface Props {
   totalDeposited: number; // real, in USD-equivalent
-  blendedApy: number | null; // real; null => no live rate available, render "—"
+  currentlyRoutingTo: string[]; // real protocol name(s) each vault is 100%-routed to right now; [] => none live
   lpFeesEarnedUsd?: number; // real, all-time LP trading fees collected; omitted/0 if no LP vaults configured
 }
 
@@ -18,7 +18,7 @@ function dotPosition(i: number, radius: number) {
   return { x: 140 + r * Math.cos(rad), y: 140 + r * Math.sin(rad) };
 }
 
-export function FleetRadar({ totalDeposited, blendedApy, lpFeesEarnedUsd }: Props) {
+export function FleetRadar({ totalDeposited, currentlyRoutingTo, lpFeesEarnedUsd }: Props) {
   const { activePositions, recentActivity: solanaActivity, totalGainedUsd, lifetimeGainedUsd, loading } = useFleetStats();
 
   type UnifiedActivity = { id: string; chain: "solana"; blockTime: number | null; explorerUrl: string };
@@ -84,7 +84,7 @@ export function FleetRadar({ totalDeposited, blendedApy, lpFeesEarnedUsd }: Prop
             {[
               { value: fmtTvl(totalDeposited), label: "Total deposited" },
               { value: String(activePositions), label: "Active positions" },
-              { value: blendedApy === null ? "—" : `${blendedApy.toFixed(1)}%`, label: "Blended net APY" },
+              { value: currentlyRoutingTo.length ? currentlyRoutingTo.join(", ") : "—", label: "Currently routing to" },
               // Real, on-chain realized gain currently sitting in the vaults —
               // total_deposits minus every position's own cost basis, summed across
               // every vault. A LIVE snapshot: goes toward $0 whenever everyone withdraws,
