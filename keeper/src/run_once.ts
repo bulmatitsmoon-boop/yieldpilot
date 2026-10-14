@@ -6,6 +6,7 @@ import { computeRebalanceDecision, shouldCompound } from "./rebalancer";
 import { computeLpRepositionDecision, LpVaultRangeState } from "./lpVaultRebalancer";
 import { notifyTelegram } from "./telegramNotify";
 import { checkNewDeposits } from "./depositWatcher";
+import { writeKeeperHealthCheck } from "./keeperHealth";
 
 /**
  * run_once.ts — single-cycle keeper run for GitHub Actions scheduled workflow.
@@ -333,6 +334,10 @@ async function main() {
     if (lpAddresses.length) await runLpIdleRecovery(client, lpAddresses);
   }
   await runHealthCheck(client);
+
+  // Real keeper-liveness timestamp, written unconditionally at the end of every
+  // successful run -- this is what the dashboard shows, not compound()'s dead one.
+  writeKeeperHealthCheck();
 
   logger.info("✓ Single run complete.");
 }
