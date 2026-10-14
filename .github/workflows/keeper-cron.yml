@@ -83,10 +83,11 @@ jobs:
           PROGRAM_ID: D9YJR8fvGLRSVfX82fpextgS9T7fT2QLm5Esnro6Yjmx
           # Real Safe vault addresses from the 2026-10-13 close-and-redeploy.
           VAULT_ADDRESSES: Cgj7SkEQDJZYhq2gviNajNmsoX4zeGzr6TgbNDZDaJSQ,8yHqDcsuEbfAVRnHns83b3spkdtjY9x4zyiUXqDUUumF
-          # LP vaults deliberately left blank -- Raydium LP vault init failed (admin
-          # ran out of SOL mid-init) and Orca LP vault, while live, is Phase 2 and not
-          # being revealed yet. Fill in once Phase 2 actually ships.
-          LP_VAULT_ADDRESSES:
+          # Orca LP vault only -- Raydium LP vault init still failed (admin ran out of
+          # SOL mid-init, never retried). Safe to have the keeper actively manage Orca
+          # (rebalance, fee collection) even though the frontend reveal for Phase 2
+          # hasn't flipped yet -- those are independent switches.
+          LP_VAULT_ADDRESSES: 99w4cTCrjgwveLwYWBMWNsV9waEookwxbb8Mn5oKo8LF
           IDL_PATH: idl/yieldpilot.mainnet.json
           KAMINO_API_URL: https://api.kamino.finance
           MARINADE_API_URL: https://api.marinade.finance
