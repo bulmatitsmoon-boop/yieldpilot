@@ -121,13 +121,15 @@ export default function Home() {
 
   const totalDepositedUsd = safeDepositedUsd + lpDepositedUsd;
   const totalFeesUsd = lpFeesUsd;
-  // Excludes stale entries: averaging a rate we did not actually fetch would put a
-  // fabricated number in the hero. null (not 0) when nothing is live, so FleetRadar
-  // can render "—" — 0.0% would read as a real, terrible rate.
-  const routableApys = apys.filter(a => ROUTABLE_PROTOCOL_IDS.has(a.protocolId) && !a.stale);
-  const blendedApy = routableApys.length
-    ? routableApys.reduce((s, a) => s + a.apyPercent, 0) / routableApys.length
-    : null;
+  // WAS an average of every routable protocol's APY ("Blended net APY") -- that was
+  // never what the vaults actually do. Routing is winner-take-all (see RoutingVisual's
+  // own comment on this), so "blended" implied a split allocation that doesn't exist
+  // and the number didn't correspond to anything a depositor actually earns. Replaced
+  // with the real thing: which protocol each vault is currently 100%-routed to.
+  // Caught live 2026-10-14 when a user asked why this was on the page at all.
+  const currentlyRoutingTo = vaults
+    .map((v) => v.protocols.find((p) => p.targetBps === 10000)?.name)
+    .filter((name): name is string => !!name);
 
   return (
     <div style={{ position: "relative" }}>
@@ -298,7 +300,7 @@ export default function Home() {
         </div>
 
         {/* ── Fleet Radar (real, live data — no fabricated numbers) ──────────── */}
-        <FleetRadar totalDeposited={totalDepositedUsd} blendedApy={blendedApy} lpFeesEarnedUsd={totalFeesUsd} />
+        <FleetRadar totalDeposited={totalDepositedUsd} currentlyRoutingTo={currentlyRoutingTo} lpFeesEarnedUsd={totalFeesUsd} />
 
         {/* ── How it works (animated stepper) ─────────────────────────────────── */}
         <div style={{ marginBottom: 96, position: "relative", zIndex: 1 }}>
