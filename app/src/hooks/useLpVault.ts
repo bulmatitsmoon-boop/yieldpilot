@@ -723,6 +723,15 @@ export function useLpVault() {
             // confirmed instant/harmless either way while diagnosing an unrelated hang
             // (2026-09-23), but a fragility worth removing rather than leaving in place.
             systemProgram: anchor.web3.SystemProgram.programId,
+            // Anchor's TS client requires an Option<Account> field to be explicitly
+            // set, even to null -- omitting the key entirely throws "Account
+            // `userGateAccount` not provided" client-side before the tx is even built.
+            // Both LP vaults have no gate_mint set today, so null is correct; if that
+            // ever changes this needs the same Token-2022-aware resolution
+            // useYieldPilot.ts's deposit/withdraw already do for the Safe vaults.
+            // Caught live 2026-10-14 testing this exact path end-to-end for the first
+            // time since the program redeploy -- every LP deposit would have failed.
+            userGateAccount: null,
           })
           .instruction();
 
@@ -830,6 +839,12 @@ export function useLpVault() {
         const userTokenAAccount = await getAssociatedTokenAddress(tokenAMint, publicKey);
         const userTokenBAccount = await getAssociatedTokenAddress(tokenBMint, publicKey);
         const userSharesAccount = await getAssociatedTokenAddress(sharesMint, publicKey);
+        // Required by withdraw_orca_lp_handler for the profit-fee transfer -- derived
+        // from the vault's own treasury field (not hardcoded) so this stays correct if
+        // the treasury is ever rotated. Caught live 2026-10-14 testing this path for the
+        // first time: "Account `treasuryTokenAAccount` not provided" on every withdraw.
+        const treasuryTokenAAccount = await getAssociatedTokenAddress(tokenAMint, raw.treasury as PublicKey);
+        const treasuryTokenBAccount = await getAssociatedTokenAddress(tokenBMint, raw.treasury as PublicKey);
 
         const tokenMinA = new anchor.BN(quote.tokenMinA.toString());
         const tokenMinB = new anchor.BN(quote.tokenMinB.toString());
@@ -869,6 +884,9 @@ export function useLpVault() {
             tickArrayUpper,
             tokenProgram: TOKEN_PROGRAM_ID,
             whirlpoolProgram: WHIRLPOOL_PROGRAM_ID,
+            userGateAccount: null,
+            treasuryTokenAAccount,
+            treasuryTokenBAccount,
           })
           .instruction();
 
@@ -1005,6 +1023,9 @@ export function useLpVault() {
             tokenProgram: TOKEN_PROGRAM_ID,
             systemProgram: anchor.web3.SystemProgram.programId,
             raydiumProgram: RAYDIUM_CLMM_PROGRAM_ID,
+            // Same Anchor-requires-explicit-null gap as the Orca side above -- see that
+            // comment for the full story.
+            userGateAccount: null,
           })
           .instruction();
 
@@ -1076,6 +1097,9 @@ export function useLpVault() {
         const userTokenAAccount = await getAssociatedTokenAddress(tokenAMint, publicKey);
         const userTokenBAccount = await getAssociatedTokenAddress(tokenBMint, publicKey);
         const userSharesAccount = await getAssociatedTokenAddress(sharesMint, publicKey);
+        // Same treasury-fee accounts as the Orca withdraw above -- see that comment.
+        const treasuryTokenAAccount = await getAssociatedTokenAddress(tokenAMint, raw.treasury as PublicKey);
+        const treasuryTokenBAccount = await getAssociatedTokenAddress(tokenBMint, raw.treasury as PublicKey);
 
         // Reward recipients must EXIST before decrease_liquidity runs, so create them
         // idempotently in the same transaction.
@@ -1115,6 +1139,9 @@ export function useLpVault() {
             tokenVault1: poolInfo.tokenVaultB,
             tokenProgram: TOKEN_PROGRAM_ID,
             raydiumProgram: RAYDIUM_CLMM_PROGRAM_ID,
+            userGateAccount: null,
+            treasuryTokenAAccount,
+            treasuryTokenBAccount,
           })
           // Raydium collects reward emissions inside decrease_liquidity and validates
           // the remaining-account count against the pool's initialized rewards; passing
