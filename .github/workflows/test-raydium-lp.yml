@@ -1,0 +1,51 @@
+name: Test Raydium LP Vault Deposit/Withdraw
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type CONFIRM to run a real small deposit + full withdraw against the Raydium LP vault'
+        required: true
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Abort unless explicitly confirmed
+        if: github.event.inputs.confirm != 'CONFIRM'
+        run: |
+          echo "Confirmation text did not match 'CONFIRM' — aborting."
+          exit 1
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install keeper deps
+        working-directory: keeper
+        run: npm ci
+
+      - name: Install Raydium SDK
+        working-directory: keeper
+        run: npm install @raydium-io/raydium-sdk-v2 --no-save
+
+      - name: Write admin authority keypair from base58 secret
+        working-directory: keeper
+        run: |
+          pip3 install --quiet base58
+          python3 ../scripts/decode_base58_key.py FRESH_ADMIN_KEYPAIR_JSON admin.json
+        env:
+          FRESH_ADMIN_KEYPAIR_JSON: ${{ secrets.FRESH_ADMIN_KEYPAIR_JSON }}
+
+      - name: Run Raydium LP deposit/withdraw test
+        working-directory: keeper
+        env:
+          MAINNET_RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
+        run: node src/scripts/test_raydium_lp_deposit_withdraw.js admin.json src/idl/yieldpilot.mainnet.json
+
+      - name: Clean up keypair
+        if: always()
+        working-directory: keeper
+        run: rm -f admin.json
