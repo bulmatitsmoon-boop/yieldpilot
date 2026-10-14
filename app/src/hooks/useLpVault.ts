@@ -731,7 +731,7 @@ export function useLpVault() {
             // useYieldPilot.ts's deposit/withdraw already do for the Safe vaults.
             // Caught live 2026-10-14 testing this exact path end-to-end for the first
             // time since the program redeploy -- every LP deposit would have failed.
-            userGateAccount: null,
+            userGateAccount: undefined,
           })
           .instruction();
 
@@ -884,7 +884,7 @@ export function useLpVault() {
             tickArrayUpper,
             tokenProgram: TOKEN_PROGRAM_ID,
             whirlpoolProgram: WHIRLPOOL_PROGRAM_ID,
-            userGateAccount: null,
+            userGateAccount: undefined,
             treasuryTokenAAccount,
             treasuryTokenBAccount,
           })
@@ -1025,7 +1025,7 @@ export function useLpVault() {
             raydiumProgram: RAYDIUM_CLMM_PROGRAM_ID,
             // Same Anchor-requires-explicit-null gap as the Orca side above -- see that
             // comment for the full story.
-            userGateAccount: null,
+            userGateAccount: undefined,
           })
           .instruction();
 
@@ -1139,7 +1139,7 @@ export function useLpVault() {
             tokenVault1: poolInfo.tokenVaultB,
             tokenProgram: TOKEN_PROGRAM_ID,
             raydiumProgram: RAYDIUM_CLMM_PROGRAM_ID,
-            userGateAccount: null,
+            userGateAccount: undefined,
             treasuryTokenAAccount,
             treasuryTokenBAccount,
           })
