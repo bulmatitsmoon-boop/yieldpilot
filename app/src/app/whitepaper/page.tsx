@@ -273,10 +273,10 @@ export default function Whitepaper() {
               ["Phase 1", "Frontend", "Complete"],
               ["Phase 1", "Devnet deployment & vault initialization", "Complete"],
               ["Phase 1", "Admin / keeper wallet separation", "Complete"],
-              ["Phase 1", "Mainnet launch with $YPILOT token gating", "Pending -- $YPILOT has not launched yet"],
+              ["Phase 1", "Mainnet launch with $YPILOT token gating", "Complete"],
               ["Phase 2", "Third-party smart contract audit", "Planned, pending demonstrated demand"],
-              ["Phase 2", "Orca / Raydium LP integration", "Built and tested -- not yet open to public deposits"],
-              ["Phase 2", "Performance fee tiers by $YPILOT holdings", "Built -- inert until $YPILOT launches, same as above"],
+              ["Phase 2", "Orca / Raydium LP integration", "Built -- not yet open to public deposits"],
+              ["Phase 2", "Performance fee tiers by $YPILOT holdings", "Complete -- live on both Safe vaults"],
               ["Phase 3", "Native per-chain vaults instead of cross-chain bridging", "Research -- an experimental Robinhood Chain vault was tested and discontinued (not a big enough edge over lending)"],
               ["Phase 3", "Additional chains", "Research"],
             ]} />
