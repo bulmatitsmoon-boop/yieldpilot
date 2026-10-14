@@ -40,7 +40,7 @@ jobs:
         env:
           RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
           KEEPER_KEYPAIR_PATH: ./keeper.json
-          IDL_PATH: ../idl/yieldpilot.mainnet.json
+          IDL_PATH: src/idl/yieldpilot.mainnet.json
         run: npx ts-node src/scripts/create-lp-alt.ts FxmqpUQWJ5oKXKkpRCrat33LkLx3GFbMnVDqbeRk6b44
 
       - name: Clean up keypair
