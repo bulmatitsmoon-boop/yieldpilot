@@ -112,8 +112,13 @@ export default function Dashboard() {
   const usdcTvl = usdcVault ? usdcVault.totalDeposits / 1e6 : null;
   const solTvl  = solVault  ? solVault.totalDeposits  / 1e9 : null;
   const hasTvl  = usdcTvl !== null || solTvl !== null;
-  const lastCompound = primaryVault && primaryVault.lastCompoundTs > 0 ? new Date(primaryVault.lastCompoundTs * 1000) : null;
-  const minutesSinceCompound = lastCompound ? Math.floor((Date.now() - lastCompound.getTime()) / 60000) : null;
+  // "Last Compounded" was removed from this page entirely (not just hidden): compound()
+  // is a genuine on-chain no-op (confirmed by reading every reference to last_compound_ts
+  // in lib.rs -- it only advances the timestamp and emits an event, moves zero funds), and
+  // the keeper deliberately stopped calling it for that reason (see run_once.ts's
+  // runCompound comment). That means last_compound_ts is now frozen at vault-creation
+  // time forever, so any "Xm ago" display here only ever counts up and reads as a broken
+  // feature -- confirmed live 2026-10-14 when a user asked if 1301 minutes was normal.
   const onChainAllocation = primaryVault?.protocols.filter(p => p.targetBps > 0) || [];
   const topApys = [...apys].filter(a => a.riskScore <= 1).sort((a, b) => b.apyPercent - a.apyPercent).slice(0, 2);
   // Show ONLY the vault's real on-chain targets. This previously fell back to a
@@ -226,12 +231,6 @@ export default function Dashboard() {
               </div>
             </div>
             <div style={{ textAlign: "left" }}>
-              <div className="mono-num" style={{ fontSize: 22, fontWeight: 500, color: "var(--token)" }}>
-                {minutesSinceCompound !== null ? minutesSinceCompound < 60 ? `${minutesSinceCompound}m ago` : minutesSinceCompound < 1440 ? `${Math.floor(minutesSinceCompound/60)}h ago` : `${Math.floor(minutesSinceCompound/1440)}d ago` : "—"}
-              </div>
-              <div style={{ fontSize: 12, color: "var(--text-low)", marginTop: 4 }}>Last Compounded</div>
-            </div>
-            <div style={{ textAlign: "left" }}>
               {/* "45 min" was wrong: the 45-minute cron expression fires at :00 and :45
                   (a 45-then-15 split), and Actions delays on top — observed gaps 60-98 min.
                   See the How-it-works note below. */}
@@ -312,17 +311,6 @@ export default function Dashboard() {
               {primaryVault?.paused ? "VAULT PAUSED" : autopilotOn ? "AUTOPILOT ENGAGED" : "AUTOPILOT OFF"}
             </span>
             {currentAllocation[0] && <span style={{ color: "var(--text-low)" }}>· Routing to {currentAllocation[0].name}</span>}
-            {/* Report when the keeper LAST acted (real, from lastCompoundTs on-chain) rather than
-                predicting when it next will. The old "Next rebalance MM:SS" countdown ignored its
-                own prop and rendered Date.now() % 45min — pure theatre. It can't be made accurate:
-                the keeper runs on a GitHub Actions cron whose OBSERVED gaps are 60-98 minutes
-                (the every-45 cron form actually means :00 and :45, and Actions cron drifts heavily on top). A
-                verifiable "last acted" beats a confident, wrong prediction. */}
-            {minutesSinceCompound !== null && (
-              <span style={{ color: "var(--text-low)" }}>
-                · Last compounded <span className="mono-num" style={{ color: "var(--text-hi)" }}>{minutesSinceCompound}m</span> ago
-              </span>
-            )}
           </div>
 
           {currentAllocation.length > 0 && (
