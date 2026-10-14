@@ -11,6 +11,7 @@ import { RecentTransactions } from "@/components/dashboard/RecentTransactions";
 import { useYieldPilot } from "@/hooks/useYieldPilot";
 import { useApys } from "@/hooks/useApys";
 import { useSolPrice } from "@/hooks/useSolPrice";
+import { useKeeperHealth } from "@/hooks/useKeeperHealth";
 
 // Load vault addresses from env
 const VAULT_ADDRESSES = (process.env.NEXT_PUBLIC_VAULT_ADDRESSES || "F1r513ZZdofz4tjhRfhNAYDK5hsmc8uCZbMmg2tkPJ6e,8KcoRt5DcCbXBaqDVDorEbW2J6GofTrRyy9Afzb8wwaE")
@@ -112,13 +113,14 @@ export default function Dashboard() {
   const usdcTvl = usdcVault ? usdcVault.totalDeposits / 1e6 : null;
   const solTvl  = solVault  ? solVault.totalDeposits  / 1e9 : null;
   const hasTvl  = usdcTvl !== null || solTvl !== null;
-  // "Last Compounded" was removed from this page entirely (not just hidden): compound()
-  // is a genuine on-chain no-op (confirmed by reading every reference to last_compound_ts
-  // in lib.rs -- it only advances the timestamp and emits an event, moves zero funds), and
-  // the keeper deliberately stopped calling it for that reason (see run_once.ts's
-  // runCompound comment). That means last_compound_ts is now frozen at vault-creation
-  // time forever, so any "Xm ago" display here only ever counts up and reads as a broken
-  // feature -- confirmed live 2026-10-14 when a user asked if 1301 minutes was normal.
+  // Real replacement for the old "Last Compounded" stat (removed 2026-10-14):
+  // compound() is a genuine on-chain no-op the keeper deliberately stopped calling
+  // (see run_once.ts's runCompound comment), so last_compound_ts was frozen at
+  // vault-creation time forever and told you nothing about keeper health. This
+  // timestamp is written fresh by the keeper itself at the end of every successful
+  // run, so it actually reflects liveness.
+  const { lastCheckTs } = useKeeperHealth();
+  const minutesSinceKeeperCheck = lastCheckTs ? Math.floor((Date.now() / 1000 - lastCheckTs) / 60) : null;
   const onChainAllocation = primaryVault?.protocols.filter(p => p.targetBps > 0) || [];
   const topApys = [...apys].filter(a => a.riskScore <= 1).sort((a, b) => b.apyPercent - a.apyPercent).slice(0, 2);
   // Show ONLY the vault's real on-chain targets. This previously fell back to a
@@ -237,6 +239,12 @@ export default function Dashboard() {
               <div className="mono-num" style={{ fontSize: 22, fontWeight: 500, color: "var(--warn)" }}>~hourly</div>
               <div style={{ fontSize: 12, color: "var(--text-low)", marginTop: 4 }}>Rebalance Cadence</div>
             </div>
+            <div style={{ textAlign: "left" }}>
+              <div className="mono-num" style={{ fontSize: 22, fontWeight: 500, color: "var(--token)" }}>
+                {minutesSinceKeeperCheck !== null ? minutesSinceKeeperCheck < 60 ? `${minutesSinceKeeperCheck}m ago` : minutesSinceKeeperCheck < 1440 ? `${Math.floor(minutesSinceKeeperCheck/60)}h ago` : `${Math.floor(minutesSinceKeeperCheck/1440)}d ago` : "—"}
+              </div>
+              <div style={{ fontSize: 12, color: "var(--text-low)", marginTop: 4 }}>Last Keeper Check</div>
+            </div>
           </div>
 
           {currentAllocation.length > 0 && (
@@ -311,6 +319,11 @@ export default function Dashboard() {
               {primaryVault?.paused ? "VAULT PAUSED" : autopilotOn ? "AUTOPILOT ENGAGED" : "AUTOPILOT OFF"}
             </span>
             {currentAllocation[0] && <span style={{ color: "var(--text-low)" }}>· Routing to {currentAllocation[0].name}</span>}
+            {minutesSinceKeeperCheck !== null && (
+              <span style={{ color: "var(--text-low)" }}>
+                · Keeper last checked in <span className="mono-num" style={{ color: "var(--text-hi)" }}>{minutesSinceKeeperCheck}m</span> ago
+              </span>
+            )}
           </div>
 
           {currentAllocation.length > 0 && (
