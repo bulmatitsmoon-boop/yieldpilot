@@ -87,7 +87,7 @@ jobs:
           # SOL mid-init, never retried). Safe to have the keeper actively manage Orca
           # (rebalance, fee collection) even though the frontend reveal for Phase 2
           # hasn't flipped yet -- those are independent switches.
-          LP_VAULT_ADDRESSES: 99w4cTCrjgwveLwYWBMWNsV9waEookwxbb8Mn5oKo8LF
+          LP_VAULT_ADDRESSES: 99w4cTCrjgwveLwYWBMWNsV9waEookwxbb8Mn5oKo8LF,FxmqpUQWJ5oKXKkpRCrat33LkLx3GFbMnVDqbeRk6b44
           IDL_PATH: idl/yieldpilot.mainnet.json
           KAMINO_API_URL: https://api.kamino.finance
           MARINADE_API_URL: https://api.marinade.finance
