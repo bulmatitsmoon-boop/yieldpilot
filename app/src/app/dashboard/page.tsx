@@ -6,6 +6,7 @@ import { useConnectWallet } from "@/components/useConnectWallet";
 import { StatCard, Card, CardHeader, Toggle, TxBanner, fmt, fmtAddr } from "@/components/ui";
 import { ProtocolTable } from "@/components/dashboard/ProtocolTable";
 import { DepositWithdrawPanel } from "@/components/dashboard/DepositWithdrawPanel";
+import { ProfitCalculator } from "@/components/dashboard/ProfitCalculator";
 import { RecentTransactions } from "@/components/dashboard/RecentTransactions";
 import { useYieldPilot } from "@/hooks/useYieldPilot";
 import { useApys } from "@/hooks/useApys";
@@ -406,6 +407,8 @@ export default function Dashboard() {
             <StatCard label="Avg Protocol APY" value={hasLiveApys ? `${fmt(avgApy)}%` : "—"} sub={hasLiveApys ? "across protocols" : "rates unavailable"} accent="var(--token)" />
             <StatCard label="Best Available" value={hasLiveApys ? `${fmt(bestApy)}%` : "—"} sub={bestProtocol ? `${bestProtocol.name} · ${bestProtocol.asset}` : "rates unavailable"} accent="var(--warn)" />
           </div>
+
+          <ProfitCalculator liveApy={hasLiveApys ? bestApy : null} />
 
           <Card>
             <CardHeader title="Your Positions" />
