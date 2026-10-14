@@ -159,6 +159,7 @@ async function sendLpV0(connection, signer, instructions, computeUnits = 600000)
       tokenVaultA: whirlpoolInfo.tokenVaultA, tokenVaultB: whirlpoolInfo.tokenVaultB,
       tickArrayLower, tickArrayUpper, tokenProgram: TOKEN_PROGRAM_ID,
       whirlpoolProgram: WHIRLPOOL_PROGRAM_ID, systemProgram: SystemProgram.programId,
+      userGateAccount: null,
     })
     .instruction();
 
@@ -197,6 +198,7 @@ async function sendLpV0(connection, signer, instructions, computeUnits = 600000)
       tokenVaultA: whirlpoolInfo.tokenVaultA, tokenVaultB: whirlpoolInfo.tokenVaultB,
       tickArrayLower, tickArrayUpper, tokenProgram: TOKEN_PROGRAM_ID,
       whirlpoolProgram: WHIRLPOOL_PROGRAM_ID,
+      userGateAccount: null,
     })
     .instruction();
 
