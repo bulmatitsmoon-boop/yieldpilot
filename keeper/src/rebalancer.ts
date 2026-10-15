@@ -2,10 +2,23 @@ import { ProtocolApy } from "./apyFetcher";
 import { VaultState } from "./solanaClient";
 import { logger } from "./logger";
 import { EPOCH_GATED_PROTOCOLS } from "./epochTracker";
+import { StreakEntry } from "./rebalanceStreak";
 
 const REBALANCE_THRESHOLD_BPS = parseInt(process.env.REBALANCE_THRESHOLD_BPS || "500");
 const MIN_APY_IMPROVEMENT_BPS = parseInt(process.env.MIN_APY_IMPROVEMENT_BPS || "100");
 const BPS_DENOM = 10_000;
+
+// A market below this TVL is "thin" -- its live supply APY can swing several points
+// on ordinary utilization/deposit-withdraw noise rather than a real sustained rate
+// edge. kamino-usdc-maple sits at ~$2.1M; the main kamino-usdc pool is ~$23.5M.
+// Below this, a win must be CONFIRMED across consecutive cycles (see below) before
+// the keeper actually switches into it.
+const THIN_MARKET_TVL_USD = parseInt(process.env.THIN_MARKET_TVL_USD || "5000000");
+// How many consecutive cycles a thin market must keep winning before the keeper
+// switches into it. 3 cycles at the ~45min keeper interval is ~2.25h of sustained
+// advantage -- long enough that a single utilization spike can't win on its own,
+// short enough that a genuinely better thin-market rate isn't ignored for days.
+const THIN_MARKET_CONFIRM_CYCLES = parseInt(process.env.THIN_MARKET_CONFIRM_CYCLES || "3");
 
 // Exit cost in bps for each protocol ID.
 // Lending protocols (Kamino, Drift, Solend) = 0: instant, no fee.
@@ -94,6 +107,10 @@ export interface RebalanceDecision {
   currentAllocations: number[];
   newAllocations: number[];
   expectedApyImprovement: number; // in bps, net of exit costs
+  /** Pass this back into the NEXT call's `streak` argument for this same vault
+   *  (persisted via rebalanceStreak.ts) — null means "nothing to track right now",
+   *  clearing any stale entry. */
+  updatedStreak: StreakEntry | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -104,6 +121,7 @@ export function computeRebalanceDecision(
   vault: VaultState,
   apys: ProtocolApy[],
   epochContext?: EpochContext,
+  streak?: StreakEntry | null,
 ): RebalanceDecision {
   const protocols = vault.protocols.slice(0, vault.protocolCount);
 
@@ -148,6 +166,7 @@ export function computeRebalanceDecision(
       currentAllocations,
       newAllocations: currentAllocations,
       expectedApyImprovement: 0,
+      updatedStreak: null,
     };
   }
 
@@ -173,6 +192,39 @@ export function computeRebalanceDecision(
     ...currentAllocations.map((cur, i) => Math.abs(cur - optimalAllocations[i]))
   );
 
+  // ── Thin-market confirmation gate ──────────────────────────────────────────
+  // See THIN_MARKET_TVL_USD's comment above and rebalanceStreak.ts's module doc for
+  // the real 2026-10-15 incident this closes. A switch INTO a thin market away from
+  // whatever is currently fully allocated must win THIN_MARKET_CONFIRM_CYCLES times
+  // in a row before it's actually acted on. Switching AWAY from a thin market (back
+  // to a deeper one) is never gated — only entry into thin markets is suspect, exit
+  // from one is always safe to act on immediately.
+  const currentWinnerIdx = currentAllocations.findIndex(a => a === BPS_DENOM);
+  const proposedWinnerIdx = optimalAllocations.findIndex(a => a === BPS_DENOM);
+  const proposedTvlUsd = proposedWinnerIdx >= 0
+    ? (apyByLabel.get(protocolIds[proposedWinnerIdx])?.tvlUsd ?? Infinity)
+    : Infinity;
+  const isSwitchIntoThinMarket =
+    proposedWinnerIdx >= 0 &&
+    proposedWinnerIdx !== currentWinnerIdx &&
+    proposedTvlUsd < THIN_MARKET_TVL_USD;
+
+  let streakGateBlocking = false;
+  let updatedStreak: StreakEntry | null = null;
+  let streakCyclesSoFar = 0;
+  if (isSwitchIntoThinMarket) {
+    const candidateId = protocolIds[proposedWinnerIdx];
+    const priorCycles = streak && streak.candidateId === candidateId ? streak.cycles : 0;
+    streakCyclesSoFar = priorCycles + 1;
+    if (streakCyclesSoFar < THIN_MARKET_CONFIRM_CYCLES) {
+      streakGateBlocking = true;
+      updatedStreak = { candidateId, cycles: streakCyclesSoFar };
+    }
+    // else: confirmed — proceed, updatedStreak stays null (reset once acted on)
+  }
+  // Any other state (not a thin-market switch at all, or a confirmed/expired one)
+  // clears whatever streak was tracked — there's nothing stale left to carry forward.
+
   // Surfaced separately from the reason string so operators can tell "nothing better
   // exists" apart from "something better exists but the epoch cooldown is blocking it" —
   // the two look identical from newAllocations alone (both hold current allocation).
@@ -190,11 +242,14 @@ export function computeRebalanceDecision(
     maxDriftBps: maxDrift,
     thresholdBps: REBALANCE_THRESHOLD_BPS,
     epochCooldownActive: cooldownBlocked,
+    isSwitchIntoThinMarket,
+    streakGateBlocking,
+    streakCyclesSoFar,
   });
 
   const apyTrigger   = netApyImprovement >= MIN_APY_IMPROVEMENT_BPS;
   const driftTrigger = maxDrift >= REBALANCE_THRESHOLD_BPS && netApyImprovement > 0;
-  const shouldRebalance = (driftTrigger || apyTrigger) && vault.autoRebalance;
+  const shouldRebalance = (driftTrigger || apyTrigger) && vault.autoRebalance && !streakGateBlocking;
 
   // The reason MUST be derived from shouldRebalance, never computed by an independent
   // cascade — otherwise the two drift apart and the log/alert contradicts the action.
@@ -217,6 +272,8 @@ export function computeRebalanceDecision(
     }
   } else if (!vault.autoRebalance) {
     reason = "Auto-rebalance is disabled";
+  } else if (streakGateBlocking) {
+    reason = `Holding — ${protocolIds[proposedWinnerIdx]} is a thin market (TVL $${Math.round(proposedTvlUsd).toLocaleString()}) leading by ${netApyImprovement}bps, but needs ${THIN_MARKET_CONFIRM_CYCLES} consecutive cycles to confirm before switching (${streakCyclesSoFar}/${THIN_MARKET_CONFIRM_CYCLES})`;
   } else if (cooldownBlocked) {
     reason = `Holding — a better rate exists but exiting the current epoch-gated position now would pay the exit fee before enough epochs have passed to earn it back`;
   } else if (grossGain > 0) {
@@ -231,6 +288,7 @@ export function computeRebalanceDecision(
     currentAllocations,
     newAllocations: shouldRebalance ? optimalAllocations : currentAllocations,
     expectedApyImprovement: netApyImprovement,
+    updatedStreak,
   };
 }
 
@@ -282,6 +340,12 @@ function computeExitCost(
 //
 // Never routes to Raydium/Orca LP positions — impermanent loss risk is
 // incompatible with principal safety.
+//
+// NOTE: this function stays a pure "what's the best headline allocation" optimizer.
+// The thin-market consecutive-cycle confirmation gate lives one level up in
+// computeRebalanceDecision, which is the only place that has the streak state —
+// this keeps computeOptimalAllocations testable without needing to thread
+// persistence through it.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const SAFE_PROTOCOLS = new Set([
