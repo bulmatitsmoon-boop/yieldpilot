@@ -7,6 +7,7 @@ import { computeLpRepositionDecision, LpVaultRangeState } from "./lpVaultRebalan
 import { notifyTelegram } from "./telegramNotify";
 import { checkNewDeposits } from "./depositWatcher";
 import { writeKeeperHealthCheck } from "./keeperHealth";
+import { readRebalanceStreak, writeRebalanceStreak } from "./rebalanceStreak";
 
 /**
  * run_once.ts — single-cycle keeper run for GitHub Actions scheduled workflow.
@@ -50,7 +51,9 @@ async function runApyPollAndRebalance(client: SolanaClient) {
     const epochContext = await client.getEpochContext(address, state);
 
     if (state.autoRebalance) {
-      const decision = computeRebalanceDecision(state, apys, epochContext);
+      const priorStreak = readRebalanceStreak(address);
+      const decision = computeRebalanceDecision(state, apys, epochContext, priorStreak);
+      writeRebalanceStreak(address, decision.updatedStreak);
       logger.info(`  Rebalance decision: ${decision.reason}`, {
         current: decision.currentAllocations,
         proposed: decision.newAllocations,
