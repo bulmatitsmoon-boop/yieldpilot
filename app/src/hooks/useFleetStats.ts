@@ -6,6 +6,7 @@ import * as anchor from "@coral-xyz/anchor";
 import { PublicKey } from "@solana/web3.js";
 import IDL from "@/idl/yieldpilot.mainnet.json";
 import { useSolPrice } from "@/hooks/useSolPrice";
+import type { ProtocolApy } from "@/hooks/useApys";
 
 const PROGRAM_ID = new PublicKey(
   process.env.NEXT_PUBLIC_PROGRAM_ID || "3tAEmHXZ51YVLe9ts8b9cMcgQPgaSamLxLtxR31VpREi"
@@ -30,6 +31,16 @@ export interface FleetStats {
    *  0 whenever everyone withdraws, since there's no longer anything "currently gaining."
    *  null while loading — never 0 as a placeholder, same rule as everywhere else here. */
   totalGainedUsd: number | null;
+  /** Same figure, but ticking in real time between on-chain snapshots. total_deposits
+   *  only actually updates on-chain when a deposit/withdraw/rebalance reconciles it
+   *  (confirmed live 2026-10-14: the keeper never calls reconcile() on a timer, only as
+   *  a side effect of those actions) -- between those events totalGainedUsd above is
+   *  frozen, which reads as broken for a "currently gaining" label. This interpolates
+   *  forward from the last real snapshot using each vault's actual deployed balance x
+   *  its live APY -- a real accrual rate, not an animation -- and re-anchors to the true
+   *  on-chain value every time a fresh snapshot lands, so it can never drift into fiction.
+   *  null while loading, same rule as totalGainedUsd. */
+  totalGainedUsdLive: number | null;
   /** Cumulative, ALL-TIME realized gain across every vault, in USD-equivalent — reads
    *  the on-chain `lifetime_gains` counter directly (added 2026-08-03), which only ever
    *  increases and survives full withdrawals. This is the number that answers "how much
@@ -40,8 +51,8 @@ export interface FleetStats {
 }
 
 /**
- * Real, program-wide aggregate stats — no fabricated numbers. Queries every
- * UserPosition account that exists on-chain (via Anchor's .all(), which
+ * activePositions / totalDepositors: real counts from on-chain UserPosition +
+ * LpUserPosition accounts (program.account["userPosition"].all() — Anchor's filter
  * matches accounts by their real discriminator) and every recent signature
  * touching the program. Will legitimately show near-zero numbers pre-launch;
  * that's accurate, not a bug.
@@ -53,14 +64,17 @@ export interface FleetStats {
  * honestly" case that made "Total Earned" a labelled PROJECTION elsewhere in this
  * app (see dashboard/page.tsx's comment on that). This reads only fields the vault
  * itself already trusts — no protocol exchange-rate decoding, no estimate.
+ *
+ * totalGainedUsdLive (added 2026-10-14): see the field's own doc comment above.
  */
-export function useFleetStats(): FleetStats {
+export function useFleetStats(apys: ProtocolApy[] = []): FleetStats {
   const { connection } = useConnection();
   const solPrice = useSolPrice();
   const [activePositions, setActivePositions] = useState(0);
   const [totalDepositors, setTotalDepositors] = useState(0);
   const [recentActivity, setRecentActivity] = useState<FleetActivity[]>([]);
   const [totalGainedUsd, setTotalGainedUsd] = useState<number | null>(null);
+  const [totalGainedUsdLive, setTotalGainedUsdLive] = useState<number | null>(null);
   const [lifetimeGainedUsd, setLifetimeGainedUsd] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   // Guards against out-of-order responses: the effect below re-fires this fetch every
@@ -72,6 +86,13 @@ export function useFleetStats(): FleetStats {
   // tick. Each fetch stamps its own id; a response only commits state if it's still the
   // most recently STARTED call by the time it resolves — stale ones are discarded.
   const requestIdRef = useRef(0);
+  // Real accrual rate (USD per millisecond), recomputed every snapshot from each
+  // vault's actual deployed balance x its live APY -- the live-ticker's engine.
+  const accrualRateRef = useRef(0);
+  const lastSnapshotRef = useRef<{ value: number; atMs: number } | null>(null);
+
+  const apysRef = useRef(apys);
+  apysRef.current = apys;
 
   const fetch = useCallback(async () => {
     const requestId = ++requestIdRef.current;
@@ -112,6 +133,13 @@ export function useFleetStats(): FleetStats {
       let gainedUsd = 0;
       let lifetimeUsd = 0;
       let anyVaultResolved = false;
+      // USD per millisecond this vault set is really earning right now, derived from
+      // each vault's actual on-chain deployed balance x the live APY of whichever
+      // protocol it's actually deployed to (not a blended/average rate).
+      let accrualRateUsdPerMs = 0;
+      const msPerYear = 365 * 24 * 60 * 60 * 1000;
+      const liveApys = apysRef.current;
+
       VAULT_ADDRESSES.forEach((addr, i) => {
         const v = vaultAccounts[i];
         if (!v) return;
@@ -150,9 +178,33 @@ export function useFleetStats(): FleetStats {
         const lifetimeRaw = BigInt((v.lifetimeGains as anchor.BN | undefined)?.toString() ?? "0");
         const lifetimeUi = Number(lifetimeRaw) / decimals;
         lifetimeUsd += isSol ? lifetimeUi * solPrice : lifetimeUi;
+
+        // Accrual rate: sum each registered protocol's real deployedBalance x its live
+        // APY. Only the protocol actually holding funds (deployedBalance > 0) ever
+        // contributes — matches the on-chain reality of a winner-take-all router.
+        const protocols = (v.protocols as any[]).slice(0, v.protocolCount as number);
+        for (const p of protocols) {
+          const deployedRaw = BigInt((p.deployedBalance as anchor.BN).toString());
+          if (deployedRaw === 0n) continue;
+          const label = Buffer.from(p.label as Buffer).toString("utf8").replace(/\0/g, "");
+          const match = liveApys.find((a) => a.protocolId === label && !a.stale);
+          if (!match) continue; // no live rate for this protocol — contribute nothing rather than guess
+          const deployedUi = Number(deployedRaw) / decimals;
+          const deployedUsd = isSol ? deployedUi * solPrice : deployedUi;
+          accrualRateUsdPerMs += (deployedUsd * (match.apyPercent / 100)) / msPerYear;
+        }
       });
       setTotalGainedUsd(anyVaultResolved ? gainedUsd : null);
       setLifetimeGainedUsd(anyVaultResolved ? lifetimeUsd : null);
+
+      if (anyVaultResolved) {
+        accrualRateRef.current = accrualRateUsdPerMs;
+        lastSnapshotRef.current = { value: gainedUsd, atMs: Date.now() };
+        setTotalGainedUsdLive(gainedUsd);
+      } else {
+        lastSnapshotRef.current = null;
+        setTotalGainedUsdLive(null);
+      }
     } catch (err) {
       console.error("useFleetStats error", err);
     } finally {
@@ -166,5 +218,18 @@ export function useFleetStats(): FleetStats {
     return () => clearInterval(id);
   }, [fetch]);
 
-  return { activePositions, totalDepositors, recentActivity, totalGainedUsd, lifetimeGainedUsd, loading };
+  // The actual live tick: every second, re-anchor from the last real on-chain
+  // snapshot plus (real accrual rate x elapsed ms) — never a free-running animation,
+  // always pinned to the most recent truth.
+  useEffect(() => {
+    const id = setInterval(() => {
+      const snap = lastSnapshotRef.current;
+      if (!snap) return;
+      const elapsedMs = Date.now() - snap.atMs;
+      setTotalGainedUsdLive(snap.value + accrualRateRef.current * elapsedMs);
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  return { activePositions, totalDepositors, recentActivity, totalGainedUsd, totalGainedUsdLive, lifetimeGainedUsd, loading };
 }
