@@ -300,7 +300,7 @@ export default function Home() {
         </div>
 
         {/* ── Fleet Radar (real, live data — no fabricated numbers) ──────────── */}
-        <FleetRadar totalDeposited={totalDepositedUsd} currentlyRoutingTo={currentlyRoutingTo} lpFeesEarnedUsd={totalFeesUsd} />
+        <FleetRadar totalDeposited={totalDepositedUsd} currentlyRoutingTo={currentlyRoutingTo} lpFeesEarnedUsd={totalFeesUsd} apys={apys} />
 
         {/* ── How it works (animated stepper) ─────────────────────────────────── */}
         <div style={{ marginBottom: 96, position: "relative", zIndex: 1 }}>
