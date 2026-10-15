@@ -2,11 +2,23 @@
 
 import { useFleetStats } from "@/hooks/useFleetStats";
 import { fmtTvl } from "@/components/ui";
+import type { ProtocolApy } from "@/hooks/useApys";
 
 interface Props {
   totalDeposited: number; // real, in USD-equivalent
   currentlyRoutingTo: string[]; // real protocol name(s) each vault is 100%-routed to right now; [] => none live
   lpFeesEarnedUsd?: number; // real, all-time LP trading fees collected; omitted/0 if no LP vaults configured
+  apys: ProtocolApy[]; // live rates, used to tick "Currently gaining" forward between on-chain snapshots
+}
+
+// "Currently gaining" ticks every second once TVL is large enough for the real
+// accrual rate to actually move a cent within a session; fmtTvl's default precision
+// is too coarse to show that movement at today's small TVL, so this stat gets its
+// own formatter instead.
+function fmtLiveGain(n: number | null): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  if (n < 0.01) return `$${n.toFixed(6)}`;
+  return `$${n.toFixed(4)}`;
 }
 
 // Deterministic pseudo-random placement so dots don't jump around on re-render,
@@ -18,8 +30,8 @@ function dotPosition(i: number, radius: number) {
   return { x: 140 + r * Math.cos(rad), y: 140 + r * Math.sin(rad) };
 }
 
-export function FleetRadar({ totalDeposited, currentlyRoutingTo, lpFeesEarnedUsd }: Props) {
-  const { activePositions, recentActivity: solanaActivity, totalGainedUsd, lifetimeGainedUsd, loading } = useFleetStats();
+export function FleetRadar({ totalDeposited, currentlyRoutingTo, lpFeesEarnedUsd, apys }: Props) {
+  const { activePositions, recentActivity: solanaActivity, totalGainedUsdLive, lifetimeGainedUsd, loading } = useFleetStats(apys);
 
   type UnifiedActivity = { id: string; chain: "solana"; blockTime: number | null; explorerUrl: string };
   const solanaCluster = process.env.NEXT_PUBLIC_SOLANA_NETWORK === "mainnet-beta" ? "mainnet-beta" : "devnet";
@@ -90,7 +102,7 @@ export function FleetRadar({ totalDeposited, currentlyRoutingTo, lpFeesEarnedUsd
               // every vault. A LIVE snapshot: goes toward $0 whenever everyone withdraws,
               // since there's nothing left "currently gaining" at that point. Not a
               // projection — settle_recall and reconcile() keep total_deposits accurate.
-              { value: totalGainedUsd === null ? "—" : fmtTvl(totalGainedUsd), label: "Currently gaining" },
+              { value: fmtLiveGain(totalGainedUsdLive), label: "Currently gaining" },
               // Cumulative, ALL-TIME realized gain — reads the on-chain lifetime_gains
               // counter directly (added 2026-08-03). Unlike the stat above, this only
               // ever goes up and survives full withdrawals — it answers "how much has
