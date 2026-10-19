@@ -724,14 +724,26 @@ export function useLpVault() {
             // (2026-09-23), but a fragility worth removing rather than leaving in place.
             systemProgram: anchor.web3.SystemProgram.programId,
             // Anchor's TS client requires an Option<Account> field to be explicitly
-            // set, even to null -- omitting the key entirely throws "Account
+            // set to null -- omitting the key entirely throws "Account
             // `userGateAccount` not provided" client-side before the tx is even built.
+            //
+            // REGRESSION, caught live 2026-10-19: this was `undefined` from 2026-10-14
+            // to satisfy the generated Accounts type (`Address | Partial<...> |
+            // undefined` has no `null` member, so `null` here is a TS2322 build error).
+            // That silenced the compiler but did NOT fix the runtime bug it was meant
+            // to fix -- in plain JS, `{ userGateAccount: undefined }` and omitting the
+            // key entirely are the exact same object shape, and Anchor's resolver
+            // checks `=== undefined`, not key presence. So every real deposit kept
+            // throwing the identical "not provided" error the whole time; only the
+            // BUILD was ever fixed. `null` is the only value that actually reads as
+            // "explicitly no account" at runtime -- the cast below keeps that real
+            // value while silencing the compiler, instead of silencing the compiler by
+            // changing the value.
+            //
             // Both LP vaults have no gate_mint set today, so null is correct; if that
             // ever changes this needs the same Token-2022-aware resolution
             // useYieldPilot.ts's deposit/withdraw already do for the Safe vaults.
-            // Caught live 2026-10-14 testing this exact path end-to-end for the first
-            // time since the program redeploy -- every LP deposit would have failed.
-            userGateAccount: undefined,
+            userGateAccount: null as any,
           })
           .instruction();
 
@@ -884,7 +896,9 @@ export function useLpVault() {
             tickArrayUpper,
             tokenProgram: TOKEN_PROGRAM_ID,
             whirlpoolProgram: WHIRLPOOL_PROGRAM_ID,
-            userGateAccount: undefined,
+            // See depositOrcaLp's userGateAccount comment above -- null, not
+            // undefined, is what actually reads as "no gate account" at runtime.
+            userGateAccount: null as any,
             treasuryTokenAAccount,
             treasuryTokenBAccount,
           })
@@ -1024,8 +1038,9 @@ export function useLpVault() {
             systemProgram: anchor.web3.SystemProgram.programId,
             raydiumProgram: RAYDIUM_CLMM_PROGRAM_ID,
             // Same Anchor-requires-explicit-null gap as the Orca side above -- see that
-            // comment for the full story.
-            userGateAccount: undefined,
+            // comment (depositOrcaLp) for the full story, including why this must be
+            // `null as any`, not `undefined`.
+            userGateAccount: null as any,
           })
           .instruction();
 
@@ -1139,7 +1154,9 @@ export function useLpVault() {
             tokenVault1: poolInfo.tokenVaultB,
             tokenProgram: TOKEN_PROGRAM_ID,
             raydiumProgram: RAYDIUM_CLMM_PROGRAM_ID,
-            userGateAccount: undefined,
+            // See depositOrcaLp's userGateAccount comment above -- null, not
+            // undefined, is what actually reads as "no gate account" at runtime.
+            userGateAccount: null as any,
             treasuryTokenAAccount,
             treasuryTokenBAccount,
           })
