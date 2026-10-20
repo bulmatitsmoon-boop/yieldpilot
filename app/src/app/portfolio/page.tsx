@@ -367,6 +367,13 @@ export default function PortfolioPage() {
     sharePct: number;
     inRange: boolean | null;
     rangePct: number | null; // 0-100: where the live price sits between tickLower/tickUpper
+    // Real LP performance: current position value minus what the user's exact deposited
+    // token amounts (LpUserPosition.deposited_amount_a/b, on-chain since 2026-09-29) would
+    // be worth TODAY — both sides priced at the same live rate, so this isolates fees
+    // earned minus impermanent loss from the pair's own price movement, with no historical
+    // price lookup needed. null when it can't be computed honestly: a pre-upgrade position
+    // with no deposited_amount_a/b on record, or a token this app can't price (priceForMint).
+    profitUsd: number | null;
   }[]>([]);
   useEffect(() => {
     if (!publicKey || lpOptions.length === 0 || solPrice <= 0) return;
@@ -395,7 +402,22 @@ export default function PortfolioPage() {
               inRange = null; // couldn't read the pool's current tick -- show as unknown, not a guess
               rangePct = null;
             }
-            return { info, shares: pos.shares, valueUsd, sharePct: sharePct * 100, inRange, rangePct };
+            // See profitUsd's own doc comment on the lpHoldings state above for the full
+            // methodology. Both legs priced at the SAME live rate as the current value
+            // above (priceForMint), so the comparison is apples-to-apples at today's
+            // market, not deposit-time vs today's.
+            let profitUsd: number | null = null;
+            if (pos.depositedAmountA !== undefined && pos.depositedAmountB !== undefined) {
+              const priceA = priceForMint(info.tokenAMint, solPrice);
+              const priceB = priceForMint(info.tokenBMint, solPrice);
+              if (priceA !== null && priceB !== null) {
+                const costBasisUsd =
+                  Number(formatBaseUnitsToDecimal(pos.depositedAmountA, info.tokenADecimals)) * priceA +
+                  Number(formatBaseUnitsToDecimal(pos.depositedAmountB, info.tokenBDecimals)) * priceB;
+                profitUsd = valueUsd - costBasisUsd;
+              }
+            }
+            return { info, shares: pos.shares, valueUsd, sharePct: sharePct * 100, inRange, rangePct, profitUsd };
           } catch {
             return null;
           }
@@ -406,7 +428,7 @@ export default function PortfolioPage() {
           results.filter(
             (r): r is {
               info: LpVaultInfo; shares: number; valueUsd: number; sharePct: number;
-              inRange: boolean | null; rangePct: number | null;
+              inRange: boolean | null; rangePct: number | null; profitUsd: number | null;
             } => r !== null
           )
         );
@@ -834,7 +856,17 @@ export default function PortfolioPage() {
                               {h.inRange === true && <Badge tone="ok">In range</Badge>}
                               {h.inRange === false && <Badge tone="loss">Out of range</Badge>}
                             </span>
-                            <span style={{ color: "var(--text-hi)", fontFamily: "var(--font-mono)" }}>${h.valueUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                            <span style={{ color: "var(--text-hi)", fontFamily: "var(--font-mono)" }}>
+                              ${h.valueUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                              {h.profitUsd !== null && (
+                                <span
+                                  style={{ color: h.profitUsd >= 0 ? "var(--signal, #2ecc71)" : "var(--loss, #c0392b)", marginLeft: 8 }}
+                                  title="Your current position value vs. what your exact deposited token amounts would be worth today, both priced the same way — isolates fees earned minus impermanent loss from the pair's own price movement."
+                                >
+                                  {h.profitUsd >= 0 ? "+" : "−"}${Math.abs(h.profitUsd).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                                </span>
+                              )}
+                            </span>
                           </div>
                           {h.rangePct !== null && (
                             <div style={{ marginTop: 6 }} title={`Live pool price is ${h.rangePct.toFixed(0)}% of the way through this vault's range`}>
@@ -865,6 +897,15 @@ export default function PortfolioPage() {
                               Vault lifetime fees: {feesA} / {feesB} ({h.info.name})
                             </span>
                           </div>
+                          {h.profitUsd === null ? (
+                            <div style={{ fontSize: 11, color: "var(--text-low, #666)", marginTop: 2 }}>
+                              Profit not available for this position — opened before cost-basis tracking existed, or a price couldn&apos;t be read.
+                            </div>
+                          ) : (
+                            <div style={{ fontSize: 11, color: "var(--text-low, #666)", marginTop: 2 }}>
+                              Fees earned minus impermanent loss, vs. your deposited {symbolForMint(h.info.tokenAMint)}/{symbolForMint(h.info.tokenBMint)} at today&apos;s prices — not price appreciation of the pair itself.
+                            </div>
+                          )}
                           {h.inRange === false && (
                             <div style={{ fontSize: 11, color: "var(--warn)", marginTop: 2 }}>
                               Pool price has moved outside this vault&apos;s range — it isn&apos;t earning trading fees right now.
