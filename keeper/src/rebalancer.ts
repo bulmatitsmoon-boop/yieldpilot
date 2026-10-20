@@ -248,7 +248,21 @@ export function computeRebalanceDecision(
   });
 
   const apyTrigger   = netApyImprovement >= MIN_APY_IMPROVEMENT_BPS;
-  const driftTrigger = maxDrift >= REBALANCE_THRESHOLD_BPS && netApyImprovement > 0;
+  // REGRESSION, caught live 2026-10-20: this vault is winner-take-all (100% to one
+  // protocol, 0% to the rest -- see computeOptimalAllocations' doc comment), so
+  // switching protocols at ALL always produces maxDrift = BPS_DENOM (10000). That
+  // means `driftTrigger` was satisfied by ANY positive net gain, however tiny, and
+  // completely bypassed the MIN_APY_IMPROVEMENT_BPS floor apyTrigger was supposed to
+  // enforce -- confirmed live: the keeper switched kamino-usdc -> kamino-usdc-maple
+  // on a 0.33bps edge, nowhere near the intended 100bps minimum. REBALANCE_THRESHOLD_BPS
+  // is a holdover from the pre-2026-07-21 80/20-split allocation scheme, where partial
+  // drift short of a full switch was a real, distinct case; under winner-take-all it
+  // never is, so the separate low-bar drift path has no scenario left where it SHOULD
+  // differ from apyTrigger. Now requires the same real net-gain floor -- the drift
+  // check still runs (kept in case a future allocation scheme reintroduces partial
+  // splits, where it would matter again), it just can no longer approve a switch
+  // apyTrigger itself wouldn't.
+  const driftTrigger = maxDrift >= REBALANCE_THRESHOLD_BPS && netApyImprovement >= MIN_APY_IMPROVEMENT_BPS;
   const shouldRebalance = (driftTrigger || apyTrigger) && vault.autoRebalance && !streakGateBlocking;
 
   // The reason MUST be derived from shouldRebalance, never computed by an independent
@@ -277,7 +291,10 @@ export function computeRebalanceDecision(
   } else if (cooldownBlocked) {
     reason = `Holding — a better rate exists but exiting the current epoch-gated position now would pay the exit fee before enough epochs have passed to earn it back`;
   } else if (grossGain > 0) {
-    reason = `Net APY gain ${netApyImprovement}bps (gross ${grossGain}bps - ${exitCostBps}bps exit cost) below the ${MIN_APY_IMPROVEMENT_BPS}bps minimum, and drift ${maxDrift}bps below the ${REBALANCE_THRESHOLD_BPS}bps threshold — holding position`;
+    // Drift alone (without also clearing MIN_APY_IMPROVEMENT_BPS) can no longer
+    // trigger a rebalance -- see driftTrigger's comment above -- so this message no
+    // longer claims drift was below threshold; it may well be at/above it.
+    reason = `Net APY gain ${netApyImprovement}bps (gross ${grossGain}bps - ${exitCostBps}bps exit cost) below the ${MIN_APY_IMPROVEMENT_BPS}bps minimum required to switch — holding position`;
   } else {
     reason = "No rebalance needed";
   }
