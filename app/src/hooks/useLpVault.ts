@@ -331,6 +331,21 @@ export interface LpUserPositionInfo {
   lpVault: string;
   shares: number;
   liquidityAtDeposit: string;
+  /** Real per-token cost basis, raw base units (see LpUserPosition.deposited_amount_a/b's
+   *  on-chain doc comment — added 2026-09-29 for the performance-fee calc, and equally
+   *  usable here: current position value (in both tokens, at TODAY's prices) minus these
+   *  two amounts (also priced today) isolates true LP performance — fees earned minus
+   *  impermanent loss — from the underlying assets' own price movement. No historical
+   *  price lookup needed, unlike the cost-basis-at-deposit-time approach this project
+   *  previously assumed was the only option (see project memory,
+   *  project_lp_profit_tracking_deferred — written before this field existed). */
+  /** undefined (not "0") for a position account that predates the 2026-09-29 upgrade
+   *  these fields were added in -- Anchor's Borsh decoder can't materialize a field
+   *  that wasn't at that byte offset when the account was created. Treat undefined as
+   *  "no real cost basis on record", never as a real 0 -- a real 0 would make the
+   *  profit math read as "100% profit", which is false, not just imprecise. */
+  depositedAmountA: string | undefined;
+  depositedAmountB: string | undefined;
 }
 
 /**
@@ -592,6 +607,11 @@ export function useLpVault() {
           lpVault: lpVaultAddress,
           shares: (raw.shares as anchor.BN).toNumber(),
           liquidityAtDeposit: (raw.liquidityAtDeposit as anchor.BN).toString(),
+          // Left as undefined (not defaulted to "0") on a pre-upgrade position account —
+          // see the field's own doc comment on LpUserPositionInfo above for why "0" would
+          // be actively wrong here, not just imprecise.
+          depositedAmountA: (raw.depositedAmountA as anchor.BN | undefined)?.toString(),
+          depositedAmountB: (raw.depositedAmountB as anchor.BN | undefined)?.toString(),
         };
       } catch {
         return null; // position doesn't exist yet — user has never deposited
