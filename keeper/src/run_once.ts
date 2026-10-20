@@ -6,6 +6,7 @@ import { computeRebalanceDecision, shouldCompound } from "./rebalancer";
 import { computeLpRepositionDecision, LpVaultRangeState } from "./lpVaultRebalancer";
 import { notifyTelegram } from "./telegramNotify";
 import { checkNewDeposits } from "./depositWatcher";
+import { checkNewLpActivity } from "./lpDepositWatcher";
 import { writeKeeperHealthCheck } from "./keeperHealth";
 import { readRebalanceStreak, writeRebalanceStreak } from "./rebalanceStreak";
 
@@ -130,6 +131,26 @@ async function runDepositWatch(client: SolanaClient) {
   for (const { address, state } of vaults) {
     await checkNewDeposits(client, address, state.name).catch(err => {
       logger.warn(`Deposit watch failed (non-fatal): ${address.slice(0, 8)}... — ${err.message}`);
+    });
+  }
+}
+
+/**
+ * LP-vault equivalent of runDepositWatch above — see lpDepositWatcher.ts's module doc
+ * for why this didn't exist until now (every real Orca/Raydium deposit/withdrawal
+ * since Phase 2 went public was silent in the alert channel). Unset/empty
+ * LP_VAULT_ADDRESSES is fine, same convention as runLpVaultCheck below.
+ */
+async function runLpDepositWatch(client: SolanaClient) {
+  logger.info("── LP deposit watch ──");
+  const lpVaults = await client.fetchAllLpVaults();
+  if (lpVaults.length === 0) {
+    logger.debug("No LP vaults configured (LP_VAULT_ADDRESSES) — skipping");
+    return;
+  }
+  for (const { address, state } of lpVaults) {
+    await checkNewLpActivity(client, address, state.name).catch(err => {
+      logger.warn(`LP deposit watch failed (non-fatal): ${address.slice(0, 8)}... — ${err.message}`);
     });
   }
 }
@@ -328,6 +349,7 @@ async function main() {
   await runApyPollAndRebalance(client);
   await runCompound(client);
   await runDepositWatch(client);
+  await runLpDepositWatch(client);
   await runLpVaultCheck(client);
   // Safety net: any vault left without an active position is earning nothing. Recover it
   // regardless of whether this run repositioned, so a failed redeploy on a previous run
