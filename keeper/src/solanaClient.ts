@@ -339,6 +339,14 @@ export class SolanaClient {
       { mint: JITOSOL_MINT,                  label: "jitoSOL (Jito)" },
       { mint: PSOL_MINT,                     label: "PSOL (Phantom)" },
       { mint: SOLEND_USDC_COLLATERAL_MINT,   label: "cUSDC (Solend collateral)" },
+      // Missing since Maple was registered as a protocol (2026-07-30) — never caused a
+      // problem until the USDC vault's rebalance actually picked it as the winner for the
+      // first time (2026-10-20), at which point deployToKamino failed every attempt with
+      // AccountNotInitialized (3012) on vault_collateral_account: this specific isolated
+      // market's own cToken mint has its own ATA, separate from the main pool's, and it
+      // had never been created. Confirmed live: the USDC vault sat fully idle (recalled
+      // out of the main pool, deploy into Maple failing every cycle) until this was added.
+      { mint: KAMINO_MAPLE_USDC_COLLATERAL_MINT, label: "kUSDC-Maple (Kamino Maple collateral)" },
     ];
 
     const tx = new Transaction();
