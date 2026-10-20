@@ -115,4 +115,4 @@ jobs:
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "chore: update keeper state [skip ci]"
-          file_pattern: "keeper/state/deposit-watch.json keeper/state/epoch-entries.json keeper/state/keeper-health.json keeper/state/rebalance-streak.json"
+          file_pattern: "keeper/state/deposit-watch.json keeper/state/epoch-entries.json keeper/state/keeper-health.json keeper/state/rebalance-streak.json keeper/state/lp-deposit-watch.json"
