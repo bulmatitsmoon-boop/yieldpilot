@@ -55,7 +55,7 @@ import { useConnection } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
 import bs58 from "bs58";
 import { blendedApy, estYearly, planLegs } from "@/lib/splitDeposit.mjs";
-import { portfolioTotals } from "@/lib/portfolio.mjs";
+import { portfolioTotals, safeValueUsd } from "@/lib/portfolio.mjs";
 import { usePhase2Gate } from "@/hooks/usePhase2Gate";
 import { useSolPrice } from "@/hooks/useSolPrice";
 import { useKeeperHealth } from "@/hooks/useKeeperHealth";
@@ -845,7 +845,25 @@ export default function PortfolioPage() {
   }
 
   const totalValueUsd = totals.totalValueUsd + lpHoldings.reduce((s, h) => s + h.valueUsd, 0);
-  const totalEarnedUsd = totals.totalEarnedUsd; // LP earnings aren't separately tracked yet — safe-side only, same as before.
+  // LP earnings used to be excluded here ("not separately tracked yet") -- that was true
+  // before the 2026-10-20 LP profit-tracking work (see lpHoldings' profitUsd doc comment
+  // further up). Real profit now = Safe-vault realized gain + LP fees-minus-IL, summed.
+  const lpProfitUsd = lpHoldings.reduce((s, h) => s + (h.profitUsd ?? 0), 0);
+  const totalEarnedUsd = totals.totalEarnedUsd + lpProfitUsd;
+  // Real "initial deposit" figure, requested by a user 2026-10-20 (relayed via Lloyd:
+  // "total value, initial deposit, profits, and current apy... below the total"). Safe
+  // side: cost basis per position, independently computed from depositedAmount -- not
+  // back-solved as valueUsd - earnedUsd, which would read wrong in a real-loss scenario
+  // since earnedValue floors at 0 rather than going negative. LP side: reuses the same
+  // costBasisUsd the profit figure (above) is already derived from.
+  const safeDepositedUsd = positions.reduce((s, p) => {
+    const v = vaults.find((v) => v.address === p.vault);
+    if (!v) return s;
+    const isSol = /SOL/i.test(v.name) && !/USD/i.test(v.name);
+    return s + safeValueUsd(p.depositedAmount, isSol, solPrice);
+  }, 0);
+  const lpDepositedUsd = lpHoldings.reduce((s, h) => s + (h.profitUsd !== null ? h.valueUsd - h.profitUsd : 0), 0);
+  const totalDepositedUsd = safeDepositedUsd + lpDepositedUsd;
   const hasAnyPosition = hasSafe || lpHoldings.length > 0;
   const risk = riskLabel(lpPct);
 
@@ -921,6 +939,37 @@ export default function PortfolioPage() {
                     +${totalEarnedUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })} earned
                   </div>
                 )}
+
+                {/* Real user request 2026-10-20: "total value, initial deposit, profits,
+                    and current apy all on that first image below the total." All three
+                    numbers below are already computed elsewhere on this page (the
+                    deposited-cost-basis math above, totalEarnedUsd, and the same
+                    currentProtocolApy the "Currently Earning" stat card further down
+                    reads) -- surfaced here too so they're visible without scrolling. */}
+                <div style={{
+                  display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10,
+                  marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--line)",
+                }}>
+                  <div>
+                    <div style={{ fontSize: 10, color: "var(--text-low, #666)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Initial deposit</div>
+                    <div style={{ fontFamily: "var(--font-mono)", fontSize: 16, fontWeight: 700, color: "var(--text-hi)", marginTop: 2 }}>
+                      ${totalDepositedUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 10, color: "var(--text-low, #666)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Profit</div>
+                    <div style={{ fontFamily: "var(--font-mono)", fontSize: 16, fontWeight: 700, color: totalEarnedUsd >= 0 ? "var(--signal, #2ecc71)" : "var(--loss, #c0392b)", marginTop: 2 }}>
+                      {totalEarnedUsd >= 0 ? "+" : "−"}${Math.abs(totalEarnedUsd).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 10, color: "var(--text-low, #666)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Current APY</div>
+                    <div style={{ fontFamily: "var(--font-mono)", fontSize: 16, fontWeight: 700, color: "var(--token)", marginTop: 2 }}>
+                      {currentProtocolApy ? `${fmt(currentProtocolApy.apyPercent)}%` : "—"}
+                    </div>
+                  </div>
+                </div>
+
                 {hasSafe && (
                   <div style={{ borderTop: "1px solid var(--line)", marginTop: 16, paddingTop: 12 }}>
                     {totals.rows.filter((r) => r.valueUsd > 0).map((r) => (
@@ -1504,6 +1553,12 @@ export default function PortfolioPage() {
           }
           .portfolio-action-col {
             position: static;
+            /* Real user feedback 2026-10-20: "an add and withdraw function right at the
+               top." On a single-column mobile stack the action column used to render
+               after the hero + allocation cards in DOM order, so Deposit/Withdraw sat
+               below a full screen of scrolling. CSS grid order moves it first without
+               touching desktop's two-column layout or the DOM/tab order at all. */
+            order: -1;
           }
         }
       `}</style>
