@@ -62,6 +62,7 @@ import { useKeeperHealth } from "@/hooks/useKeeperHealth";
 import { StatCard, Toggle, fmt } from "@/components/ui";
 import { ProtocolTable } from "@/components/dashboard/ProtocolTable";
 import { ProfitCalculator } from "@/components/dashboard/ProfitCalculator";
+import { DepositWithdrawPanel } from "@/components/dashboard/DepositWithdrawPanel";
 
 // Same admin pubkey useYieldPilot/dashboard use to gate the auto-compound/auto-rebalance
 // toggles — merged in here 2026-10-20 so /dashboard's admin controls and stats aren't
@@ -230,7 +231,7 @@ export default function PortfolioPage() {
   // The actual gating now happens once, right before the final JSX return below.
   const { visible, adminPreview, deciding } = usePhase2Gate();
 
-  const { vaults, positions, deposit, updateSettings } = useYieldPilot(VAULT_ADDRESSES);
+  const { vaults, positions, deposit, withdraw, updateSettings, userGateBalance } = useYieldPilot(VAULT_ADDRESSES);
   const solPrice = useSolPrice();
   const { connection } = useConnection();
   const isAdmin = publicKey?.toBase58() === ADMIN_PUBKEY;
@@ -314,6 +315,16 @@ export default function PortfolioPage() {
   // to vaults[0] (whichever vault address is listed first, currently USDC) with no way to
   // reach the live SOL vault from this box at all -- fixed by making it a real picker.
   const [safeVaultIndex, setSafeVaultIndex] = useState(0);
+
+  // Deposit/withdraw toggle for the Safe-vault leg specifically — added 2026-10-20. Before
+  // this, /portfolio could only ever deposit into the Safe vault; the only way to withdraw
+  // was the separate DepositWithdrawPanel instance on /dashboard. Once /dashboard became a
+  // redirect to here (merging its stats/table/toggles in), that left genuinely no UI path
+  // to withdraw Safe-vault funds at all -- caught live before it shipped broken. Reuses the
+  // exact same DepositWithdrawPanel component dashboard used, not a reimplementation --
+  // its withdraw-ceiling math (exit-fee-aware MAX, recall bundling awareness) is real,
+  // tested, previously-fixed logic that has no business being rewritten under time pressure.
+  const [safeTab, setSafeTab] = useState<"deposit" | "withdraw">("deposit");
 
   // Live APYs for the preview. Safe = the vault the user will fund; LP = the paired vault.
   const safeVault = vaults[safeVaultIndex] ?? vaults[0] ?? null;
@@ -1109,12 +1120,46 @@ export default function PortfolioPage() {
                 {safeVault ? safeVault.name : "No vault configured"} · lending &amp; staking
               </div>
             )}
-            <input
-              placeholder="Amount"
-              value={safeAmount}
-              onChange={(e) => setSafeAmount(e.target.value)}
-              style={{ ...inputStyle(), width: "100%" }}
-            />
+
+            <div style={{ display: "flex", borderBottom: "1px solid var(--line)", marginBottom: 12 }}>
+              {(["deposit", "withdraw"] as const).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setSafeTab(t)}
+                  style={{
+                    flex: 1, padding: "7px 0", background: "none", border: "none", cursor: "pointer",
+                    fontSize: 12.5, fontWeight: 700, textTransform: "capitalize",
+                    color: safeTab === t ? "var(--text-hi)" : "var(--text-low, #666)",
+                    borderBottom: safeTab === t ? "2px solid var(--signal)" : "2px solid transparent",
+                    marginBottom: -1, transition: "color 0.15s ease",
+                  }}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+
+            {safeTab === "deposit" ? (
+              <input
+                placeholder="Amount"
+                value={safeAmount}
+                onChange={(e) => setSafeAmount(e.target.value)}
+                style={{ ...inputStyle(), width: "100%" }}
+              />
+            ) : safeVault ? (
+              <DepositWithdrawPanel
+                vault={safeVault}
+                apys={apys}
+                onDeposit={deposit}
+                onWithdraw={withdraw}
+                userShares={positions.find((p) => p.vault === safeVault.address)?.shares || 0}
+                depositedAmount={positions.find((p) => p.vault === safeVault.address)?.depositedAmount || 0}
+                userGateBalance={userGateBalance}
+                initialTab="withdraw"
+              />
+            ) : (
+              <div style={{ fontSize: 12.5, color: "var(--text-mid)" }}>No vault configured</div>
+            )}
           </div>
 
           {/* ── LP leg ── */}
