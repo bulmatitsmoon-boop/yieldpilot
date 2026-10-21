@@ -58,6 +58,15 @@ import { blendedApy, estYearly, planLegs } from "@/lib/splitDeposit.mjs";
 import { portfolioTotals } from "@/lib/portfolio.mjs";
 import { usePhase2Gate } from "@/hooks/usePhase2Gate";
 import { useSolPrice } from "@/hooks/useSolPrice";
+import { useKeeperHealth } from "@/hooks/useKeeperHealth";
+import { StatCard, Toggle, fmt } from "@/components/ui";
+import { ProtocolTable } from "@/components/dashboard/ProtocolTable";
+import { ProfitCalculator } from "@/components/dashboard/ProfitCalculator";
+
+// Same admin pubkey useYieldPilot/dashboard use to gate the auto-compound/auto-rebalance
+// toggles — merged in here 2026-10-20 so /dashboard's admin controls and stats aren't
+// stranded on a page this one is replacing. See the Dashboard-merge note below.
+const ADMIN_PUBKEY = "yaZDx7cKF8WqJyaVQJDhiTgi1UEB6rgjSpg5sW4GpD7";
 
 // Same fallback pattern useYieldPilot.ts uses for the program address.
 const PROGRAM_ID = new PublicKey(
@@ -221,15 +230,66 @@ export default function PortfolioPage() {
   // The actual gating now happens once, right before the final JSX return below.
   const { visible, adminPreview, deciding } = usePhase2Gate();
 
-  const { vaults, positions, deposit } = useYieldPilot(VAULT_ADDRESSES);
+  const { vaults, positions, deposit, updateSettings } = useYieldPilot(VAULT_ADDRESSES);
   const solPrice = useSolPrice();
   const { connection } = useConnection();
+  const isAdmin = publicKey?.toBase58() === ADMIN_PUBKEY;
 
   // Combined portfolio total across the safe vaults (LP value needs a live quote — shown
   // separately below). Pure, tested math (portfolio.mjs / verify-split-deposit.mjs).
   const totals = portfolioTotals(positions, vaults, solPrice);
   const hasSafe = totals.rows.some((r) => r.valueUsd > 0);
-  const { apys } = useApys();
+  const { apys, loading: apyLoading } = useApys();
+
+  // ── Merged in from /dashboard, 2026-10-20 ──────────────────────────────────
+  // /dashboard was a separate page duplicating the Safe-vault deposit flow this page
+  // already covers (plus LP, which /dashboard never had at all) — real users were
+  // confused about where to actually deposit for LP as a result. Rather than keep two
+  // pages with overlapping-but-different content, /dashboard now redirects here and
+  // everything it offered lives on this one page instead. Logic below is a direct port
+  // of dashboard/page.tsx's own derived stats, including the 2026-10-20 fix for a real
+  // bug: the old dashboard always showed vaults[0]'s (USDC's) routing/APY regardless of
+  // which vault the connected wallet actually had funds in.
+  const lendingApys = apys.filter((a) => a.riskScore <= 1 && !a.stale);
+  const hasLiveApys = lendingApys.length > 0;
+  const dashBestApy = hasLiveApys ? Math.max(...lendingApys.map((a) => a.apyPercent)) : 0;
+  const dashBestProtocol = hasLiveApys ? lendingApys.find((a) => a.apyPercent === dashBestApy) : undefined;
+
+  const userVaultsByValue = [...positions]
+    .filter((p) => p.currentValue > 0)
+    .sort((a, b) => b.currentValue - a.currentValue)
+    .map((p) => vaults.find((v) => v.address === p.vault))
+    .filter((v): v is typeof vaults[number] => !!v);
+  const primarySafeVault = userVaultsByValue[0] ?? vaults[0];
+  const dashCurrentAllocation = primarySafeVault?.protocols.filter((p) => p.targetBps > 0) || [];
+  const currentProtocolApy = dashCurrentAllocation[0]
+    ? apys.find((a) => a.protocolId === dashCurrentAllocation[0].name && !a.stale)
+    : undefined;
+  const autopilotOn = !!primarySafeVault?.autoRebalance && !primarySafeVault?.paused;
+
+  const DEPLOYED_FRACTION = 0.9; // mirrors MIN_IDLE_BPS = 1000 (10% idle buffer) — see dashboard's original comment
+  const vaultBlendedApy = (vault: typeof vaults[number] | undefined): number => {
+    if (!vault) return 0;
+    const active = vault.protocols.filter((p) => p.targetBps > 0);
+    const totalBps = active.reduce((sum, p) => sum + p.targetBps, 0);
+    if (totalBps === 0) return 0;
+    const rates = active.map((p) => apys.find((x) => x.protocolId === p.name));
+    if (rates.some((a) => !a || a.stale)) return 0;
+    return active.reduce((sum, p, i) => sum + rates[i]!.apyPercent * (p.targetBps / totalBps), 0);
+  };
+  const dashTotalEarned = positions.reduce((s, p) => {
+    const v = vaults.find((v) => v.address === p.vault);
+    if (!v || p.lastDepositTs <= 0) return s;
+    const apy = vaultBlendedApy(v);
+    if (apy <= 0) return s;
+    const decimals = v.name.toUpperCase().includes("SOL") ? 1e9 : 1e6;
+    const yearFraction = Math.max(0, Date.now() / 1000 - p.lastDepositTs) / 31_536_000;
+    const principalUsd = (p.depositedAmount / decimals) * (v.name.toUpperCase().includes("SOL") ? solPrice : 1);
+    return s + principalUsd * DEPLOYED_FRACTION * (apy / 100) * yearFraction;
+  }, 0);
+
+  const { lastCheckTs } = useKeeperHealth();
+  const minutesSinceKeeperCheck = lastCheckTs ? Math.floor((Date.now() / 1000 - lastCheckTs) / 60) : null;
   const {
     fetchLpVault,
     fetchLpPosition,
@@ -1233,6 +1293,62 @@ export default function PortfolioPage() {
           </p>
         </div>
       </div>
+
+      {/* ══════════ Merged from /dashboard, 2026-10-20 — see the primarySafeVault
+          comment above for why. Stats + rate table + admin controls, all full-width
+          below the deposit UI rather than wedged into the two-column layout above. ══ */}
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 24 }}>
+        <StatCard
+          label="Currently Earning"
+          value={currentProtocolApy ? `${fmt(currentProtocolApy.apyPercent)}%` : "—"}
+          sub={currentProtocolApy ? `${currentProtocolApy.name} · ${currentProtocolApy.asset}` : positions.length > 0 ? "rate unavailable" : "no position yet"}
+          accent="var(--token)"
+        />
+        <StatCard
+          label="Best Available"
+          value={hasLiveApys ? `${fmt(dashBestApy)}%` : "—"}
+          sub={dashBestProtocol ? `${dashBestProtocol.name} · ${dashBestProtocol.asset}` : "rates unavailable"}
+          accent="var(--warn)"
+        />
+        <StatCard
+          label="Total Earned"
+          value={dashTotalEarned > 0 && dashTotalEarned < 0.005 ? "<$0.01" : `$${fmt(dashTotalEarned)}`}
+          sub={dashTotalEarned >= 0.005 ? "projected · est." : positions.length > 0 ? "accruing" : "—"}
+          accent="var(--signal)"
+        />
+        <StatCard
+          label="Keeper Status"
+          value={autopilotOn ? "ENGAGED" : "OFF"}
+          sub={minutesSinceKeeperCheck !== null ? `checked ${minutesSinceKeeperCheck}m ago` : "—"}
+          accent={autopilotOn ? "var(--signal)" : "var(--text-low)"}
+        />
+      </div>
+
+      <div style={{ marginTop: 24 }}>
+        <ProfitCalculator liveApy={hasLiveApys ? dashBestApy : null} />
+      </div>
+
+      <div style={{ ...cardStyle, marginTop: 24 }}>
+        <SectionLabel>All protocols — live rates</SectionLabel>
+        <ProtocolTable apys={apys} loading={apyLoading} />
+      </div>
+
+      {primarySafeVault && isAdmin && (
+        <div style={{ ...cardStyle, marginTop: 24, display: "flex", gap: 32, flexWrap: "wrap" }}>
+          <Toggle
+            value={primarySafeVault.autoCompound}
+            onChange={() => updateSettings(primarySafeVault.address, !primarySafeVault.autoCompound, primarySafeVault.autoRebalance)}
+            label="Auto-Compound"
+            sub="Emits a compound checkpoint (yield accrues in-kind)"
+          />
+          <Toggle
+            value={primarySafeVault.autoRebalance}
+            onChange={() => updateSettings(primarySafeVault.address, primarySafeVault.autoCompound, !primarySafeVault.autoRebalance)}
+            label="Auto-Rebalance"
+            sub="Keeper moves funds to best APY"
+          />
+        </div>
+      )}
 
       {/* Real activity feed — every row is a decoded, confirmed transaction (see the
           `activity` effect above), never a placeholder or synthesized event. */}
