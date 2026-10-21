@@ -63,6 +63,7 @@ import { StatCard, Toggle, fmt } from "@/components/ui";
 import { ProtocolTable } from "@/components/dashboard/ProtocolTable";
 import { ProfitCalculator } from "@/components/dashboard/ProfitCalculator";
 import { DepositWithdrawPanel } from "@/components/dashboard/DepositWithdrawPanel";
+import { BuyCryptoButton } from "@/components/BuyCryptoButton";
 
 // Same admin pubkey useYieldPilot/dashboard use to gate the auto-compound/auto-rebalance
 // toggles — merged in here 2026-10-20 so /dashboard's admin controls and stats aren't
@@ -1186,6 +1187,11 @@ export default function PortfolioPage() {
         {/* ══════════ RIGHT: action ══════════ */}
         <div className="portfolio-action-col" style={cardStyle}>
           <SectionLabel>Add to position</SectionLabel>
+
+          <BuyCryptoButton
+            walletAddress={publicKey ? publicKey.toBase58() : null}
+            asset={safeVault && safeVault.name.toUpperCase().includes("SOL") ? "SOL" : "USDC"}
+          />
 
           {/* ── safe leg ── */}
           <div style={{ marginBottom: 20 }}>
