@@ -23,12 +23,26 @@ import { useState } from "react";
  * GET https://api.moonpay.com/v3/currencies -- usdc_sol's on-chain contractAddress matches
  * our own USDC mint (EPjFWdd...) exactly, confirming it's the right code for Solana USDC
  * specifically (MoonPay has a separate usdc_* code per chain).
+ *
+ * SIGNING, added 2026-10-20 after a real failure: the widget rejected the first live
+ * attempt with "Signature check failed" -- MoonPay requires any widget URL carrying
+ * walletAddress to be signed server-side with the secret key (see
+ * dev.moonpay.com/widget/on-ramp/customization/url-signing), which cannot live in client
+ * code. Follows MoonPay's own documented SDK signing flow exactly:
+ * generateUrlForSigning() -> POST to our own /api/moonpay-sign (HMAC-SHA256 with the
+ * secret key, verified against MoonPay's published test vector before trusting it) ->
+ * updateSignature() -> show(). The secret key never reaches this file or the client bundle.
  */
 
 declare global {
   interface Window {
     MoonPayWebSdk?: {
-      init: (config: Record<string, unknown>) => { show: () => void; close: () => void };
+      init: (config: Record<string, unknown>) => {
+        show: () => void;
+        close: () => void;
+        generateUrlForSigning: () => string;
+        updateSignature: (signature: string) => void;
+      };
     };
   }
 }
@@ -85,6 +99,21 @@ export function BuyCryptoButton({ walletAddress, asset }: Props) {
           walletAddress,
         },
       });
+
+      // Required because walletAddress is set above -- see the module doc comment.
+      const urlForSignature = sdk.generateUrlForSigning();
+      const res = await fetch("/api/moonpay-sign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ urlForSignature }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || "Could not sign the MoonPay widget URL.");
+      }
+      const { signature } = await res.json();
+      sdk.updateSignature(signature);
+
       sdk.show();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
