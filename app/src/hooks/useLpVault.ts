@@ -533,20 +533,69 @@ export function useLpVault() {
       if (!publicKey) return;
       setTxStatus("signing");
       setTxError(null);
-      try {
-        setTxStatus("confirming");
-        const sig = await fn();
+
+      const markSuccess = (sig: string) => {
         setTxStatus("success");
         setTimeout(() => setTxStatus("idle"), 5000);
         return sig;
+      };
+
+      try {
+        setTxStatus("confirming");
+        const sig = await fn();
+        return markSuccess(sig);
       } catch (err: any) {
+        // Same false-negative useYieldPilot.wrapTx (#118) already fixed, never ported here:
+        // a confirmation TIMEOUT is not a failure -- web3.js gives up waiting at 30s by
+        // default, but the tx frequently lands anyway. Caught live 2026-10-20: a real LP
+        // deposit (Orca) landed on-chain and showed up correctly in the activity feed after
+        // a refresh, but the page showed a scary red "not confirmed in 30 seconds, unknown
+        // if it succeeded" error the whole time in between -- exactly the false alarm #118
+        // exists to prevent, just never applied to this hook. Poll the chain for the real
+        // outcome before deciding anything failed, same detection and same ~90s window.
+        const timedOut =
+          err?.name === "TransactionExpiredTimeoutError" ||
+          /was not confirmed in|Check signature/i.test(err?.message || "");
+        const sig: string | undefined =
+          err?.signature || err?.message?.match(/[1-9A-HJ-NP-Za-km-z]{40,}/)?.[0];
+
+        if (timedOut && sig) {
+          setTxStatus("confirming");
+          const start = Date.now();
+          while (Date.now() - start < 90_000) {
+            try {
+              const st = await connection.getSignatureStatus(sig, { searchTransactionHistory: true });
+              const v = st.value;
+              if (v?.err) {
+                const failErr = new Error("Transaction failed on-chain.");
+                setTxError(failErr.message);
+                setTxStatus("error");
+                throw failErr;
+              }
+              if (v && (v.confirmationStatus === "confirmed" || v.confirmationStatus === "finalized")) {
+                return markSuccess(sig);
+              }
+            } catch (pollErr: any) {
+              if (pollErr?.message === "Transaction failed on-chain.") throw pollErr;
+              // transient RPC error while polling -- keep trying within the 90s window
+            }
+            await new Promise((r) => setTimeout(r, 2000));
+          }
+          // Never resolved: genuinely unknown, not a failure -- tell the caller to check
+          // rather than silently swallowing or falsely declaring it broken.
+          const unknownErr = new Error("Still confirming — check Solscan before retrying to avoid a double submit.");
+          setTxError(unknownErr.message);
+          setTxStatus("error");
+          throw unknownErr;
+        }
+
         console.error("LP vault transaction error", err);
         setTxError(err.message ?? String(err));
         setTxStatus("error");
         throw err;
       }
     },
-    [publicKey]
+    [publicKey, connection]
   );
 
   const fetchLpVault = useCallback(
