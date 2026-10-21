@@ -741,7 +741,11 @@ export default function PortfolioPage() {
   if (!connected) {
     return (
       <main style={{ maxWidth: 640, margin: "0 auto", padding: "3rem 1.5rem" }}>
-        <Badge tone="warn">Phase 2 · Preview — not public</Badge>
+        {/* Was an unconditional "Preview — not public" string, never wired to the same
+            adminPreview/visible state the banner below already uses correctly -- found
+            live 2026-10-20, days after NEXT_PUBLIC_LP_ENABLED went true: every real
+            public visitor landing here saw the page tell them it wasn't public yet. */}
+        <Badge tone={adminPreview ? "warn" : "ok"}>{adminPreview ? "Phase 2 · Preview — not public" : "Phase 2 · Live"}</Badge>
         <h1 style={{ fontFamily: "var(--font-display)", fontSize: 28, fontWeight: 700, marginTop: 12, marginBottom: 12, color: "var(--text-hi)" }}>
           Split deposit
         </h1>
@@ -777,7 +781,7 @@ export default function PortfolioPage() {
       )}
 
       <div style={{ marginBottom: 18 }}>
-        <Badge tone="warn">Phase 2 · Preview — not public</Badge>
+        <Badge tone={adminPreview ? "warn" : "ok"}>{adminPreview ? "Phase 2 · Preview — not public" : "Phase 2 · Live"}</Badge>
       </div>
 
       <div className="portfolio-two-col">
