@@ -40,13 +40,15 @@ export function Header() {
 
   const phase2Visible = process.env.NEXT_PUBLIC_LP_ENABLED === "true" || isAdmin;
 
+  // "Dashboard" link removed 2026-10-20 — /dashboard now just redirects to /portfolio,
 
+  // which absorbed everything it offered (stats, protocol table, admin toggles) plus LP,
+
+  // which /dashboard never had. See portfolio/page.tsx's "Merged in from /dashboard" note.
 
   const navLinks: [string, string][] = [
 
     ["Home", "/"],
-
-    ["Dashboard", "/dashboard"],
 
     ["Live Rates", "/apys"],
 
