@@ -55,7 +55,6 @@ export default function Dashboard() {
   // there for good if /api/apys was down. Same bug class as the fake Solend 5.10%.
   const lendingApys = apys.filter(a => a.riskScore <= 1 && !a.stale);
   const hasLiveApys = lendingApys.length > 0;
-  const avgApy = hasLiveApys ? lendingApys.reduce((s, a) => s + a.apyPercent, 0) / lendingApys.length : 0;
   const bestApy = hasLiveApys ? Math.max(...lendingApys.map((a) => a.apyPercent)) : 0;
   const bestProtocol = hasLiveApys ? lendingApys.find((a) => a.apyPercent === bestApy) : undefined;
 
@@ -100,7 +99,20 @@ export default function Dashboard() {
     return s + principalUsd * DEPLOYED_FRACTION * (apy / 100) * yearFraction;
   }, 0);
 
-  const primaryVault = vaults[0];
+  // Real bug, caught from live user feedback 2026-10-20: this always showed vaults[0]
+  // (the USDC vault) regardless of which vault the connected wallet actually had funds
+  // in. A user whose entire position was 3 SOL (routed to psol-sol in the SOL vault)
+  // saw this card's "Position value" show their real 3 SOL, but the "Routing to" /
+  // allocation bar directly underneath it showed the UNRELATED USDC vault's
+  // "kamino-usdc 100%" -- two adjacent numbers on the same card, one right and one
+  // describing someone else's vault. Derive the displayed vault from the user's own
+  // largest real position instead; fall back to vaults[0] only pre-connect / no position.
+  const userVaultsByValue = [...positions]
+    .filter(p => p.currentValue > 0)
+    .sort((a, b) => b.currentValue - a.currentValue)
+    .map(p => vaults.find(v => v.address === p.vault))
+    .filter((v): v is typeof vaults[number] => !!v);
+  const primaryVault = userVaultsByValue[0] ?? vaults[0];
   // "AUTOPILOT ENGAGED" was a HARDCODED string — it never read autoRebalance, so it claimed
   // engaged while autopilot was off, the vault was paused, or the keeper was dead. It has been
   // lying since the USDC vault's auto-rebalance was deliberately disabled as Solend containment.
@@ -129,6 +141,15 @@ export default function Dashboard() {
   // That is the same failure that produced Solend's fake 5.10% and Jito's hardcoded 6.5%
   // base: a made-up number wearing the costume of live state. Render nothing instead.
   const currentAllocation = onChainAllocation;
+  // Real user feedback, 2026-10-20: "Is my 3 SOL in the Kamino pool? It would be helpful
+  // to see next to the position value what it's invested in and what the current pay for
+  // what you are invested in is." "Avg Protocol APY" below answers neither question — it
+  // averages EVERY registered protocol regardless of whether a cent is actually deployed
+  // there, so it rarely matches what the user's own funds are earning. This instead finds
+  // the live rate of the protocol that's ACTUALLY holding the deployed funds.
+  const currentProtocolApy = currentAllocation[0]
+    ? apys.find(a => a.protocolId === currentAllocation[0].name && !a.stale)
+    : undefined;
 
   // Tiers only exist when the vault actually has a gate mint set. `system_program::ID` is
   // the program's "unset" sentinel, and on an ungated vault `withdraw()` skips tier logic
@@ -318,7 +339,12 @@ export default function Dashboard() {
             <span style={{ color: autopilotOn ? "var(--signal)" : "var(--text-low)", fontFamily: "var(--font-mono)", fontWeight: 500 }}>
               {primaryVault?.paused ? "VAULT PAUSED" : autopilotOn ? "AUTOPILOT ENGAGED" : "AUTOPILOT OFF"}
             </span>
-            {currentAllocation[0] && <span style={{ color: "var(--text-low)" }}>· Routing to {currentAllocation[0].name}</span>}
+            {currentAllocation[0] && (
+              <span style={{ color: "var(--text-low)" }}>
+                · Routing to {currentProtocolApy?.name ?? currentAllocation[0].name}
+                {currentProtocolApy && <span className="mono-num" style={{ color: "var(--text-hi)" }}> ({fmt(currentProtocolApy.apyPercent)}%)</span>}
+              </span>
+            )}
             {minutesSinceKeeperCheck !== null && (
               <span style={{ color: "var(--text-low)" }}>
                 · Keeper last checked in <span className="mono-num" style={{ color: "var(--text-hi)" }}>{minutesSinceKeeperCheck}m</span> ago
@@ -409,7 +435,12 @@ export default function Dashboard() {
               sub={totalEarned >= 0.005 ? "projected · est." : positions.length > 0 ? "accruing" : "—"}
               accent="var(--signal)"
             />
-            <StatCard label="Avg Protocol APY" value={hasLiveApys ? `${fmt(avgApy)}%` : "—"} sub={hasLiveApys ? "across protocols" : "rates unavailable"} accent="var(--token)" />
+            <StatCard
+              label="Currently Earning"
+              value={currentProtocolApy ? `${fmt(currentProtocolApy.apyPercent)}%` : "—"}
+              sub={currentProtocolApy ? `${currentProtocolApy.name} · ${currentProtocolApy.asset}` : positions.length > 0 ? "rate unavailable" : "no position yet"}
+              accent="var(--token)"
+            />
             <StatCard label="Best Available" value={hasLiveApys ? `${fmt(bestApy)}%` : "—"} sub={bestProtocol ? `${bestProtocol.name} · ${bestProtocol.asset}` : "rates unavailable"} accent="var(--warn)" />
           </div>
 
