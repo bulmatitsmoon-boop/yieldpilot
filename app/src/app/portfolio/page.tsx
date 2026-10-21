@@ -36,7 +36,7 @@
  * auto-picks the one with the highest live fee APY (obviously what someone running "the
  * plan" wants) rather than making them click a vault option first.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { notFound } from "next/navigation";
 import { useWallet } from "@solana/wallet-adapter-react";
@@ -315,6 +315,22 @@ export default function PortfolioPage() {
   // to vaults[0] (whichever vault address is listed first, currently USDC) with no way to
   // reach the live SOL vault from this box at all -- fixed by making it a real picker.
   const [safeVaultIndex, setSafeVaultIndex] = useState(0);
+  // Real user question 2026-10-20: "why immediately go to usdc instead of the safe sol
+  // vault?" -- because this had no logic at all, it was always 0 (whichever vault is
+  // first in NEXT_PUBLIC_VAULT_ADDRESSES, currently USDC) regardless of where the
+  // connected wallet's money actually is. Once vaults + positions are loaded, default to
+  // whichever Safe vault holds the user's larger real position instead -- same pattern as
+  // the dashboard-merge fix for primaryVault. Runs once per session (the ref guard), so a
+  // manual click on USDC/SOL afterward is never silently overridden.
+  const safeVaultAutoPicked = useRef(false);
+  useEffect(() => {
+    if (safeVaultAutoPicked.current || vaults.length === 0 || positions.length === 0) return;
+    safeVaultAutoPicked.current = true;
+    const byValue = [...positions].filter((p) => p.currentValue > 0).sort((a, b) => b.currentValue - a.currentValue);
+    if (byValue.length === 0) return;
+    const idx = vaults.findIndex((v) => v.address === byValue[0].vault);
+    if (idx >= 0) setSafeVaultIndex(idx);
+  }, [vaults, positions]);
 
   // Deposit/withdraw toggle for the Safe-vault leg specifically — added 2026-10-20. Before
   // this, /portfolio could only ever deposit into the Safe vault; the only way to withdraw
@@ -1082,6 +1098,32 @@ export default function PortfolioPage() {
                 ${yearly.toLocaleString()}/yr
               </div>
             </div>
+
+            {/* Real breakdown of what the plan actually needs in each currency, once it's
+                been run (or typed by hand) -- reads the same safeAmount/lpAmountA/lpQuoteB
+                state the action column's inputs already hold, no new chain calls. Real user
+                ask 2026-10-20: "it should give a breakdown of usdc and sol needed." */}
+            {(safeAmount || lpAmountA) && (
+              <div style={{ fontSize: 12.5, color: "var(--text-mid)", marginTop: 10, lineHeight: 1.7 }}>
+                {safeAmount && safeVault && (
+                  <div>
+                    Safe vault needs:{" "}
+                    <b style={{ color: "var(--text-hi)", fontFamily: "var(--font-mono)" }}>
+                      {safeAmount} {safeVault.name.toUpperCase().includes("SOL") ? "SOL" : "USDC"}
+                    </b>
+                  </div>
+                )}
+                {lpAmountA && lpInfo && (
+                  <div>
+                    LP vault needs:{" "}
+                    <b style={{ color: "var(--text-hi)", fontFamily: "var(--font-mono)" }}>
+                      {lpAmountA} {symbolForMint(lpInfo.tokenAMint)}
+                      {lpQuoteB ? ` + up to ~${lpQuoteB} ${symbolForMint(lpInfo.tokenBMint)}` : ""}
+                    </b>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div style={{
               fontSize: 12.5, color: "var(--text-mid)", background: "rgba(216, 90, 48, 0.08)",
