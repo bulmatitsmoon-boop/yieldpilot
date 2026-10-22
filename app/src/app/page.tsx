@@ -67,8 +67,11 @@ export default function Home() {
 
   const routable = apys.filter(a => ROUTABLE_PROTOCOL_IDS.has(a.protocolId)).sort((a, b) => b.apyBps - a.apyBps);
   const informational = apys.filter(a => !ROUTABLE_PROTOCOL_IDS.has(a.protocolId));
-  const best = routable[0];
-  const runnerUp = routable[1];
+  // WAS routable[0]/[1] -- highest APY regardless of where funds actually are. The hero
+  // widget below presents itself as a live "100%" allocation + routing animation, so it
+  // must reflect the real on-chain target (targetBps === 10000), not an APY leaderboard
+  // position. Caught live 2026-10-21: a user saw Marinade badged here while PSOL held the
+  // real deployed balance and the real 10000bps target.
 
   // Real TVL across both vaults, normalized to a USD-equivalent using a live
   // SOL/USD price (via useSolPrice), not a hardcoded guess.
@@ -130,6 +133,13 @@ export default function Home() {
   const currentlyRoutingTo = vaults
     .map((v) => v.protocols.find((p) => p.targetBps === 10000)?.name)
     .filter((name): name is string => !!name);
+
+  // The hero "Best route now" widget below shows a live 100%-allocation bar and flight
+  // path -- it must point at the protocol actually holding funds right now, not just
+  // whichever routable protocol has the highest APY at this instant.
+  const actuallyRouted = apys.filter((a) => currentlyRoutingTo.includes(a.protocolId));
+  const currentRoute = [...actuallyRouted].sort((a, b) => b.apyBps - a.apyBps)[0];
+  const nextBestRoute = routable.find((p) => p.protocolId !== currentRoute?.protocolId);
 
   return (
     <div style={{ position: "relative" }}>
@@ -246,16 +256,16 @@ export default function Home() {
             <div style={{ fontSize: 10, fontWeight: 600, color: "var(--text-low)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 16 }}>
               Best route now
             </div>
-            {best ? (
+            {currentRoute ? (
               <>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 6 }}>
                   <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 20, color: "var(--text-hi)" }}>
-                    {best.name}
+                    {currentRoute.name}
                   </span>
-                  <span style={{ fontSize: 12, color: "var(--text-mid)", fontFamily: "var(--font-mono)" }}>{best.asset}</span>
+                  <span style={{ fontSize: 12, color: "var(--text-mid)", fontFamily: "var(--font-mono)" }}>{currentRoute.asset}</span>
                 </div>
                 <div className="mono-num" style={{ fontSize: 40, fontWeight: 500, color: "var(--signal)", lineHeight: 1, marginBottom: 16 }}>
-                  {best.stale ? "—" : `${fmt(best.apyPercent)}%`}
+                  {currentRoute.stale ? "—" : `${fmt(currentRoute.apyPercent)}%`}
                   <span style={{ fontSize: 14, color: "var(--text-low)", marginLeft: 6 }}>APY</span>
                 </div>
               </>
@@ -278,13 +288,13 @@ export default function Home() {
             </div>
 
             {/* Flight-path routing visual */}
-            <RoutingVisual bestName={best?.name ?? null} bestApy={best?.apyPercent ?? null} runnerUpName={runnerUp?.name ?? null} />
+            <RoutingVisual bestName={currentRoute?.name ?? null} bestApy={currentRoute?.apyPercent ?? null} runnerUpName={nextBestRoute?.name ?? null} />
 
             {/* Allocation gauge — a single full bar. The 80/20 split was removed 2026-07-21. */}
-            {best && (
+            {currentRoute && (
               <div>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text-mid)", marginBottom: 6, fontFamily: "var(--font-mono)" }}>
-                  <span>{best.name} 100%</span>
+                  <span>{currentRoute.name} 100%</span>
                 </div>
                 <div style={{ display: "flex", height: 6, borderRadius: 3, overflow: "hidden", background: "var(--ink-700)" }}>
                   <motion.div
