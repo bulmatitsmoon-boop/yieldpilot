@@ -264,7 +264,11 @@ export default function PortfolioPage() {
     .filter((v): v is typeof vaults[number] => !!v);
   const primarySafeVault = userVaultsByValue[0] ?? vaults[0];
   const dashCurrentAllocation = primarySafeVault?.protocols.filter((p) => p.targetBps > 0) || [];
-  const currentProtocolApy = dashCurrentAllocation[0]
+  // Renamed from currentProtocolApy -- this is the SAFE-vault-only rate, kept separate
+  // from the real "Currently Earning" display value (defined after lpHoldings below,
+  // which picks Safe vs LP based on where the user's money actually is). Still used
+  // as-is for primarySafeVault's own purposes (admin toggles, Deposit/Withdraw panel).
+  const safeCurrentProtocolApy = dashCurrentAllocation[0]
     ? apys.find((a) => a.protocolId === dashCurrentAllocation[0].name && !a.stale)
     : undefined;
   const autopilotOn = !!primarySafeVault?.autoRebalance && !primarySafeVault?.paused;
@@ -463,6 +467,22 @@ export default function PortfolioPage() {
     // with no deposited_amount_a/b on record, or a token this app can't price (priceForMint).
     profitUsd: number | null;
   }[]>([]);
+
+  // Real bug, caught from live user feedback 2026-10-21: "Current APY" used to always
+  // read safeCurrentProtocolApy (the Safe vault's rate) even for a user with $0 in the
+  // Safe vault and their entire position in an LP vault -- primarySafeVault falls back
+  // to vaults[0] when there's no real Safe position, so it silently showed an unrelated
+  // vault's rate (e.g. 3.03%) to someone actually earning the LP pool's real fee APY
+  // (which runs far higher). Picks whichever side -- Safe or LP -- the user actually
+  // holds more value in, and shows THAT side's real live rate.
+  const lpValueUsdForUser = lpHoldings.reduce((s, h) => s + h.valueUsd, 0);
+  const topLpHolding = [...lpHoldings].sort((a, b) => b.valueUsd - a.valueUsd)[0];
+  const lpCurrentProtocolApy = topLpHolding
+    ? apys.find((a) => a.protocolId?.toLowerCase().includes(topLpHolding.info.protocol.toLowerCase()) && !a.stale)
+    : undefined;
+  const currentProtocolApy = (lpValueUsdForUser > totals.totalValueUsd && lpCurrentProtocolApy)
+    ? { ...lpCurrentProtocolApy, asset: topLpHolding!.info.name } // label with the real LP vault name, not the raw pair asset string
+    : safeCurrentProtocolApy;
   useEffect(() => {
     if (!publicKey || lpOptions.length === 0 || solPrice <= 0) return;
     let cancelled = false;
