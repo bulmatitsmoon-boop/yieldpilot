@@ -473,16 +473,27 @@ export default function PortfolioPage() {
   // Safe vault and their entire position in an LP vault -- primarySafeVault falls back
   // to vaults[0] when there's no real Safe position, so it silently showed an unrelated
   // vault's rate (e.g. 3.03%) to someone actually earning the LP pool's real fee APY
-  // (which runs far higher). Picks whichever side -- Safe or LP -- the user actually
-  // holds more value in, and shows THAT side's real live rate.
+  // (which runs far higher).
+  //
+  // FOLLOW-UP, same day: picking a single "winner" between Safe and LP was itself wrong
+  // for anyone holding BOTH (Lloyd's own wallet: $150 Safe + $21 LP) -- it silently hid
+  // whichever side didn't win, when the honest answer is "you're earning two different
+  // real rates, both real, both worth seeing." Now returns every real earning source the
+  // user actually has nonzero value in -- one entry, two, or zero -- rather than ever
+  // collapsing to a single chosen rate.
   const lpValueUsdForUser = lpHoldings.reduce((s, h) => s + h.valueUsd, 0);
   const topLpHolding = [...lpHoldings].sort((a, b) => b.valueUsd - a.valueUsd)[0];
   const lpCurrentProtocolApy = topLpHolding
     ? apys.find((a) => a.protocolId?.toLowerCase().includes(topLpHolding.info.protocol.toLowerCase()) && !a.stale)
     : undefined;
-  const currentProtocolApy = (lpValueUsdForUser > totals.totalValueUsd && lpCurrentProtocolApy)
-    ? { ...lpCurrentProtocolApy, asset: topLpHolding!.info.name } // label with the real LP vault name, not the raw pair asset string
-    : safeCurrentProtocolApy;
+  const currentEarningEntries: { label: string; apyPercent: number; source: string }[] = [
+    ...(totals.totalValueUsd > 0 && safeCurrentProtocolApy
+      ? [{ label: "Safe", apyPercent: safeCurrentProtocolApy.apyPercent, source: `${safeCurrentProtocolApy.name} · ${safeCurrentProtocolApy.asset}` }]
+      : []),
+    ...(lpValueUsdForUser > 0 && lpCurrentProtocolApy
+      ? [{ label: "LP", apyPercent: lpCurrentProtocolApy.apyPercent, source: topLpHolding!.info.name }]
+      : []),
+  ];
   useEffect(() => {
     if (!publicKey || lpOptions.length === 0 || solPrice <= 0) return;
     let cancelled = false;
@@ -985,9 +996,15 @@ export default function PortfolioPage() {
                   </div>
                   <div>
                     <div style={{ fontSize: 10, color: "var(--text-low, #666)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Current APY</div>
-                    <div style={{ fontFamily: "var(--font-mono)", fontSize: 16, fontWeight: 700, color: "var(--token)", marginTop: 2 }}>
-                      {currentProtocolApy ? `${fmt(currentProtocolApy.apyPercent)}%` : "—"}
-                    </div>
+                    {currentEarningEntries.length === 0 ? (
+                      <div style={{ fontFamily: "var(--font-mono)", fontSize: 16, fontWeight: 700, color: "var(--token)", marginTop: 2 }}>—</div>
+                    ) : (
+                      currentEarningEntries.map((e) => (
+                        <div key={e.label} style={{ fontFamily: "var(--font-mono)", fontSize: 16, fontWeight: 700, color: "var(--token)", marginTop: 2 }}>
+                          {fmt(e.apyPercent)}% <span style={{ fontSize: 10, color: "var(--text-low, #666)", fontWeight: 600 }}>{e.label}</span>
+                        </div>
+                      ))
+                    )}
                   </div>
                 </div>
 
@@ -1462,8 +1479,8 @@ export default function PortfolioPage() {
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 24 }}>
         <StatCard
           label="Currently Earning"
-          value={currentProtocolApy ? `${fmt(currentProtocolApy.apyPercent)}%` : "—"}
-          sub={currentProtocolApy ? `${currentProtocolApy.name} · ${currentProtocolApy.asset}` : positions.length > 0 ? "rate unavailable" : "no position yet"}
+          value={currentEarningEntries.length > 0 ? currentEarningEntries.map((e) => `${fmt(e.apyPercent)}% ${e.label}`).join(" · ") : "—"}
+          sub={currentEarningEntries.length > 0 ? currentEarningEntries.map((e) => e.source).join(" · ") : (positions.length > 0 || lpHoldings.length > 0) ? "rate unavailable" : "no position yet"}
           accent="var(--token)"
         />
         <StatCard
