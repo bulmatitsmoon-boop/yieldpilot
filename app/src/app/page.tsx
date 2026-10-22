@@ -339,7 +339,9 @@ export default function Home() {
                 <span style={{ textAlign: "right" }}>Asset</span>
                 <span style={{ textAlign: "right" }}>APY</span>
               </div>
-              {routable.slice(0, 5).map((p, i) => (
+              {routable.slice(0, 5).map((p) => {
+                const isRoutedHere = currentlyRoutingTo.includes(p.protocolId);
+                return (
                 <div key={p.protocolId} className="rate-row" style={{
                   display: "grid", gridTemplateColumns: "minmax(0,1fr) 70px 70px",
                   padding: "14px 20px", borderTop: "1px solid var(--line)",
@@ -349,7 +351,7 @@ export default function Home() {
                   <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, flexWrap: "wrap" }}>
                     <div style={{ width: 6, height: 6, borderRadius: "50%", background: p.color, flexShrink: 0 }} />
                     <span style={{ fontWeight: 600, fontSize: 13, color: "var(--text-hi)" }}>{p.name}</span>
-                    {i === 0 && (
+                    {isRoutedHere && (
                       <span style={{
                         fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4,
                         background: "rgba(63,224,160,0.12)", color: "var(--signal)",
@@ -363,12 +365,12 @@ export default function Home() {
                   </span>
                   <span className="mono-num" style={{
                     textAlign: "right", fontWeight: 500, fontSize: 15,
-                    color: i === 0 ? "var(--signal)" : "var(--text-hi)",
+                    color: isRoutedHere ? "var(--signal)" : "var(--text-hi)",
                   }}>
                     {p.stale ? "—" : `${fmt(p.apyPercent)}%`}
                   </span>
                 </div>
-              ))}
+              );})}
               {informational.map((p) => (
                 <div key={p.protocolId} className="rate-row" style={{
                   display: "grid", gridTemplateColumns: "minmax(0,1fr) 70px 70px",
